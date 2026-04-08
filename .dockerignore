@@ -1,0 +1,4 @@
+.git/
+Dockerfile
+.gitlab-ci.yml
+node_modules/

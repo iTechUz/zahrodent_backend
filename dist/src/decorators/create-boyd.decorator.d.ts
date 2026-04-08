@@ -1,0 +1,1 @@
+export declare function CreateDecorator<T>(dtoClass: new () => T): <TFunction extends Function, Y>(target: TFunction | object, propertyKey?: string | symbol, descriptor?: TypedPropertyDescriptor<Y>) => void;
