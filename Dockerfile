@@ -108,8 +108,7 @@ FROM base AS deps
 WORKDIR /app
 
 COPY package.json bun.lockb ./
-# RUN bun install --frozen-lockfile
-RUN --mount=type=cache,target=/app/node_modules bun install --frozen-lockfile
+RUN bun install --frozen-lockfile
 
 # ==================== BUILDER STAGE ====================
 FROM base AS builder
@@ -122,10 +121,7 @@ COPY . .
 # Generate Prisma Client
 RUN bun run prisma:gen
 
-# Install build tools
-RUN bun add -D @swc/cli @swc/core typescript
-
-# Build with SWC (faster and better path handling)
+# Build application
 RUN bun run build
 
 # ==================== PRODUCTION STAGE ====================

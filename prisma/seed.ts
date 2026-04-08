@@ -43,6 +43,9 @@ async function main() {
 	const findSuperAdmin = await prisma.roles.findFirst({
 		where: { name: RolesEnum.SUPER_ADMIN }
 	})
+	if (!findSuperAdmin) {
+		throw new Error('SUPER_ADMIN role not found after role seeding')
+	}
 
 	const existingAdmin = await prisma.user.findFirst({
 		where: {
@@ -59,7 +62,7 @@ async function main() {
 			data: {
 				phone: adminPhone,
 				password: hashedPassword,
-				roleId: findSuperAdmin.id,
+				roleId: findSuperAdmin.id
 			}
 		})
 

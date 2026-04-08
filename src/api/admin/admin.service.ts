@@ -3,6 +3,7 @@ import {
 	Injectable,
 	NotFoundException
 } from '@nestjs/common'
+import { User } from '@prisma/client'
 import { RolesEnum, STATUS } from 'src/constantis'
 import { PrismaService } from 'src/prisma.service'
 import { HashingService } from 'src/utils/hashing/hashing.service'
@@ -16,7 +17,7 @@ export class AdminService {
 		private readonly hashService: HashingService
 	) {}
 
-	async findAll(pagination: PaginationDto, user) {
+	async findAll(pagination: PaginationDto, user: User) {
 		const { page, pageSize, search } = pagination
 		let where = {}
 		if (search) {
@@ -62,7 +63,7 @@ export class AdminService {
 		}
 	}
 
-	async findOne(id: string, user) {
+	async findOne(id: string, user: User) {
 		const foundUser = await this.prismaService.user.findUnique({
 			where: { id, roles: {
 				name: RolesEnum.ADMIN
@@ -78,10 +79,13 @@ export class AdminService {
 		return foundUser
 	}
 
-	async create(data: CreateAdminDto, user) {
+	async create(data: CreateAdminDto, user: User) {
 		const adminRole = await this.prismaService.roles.findFirst({
 			where: { name: RolesEnum.ADMIN }
 		})
+		if (!adminRole) {
+			throw new NotFoundException('Admin role not found')
+		}
 		const isExists = await this.prismaService.user.findFirst({
 			where: {
 				phone: data.phone,
@@ -112,7 +116,7 @@ export class AdminService {
 		})
 	}
 
-	async update(id: string, data: UpdateAdminDto, user) {
+	async update(id: string, data: UpdateAdminDto, user: User) {
 		await this.findOne(id, user)
 		const { branchIds, ...datas } = data
 		const areBranchesExist = await this.prismaService.branch.findMany({
@@ -132,7 +136,7 @@ export class AdminService {
 		})
 	}
 
-	async remove(id: string, user) {
+	async remove(id: string, user: User) {
 		await this.findOne(id, user)
 		return await this.prismaService.user.update({
 			where: { id },

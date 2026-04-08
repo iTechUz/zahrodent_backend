@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import * as dayjs from 'dayjs'
-import * as isBetween from 'dayjs/plugin/isBetween'
-import * as timezone from 'dayjs/plugin/timezone'
+import dayjs from 'dayjs'
+import isBetween from 'dayjs/plugin/isBetween'
+import timezone from 'dayjs/plugin/timezone'
 // import * as isoWeek from 'dayjs/plugin/isoWeek';
-import * as utc from 'dayjs/plugin/utc'
+import utc from 'dayjs/plugin/utc'
 
 @Injectable()
 export class DateTimeService {

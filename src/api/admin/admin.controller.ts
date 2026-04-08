@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Query } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common'
 import { ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger'
 import { AdminService } from './admin.service'
 
@@ -14,7 +14,9 @@ import { CreateAdminDto, UpdateAdminDto } from './dto'
 @RolesD(RolesEnum.SUPER_ADMIN)
 @Controller('admin')
 export class AdminController extends ApiController {
-	@Inject() private readonly adminService: AdminService
+	constructor(private readonly adminService: AdminService) {
+		super()
+	}
 
 	@Get()
 	@ApiResponse({ status: 200, description: 'Success' })
