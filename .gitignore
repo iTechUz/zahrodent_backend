@@ -396,8 +396,3 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
-=======
-# Local
-dist
-.webpack
-.serverless/**/*.zip
