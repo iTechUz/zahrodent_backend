@@ -15,6 +15,7 @@
 		"rootDir": "./",
 		"moduleResolution": "node",
 		"paths": {
+			"src/*": ["src/*"],
 			"@/*": ["src/*"],
 			"@app/*": ["src/*"],
 			"@prisma/*": ["src/prisma/*"]

@@ -148,16 +148,19 @@ COPY --from=builder --chown=bunuser:bunuser /app/dist ./dist
 COPY --from=builder --chown=bunuser:bunuser /app/node_modules ./node_modules
 COPY --from=builder --chown=bunuser:bunuser /app/prisma ./prisma
 COPY --from=builder --chown=bunuser:bunuser /app/package.json ./
+COPY --from=builder --chown=bunuser:bunuser /app/tsconfig.json ./tsconfig.json
+COPY --from=builder --chown=bunuser:bunuser /app/tsconfig.build.json ./tsconfig.build.json
 
 USER bunuser
 
 ENV NODE_ENV=production
 ENV TZ=Asia/Tashkent
+ENV TS_NODE_BASEURL=./dist
 
 EXPOSE 8088
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:8088/health || exit 1
 
-# Use Bun runtime (recommended)
-CMD ["bun", "run", "dist/src/main.js"]
+# Run with Node + tsconfig-paths so `src/*` aliases resolve in dist.
+CMD ["node", "-r", "tsconfig-paths/register", "dist/src/main.js"]
