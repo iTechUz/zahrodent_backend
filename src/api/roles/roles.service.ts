@@ -5,12 +5,14 @@ import {
 } from '@nestjs/common'
 import { RolesEnum } from 'src/constantis'
 import { PrismaService } from 'src/prisma.service'
-import { RoleCreateDto, RoleUpdateDto } from './dto'
+import { RoleCreateDto } from './dto'
+import { PaginationDto } from '@/utils/paginations'
+import { IUserProfileDto } from '../users/dto/user.dto'
 @Injectable()
 export class RolesService {
 	constructor(private readonly prisma: PrismaService) {}
 
-	async findAll(pagination, user) {
+	async findAll(pagination:PaginationDto, user: IUserProfileDto) {
 		const { page, pageSize, search, sortBy } = pagination
 		let where: any = {
 			name: {
@@ -59,7 +61,7 @@ export class RolesService {
 			}
 		}
 	}
-	async findOne(id: string, user) {
+	async findOne(id: string, user: IUserProfileDto) {
 		let role = await this.prisma.roles.findUnique({
 			where: { id },
 			include: {
@@ -81,8 +83,8 @@ export class RolesService {
 		return role
 	}
 
-	async create(data: RoleCreateDto, user) {
-		const { name, permissions } = data
+	async create(data: RoleCreateDto, user: IUserProfileDto) {
+		const { name } = data
 
 		const _data = await this.prisma.$transaction(async ctx => {
 			const role = await ctx.roles.findFirst({ where: { name } })
@@ -93,15 +95,6 @@ export class RolesService {
 				data: { name }
 			})
 
-			for (let key in permissions) {
-				await ctx.permission.create({
-					data: {
-						roleId: createRole.id,
-						name: key,
-						...permissions[key]
-					}
-				})
-			}
 
 			return await ctx.roles.findFirst({
 				where: {
@@ -116,38 +109,8 @@ export class RolesService {
 		return _data
 	}
 
-	async update(id: string, data: RoleUpdateDto, user) {
-		const item = await this.findOne(id, user)
-		const per = data.permissions
-
-		return await this.prisma.$transaction(async ctx => {
-			for (let key in per) {
-				const find = await ctx.permission.findFirst({
-					where: {
-						roleId: id,
-						name: key
-					}
-				})
-				if (find)
-					await ctx.permission.update({
-						where: { id: find.id },
-						data: per[key]
-					})
-				if (!find) {
-					await ctx.permission.create({
-						data: {
-							roleId: item.id,
-							name: key,
-							...per[key]
-						}
-					})
-				}
-			}
-			return true
-		})
-	}
-
-	async remove(id: string, user) {
+	
+	async remove(id: string, user: IUserProfileDto) {
 		const role = await this.findOne(id,user)
 
 		if (role.users.length > 0) {

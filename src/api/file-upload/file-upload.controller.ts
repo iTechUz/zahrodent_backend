@@ -1,30 +1,22 @@
 import { AppMimeType, BufferedFile } from 'src/api/minio/file.model';
-import { Controller, Post, UseGuards, Body, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common'
+import { Controller, Post, Body, UseInterceptors, UploadedFile, BadRequestException, Inject } from '@nestjs/common'
 import { FileUploadService } from './file-upload.service'
 import { ApiBearerAuth, ApiTags, ApiConsumes, ApiBody } from '@nestjs/swagger'
-import { UploadFileDto } from './dto'
 import { FileInterceptor } from '@nestjs/platform-express'
-import { diskStorage } from 'multer'
-import { readFile } from 'fs/promises'
-// import { RolesGuard } from 'src/guards/roles.guard';
-import { JwtAuthGuard } from 'src/guards/jwt.guard';
-import { RequirePermission } from 'src/decorators/permissions.decorator';
-import { PermissionGuard } from 'src/guards/permissions.guard';
 import { CurrentUser } from 'src/decorators/user.decorator';
-import { User } from '@prisma/client';
-import { log } from 'console';
-// import { BufferedFile } from './types'
+import { ApiController } from '../jwt.check.controller';
+import { IUserProfileDto } from '../users/dto/user.dto';
 
 @Controller('upload')
 @ApiTags('Upload')
 // @UseGuards(JwtAuthGuard, PermissionGuard)
-export class FileUploadController {
-	constructor(private fileUploadService: FileUploadService) {}
+export class FileUploadController extends ApiController {
+  constructor(private readonly fileUploadService: FileUploadService){
+    super()
+  }
 
 	@Post()
 	@ApiBearerAuth('JWT-auth')
-	// @Roles(Role.ADMIN, Role.SUPER_ADMIN, Role.MANAGER, Role.TEACHER, Role.STUDENT)
-  @RequirePermission('upload')
 	@ApiConsumes('multipart/form-data')
 	@ApiBody({
 		schema: {
@@ -44,7 +36,7 @@ export class FileUploadController {
     @UseInterceptors(
         FileInterceptor('file'),
       )
-	    async uploadFile(@UploadedFile() file: Express.Multer.File, @CurrentUser() user:User, @Body() body: { is_face_image?: string | boolean }): Promise<{fileUrl: string}> {
+	    async uploadFile(@UploadedFile() file: Express.Multer.File, @CurrentUser() user:IUserProfileDto, @Body() body: { is_face_image?: string | boolean }): Promise<{fileUrl: string}> {
 
        const isFaceImage = body.is_face_image === 'true' || body.is_face_image === true;
             

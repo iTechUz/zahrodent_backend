@@ -7,7 +7,6 @@ import { MinioClientModule } from './minio/minio-client.module';
 import { RolesModule } from './roles/roles.module';
 import { UsersModule } from './users/users.module';
 
-import { AdminModule } from './admin/admin.module';
 @Module({
 	imports: [
 		AuthModule,
@@ -16,7 +15,6 @@ import { AdminModule } from './admin/admin.module';
 		DateTimeModule,
 		RolesModule,
 		BranchModule,
-		AdminModule,
 
 	],
 })
