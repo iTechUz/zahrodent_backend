@@ -10,36 +10,33 @@ import {
 	Query
 } from '@nestjs/common'
 import { ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger'
-import { RoleCreateDto, RoleUpdateDto } from './dto'
+import { RoleCreateDto } from './dto'
 
-import { RequirePermission } from '@/decorators/permissions.decorator'
 import { CurrentUser } from '@/decorators/user.decorator'
 import { PaginationDto } from '@/utils/paginations'
-import { User } from '@prisma/client'
-import { RolesEnum } from 'src/constantis'
-import { RolesD } from 'src/decorators/role.decorator'
 import { ApiController } from '../jwt.check.controller'
 import { RolesService } from './roles.service'
+import { IUserProfileDto } from '../users/dto/user.dto'
 
 @ApiTags('Roles')
-@RolesD(RolesEnum.SUPER_ADMIN)
 @Controller('roles')
 export class RolesController extends ApiController {
-	@Inject() private readonly rolesService: RolesService
+	constructor(private readonly rolesService: RolesService) {
+		super()
+	}
 
 	@Get()
 	@ApiResponse({ status: 200, description: 'Success' })
 	@ApiResponse({ status: 404, description: 'Not found' })
 	@ApiQuery({ type: PaginationDto })
-	@RequirePermission('read')
-	async findAll(@Query() query: PaginationDto, @CurrentUser() user: User) {
+	async findAll(@Query() query: PaginationDto, @CurrentUser() user: IUserProfileDto) {
 		return await this.rolesService.findAll(query, user)
 	}
 
 	@Get(':id')
 	@ApiResponse({ status: 200, description: 'Success' })
 	@ApiResponse({ status: 404, description: 'Not found' })
-	findOne(@Param('id') id: string, @CurrentUser() user: User) {
+	findOne(@Param('id') id: string, @CurrentUser() user: IUserProfileDto) {
 		return this.rolesService.findOne(id, user)
 	}
 	@Get('some')
@@ -49,7 +46,7 @@ export class RolesController extends ApiController {
 	@Post()
 	@ApiResponse({ status: 200, description: 'Success' })
 	@ApiResponse({ status: 404, description: 'Not found' })
-	create(@Body() dto: RoleCreateDto, @CurrentUser() user: User) {
+	create(@Body() dto: RoleCreateDto, @CurrentUser() user: IUserProfileDto) {
 		return this.rolesService.create(dto, user)
 	}
 
@@ -58,16 +55,15 @@ export class RolesController extends ApiController {
 	@ApiResponse({ status: 404, description: 'Not found' })
 	update(
 		@Param('id') id: string,
-		@Body() dto: RoleUpdateDto,
-		@CurrentUser() user: User
+		@CurrentUser() user: IUserProfileDto
 	) {
-		return this.rolesService.update(id, dto, user)
+		// return this.rolesService.update(id, dto, user)
 	}
 
 	@Delete(':id')
 	@ApiResponse({ status: 200, description: 'Success' })
 	@ApiResponse({ status: 404, description: 'Not found' })
-	remove(@Param('id') id: string, @CurrentUser() user: User) {
+	remove(@Param('id') id: string, @CurrentUser() user: IUserProfileDto) {
 		return this.rolesService.remove(id, user)
 	}
 }

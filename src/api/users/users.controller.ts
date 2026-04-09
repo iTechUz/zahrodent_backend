@@ -19,7 +19,6 @@ import {
 } from '@nestjs/swagger'
 import { JwtAuthGuard } from 'src/guards/jwt.guard'
 // import { Auth } from '../../decorators/auth.decorator'
-import { RequirePermission } from 'src/decorators/permissions.decorator'
 import { CurrentUser } from '../../decorators/user.decorator'
 import { FileUploadService } from '../file-upload/file-upload.service'
 import {
@@ -45,13 +44,11 @@ export class UsersController {
 	// @Auth(Role.SUPER_ADMIN)
 	@ApiResponse({ status: 200, description: 'Success' })
 	@ApiResponse({ status: 404, description: 'Not found' })
-	@RequirePermission('read')
 	async findAll(@Query() pagination: filterByUserDto) {
 		return this.usersService.findAll(pagination)
 	}
 
 	@Get('/number-of-users')
-	@RequirePermission('read')
 	@ApiResponse({ status: 200, description: 'Success' })
 	@ApiResponse({ status: 404, description: 'Not found' })
 	numberOfUsers() {
@@ -59,7 +56,6 @@ export class UsersController {
 	}
 
 	@Get('/me')
-	@RequirePermission('view')
 
 	// @Auth(Role.STUDENT, Role.TEACHER, Role.MANAGER, Role.ADMIN, Role.SUPER_ADMIN)
 	@ApiResponse({ status: 200, description: 'Success' })
@@ -70,7 +66,6 @@ export class UsersController {
 	}
 
 	@Get(':id')
-	@RequirePermission('view')
 	// @Auth(Role.SUPER_ADMIN)
 	@ApiResponse({ status: 200, description: 'Success' })
 	@ApiResponse({ status: 404, description: 'Not found' })
@@ -79,7 +74,6 @@ export class UsersController {
 	}
 
 	@Patch(':branchId')
-	@RequirePermission('update')
 	// @Auth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.TEACHER, Role.STUDENT)
 	@ApiResponse({ status: 200, description: 'Success' })
 	@ApiResponse({ status: 404, description: 'Not found' })
@@ -92,7 +86,6 @@ export class UsersController {
 	}
 
 	@Put(':id')
-	@RequirePermission('update')
 	// @Auth(Role.SUPER_ADMIN)
 	@ApiResponse({ status: 200, description: 'Success' })
 	@ApiResponse({ status: 404, description: 'Not found' })
@@ -102,8 +95,6 @@ export class UsersController {
 	}
 
 	@Delete(':id')
-	@RequirePermission('remove')
-	// @Auth(Role.SUPER_ADMIN)
 	@ApiResponse({ status: 200, description: 'Success' })
 	@ApiResponse({ status: 404, description: 'Not found' })
 	delete(@Param('id') id: string) {
@@ -111,8 +102,6 @@ export class UsersController {
 	}
 
 	@Post()
-	// @RequirePermission('create')
-	// @Auth(Role.SUPER_ADMIN, Role.ADMIN, Role.MANAGER, Role.TEACHER, Role.STUDENT)
 	@ApiResponse({ status: 200, description: 'Success' })
 	@ApiResponse({ status: 404, description: 'Not found' })
 	@ApiBody({ type: CreateUserDto })
