@@ -24,7 +24,6 @@ export class CreateBookingDto {
   @MinLength(1)
   doctorId: string;
 
-  /** YYYY-MM-DD */
   @IsString()
   @MinLength(10)
   date: string;

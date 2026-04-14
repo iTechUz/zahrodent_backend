@@ -41,7 +41,6 @@ export class CreatePaymentDto {
   @IsString()
   serviceId?: string;
 
-  /** YYYY-MM-DD; defaults to today */
   @IsOptional()
   @IsString()
   date?: string;

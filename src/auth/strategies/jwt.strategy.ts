@@ -17,10 +17,6 @@ function isJwtAccessPayload(p: unknown): p is JwtAccessPayload {
   );
 }
 
-/**
- * Har so'rovda users jadvaliga qaramaydi — imzolangan JWT dan `request.user` to'ldiriladi.
- * Eski tokenlar (faqat sub+role) — 401, qayta login.
- */
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {

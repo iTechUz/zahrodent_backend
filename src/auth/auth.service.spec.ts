@@ -4,7 +4,6 @@ import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { UsersRepository } from './users.repository';
 
-/** Matches `UsersRepository.findByEmail` resolved user row */
 type User = NonNullable<Awaited<ReturnType<UsersRepository['findByEmail']>>>;
 
 function mockUser(partial: Partial<User>): User {

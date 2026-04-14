@@ -109,6 +109,8 @@ async function bootstrap() {
 
 bootstrap().catch((err: unknown) => {
   const logger = new Logger('Bootstrap');
+  // eslint-disable-next-line no-console
+  console.error(err);
   logger.error(err instanceof Error ? err.stack ?? err.message : String(err));
   process.exit(1);
 });

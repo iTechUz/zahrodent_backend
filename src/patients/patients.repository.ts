@@ -21,7 +21,6 @@ export class PatientsRepository {
     return this.prisma.patient.findUnique({ where: { id } });
   }
 
-  /** Bir nechta bemorga tez kalit (N+1 oldini olish) */
   findSourcesByPatientIds(ids: string[]) {
     const unique = [...new Set(ids)].filter(Boolean);
     if (!unique.length) {

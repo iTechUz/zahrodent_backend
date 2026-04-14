@@ -3,9 +3,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AppModule } from '../src/app.module';
 import { AllExceptionsFilter } from '../src/common/filters/http-exception.filter';
 
-/**
- * main.ts dagi ValidationPipe + ExceptionFilter bilan mos (E2E uchun).
- */
 export async function createE2eApp(): Promise<INestApplication> {
   const moduleFixture: TestingModule = await Test.createTestingModule({
     imports: [AppModule],

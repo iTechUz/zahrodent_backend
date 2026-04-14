@@ -19,7 +19,6 @@ export class CreateNotificationDto {
   @IsIn(STATUSES)
   status?: (typeof STATUSES)[number];
 
-  /** ISO 8601 datetime */
   @IsOptional()
   @IsString()
   sentAt?: string;

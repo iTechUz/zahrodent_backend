@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-/** Eskiz.uz — https://eskiz.uz (notify.eskiz.uz API) */
 @Injectable()
 export class EskizService {
   private readonly logger = new Logger(EskizService.name);
@@ -13,7 +12,6 @@ export class EskizService {
     );
   }
 
-  /** Kabinetdan olingan jo'natuvchi nomi / qisqa raqam (masalan 4546) */
   private get senderFrom(): string {
     return process.env.ESKIZ_FROM?.trim() || '4546';
   }
@@ -24,9 +22,6 @@ export class EskizService {
     return Boolean(email && password);
   }
 
-  /**
-   * Raqamni Eskiz talabiga moslashtiradi: faqat raqamlar, 998XXXXXXXXX (12 ta).
-   */
   normalizeMobile(phone: string): string | null {
     const digits = phone.replace(/\D/g, '');
     if (digits.length === 12 && digits.startsWith('998')) return digits;
@@ -69,9 +64,6 @@ export class EskizService {
     return this.login();
   }
 
-  /**
-   * Bitta SMS yuboradi. `mobile_phone` — 998901234567 formatida.
-   */
   async sendSms(
     mobilePhone: string,
     message: string,

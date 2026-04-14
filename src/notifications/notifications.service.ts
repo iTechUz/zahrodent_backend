@@ -47,7 +47,6 @@ export class NotificationsService {
     return this.toResponse(n);
   }
 
-  /** Qabullar uchun eslatmalar: Eskiz sozlangan bo‘lsa SMS haqiqiy yuboriladi */
   async sendReminders() {
     const bookings = await this.bookingsRepository.findAll({
       status: { in: ['confirmed', 'pending'] },

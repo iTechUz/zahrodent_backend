@@ -15,7 +15,6 @@ export class CreateVisitDto {
   @IsString()
   bookingId?: string;
 
-  /** YYYY-MM-DD; defaults to server date if omitted */
   @IsOptional()
   @IsString()
   date?: string;

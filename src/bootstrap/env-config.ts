@@ -12,16 +12,11 @@ export function parsePort(): number {
   return n;
 }
 
-/** 0.0.0.0 — Docker / VPS / cloud (barcha interfeyslar). Lokal faqat 127.0.0.1 bo'lsin desangiz HOST=127.0.0.1 */
 export function getListenHost(): string {
   const h = process.env.HOST?.trim();
   return h && h.length > 0 ? h : '0.0.0.0';
 }
 
-/**
- * Log va havolalar uchun tashqi URL (nginx/HTTPS ortida).
- * Bo'lmasa: localhost + PORT (brauzerda ochish uchun).
- */
 export function getPublicBaseUrl(port: number): string {
   const fromEnv = process.env.PUBLIC_BASE_URL?.trim().replace(/\/$/, '');
   if (fromEnv) return fromEnv;
@@ -65,8 +60,6 @@ export function buildCorsOptions(prod: boolean): CorsOptions {
   }
 
   if (prod) {
-    // Production'da "origin: true" (hammasiga ruxsat) xavfli.
-    // DevOps deploy paytida CORS_ORIGINS ni aniq domen(lar) bilan berish majburiy.
     throw new Error(
       'Production: CORS_ORIGINS majburiy. Misol: CORS_ORIGINS=https://app.example.com,https://www.example.com',
     );
@@ -91,7 +84,6 @@ export function warnWeakJwtSecret(prod: boolean): void {
   }
 }
 
-/** Production\'da zaif yoki bo\'sh JWT_SECRET bo\'lsa process to\'xtaydi */
 export function enforceProductionJwtSecret(): void {
   if (!isProduction()) return;
   const secret = process.env.JWT_SECRET?.trim();
