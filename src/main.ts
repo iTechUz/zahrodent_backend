@@ -5,6 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { requestIdMiddleware } from './common/middleware/request-id.middleware';
 import {
   buildCorsOptions,
   getListenHost,
@@ -31,6 +32,8 @@ async function bootstrap() {
     bufferLogs: true,
     logger: prod ? ['error', 'warn', 'log'] : undefined,
   });
+
+  app.use(requestIdMiddleware);
 
   if (process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true') {
     app.set('trust proxy', 1);
