@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         String
+  specialty    String?
+  avatar       String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Patient {
+  id         String   @id @default(cuid())
+  firstName  String   @map("first_name")
+  lastName   String   @map("last_name")
+  age        Int
+  phone      String
+  source     String
+  notes      String   @default("")
+  avatar     String?
+  createdAt  DateTime @default(now()) @map("created_at") @db.Date
+  allergies  String?
+  bloodType  String?  @map("blood_type")
+  toothChart Json?    @map("tooth_chart")
+
+  bookings      Booking[]
+  visits        Visit[]
+  payments      Payment[]
+  notifications Notification[]
+
+  @@index([createdAt])
+  @@index([phone])
+  @@map("patients")
+}
+
+model Doctor {
+  id           String   @id @default(cuid())
+  name         String
+  specialty    String
+  phone        String
+  workingHours String   @map("working_hours")
+  avatar       String?
+  schedule     Json?
+  daysOff      Json?    @map("days_off")
+
+  bookings Booking[]
+  visits   Visit[]
+
+  @@map("doctors")
+}
+
+model Service {
+  id          String  @id @default(cuid())
+  name        String
+  category    String
+  price       Int
+  duration    Int
+  description String?
+
+  bookings Booking[]
+  payments Payment[]
+
+  @@map("services")
+}
+
+model Booking {
+  id             String    @id @default(cuid())
+  patientId      String    @map("patient_id")
+  doctorId       String    @map("doctor_id")
+  date           DateTime  @db.Date
+  time           String
+  source         String
+  status         String
+  notes          String    @default("")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Date
+  serviceId      String?   @map("service_id")
+  reminderSentAt DateTime? @map("reminder_sent_at")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor  Doctor  @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  service Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  visits Visit[]
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([date])
+  @@index([status])
+  @@map("bookings")
+}
+
+model Visit {
+  id        String  @id @default(cuid())
+  patientId String  @map("patient_id")
+  doctorId  String  @map("doctor_id")
+  bookingId String? @map("booking_id")
+  date      DateTime @db.Date
+  status    String
+  diagnosis String  @default("")
+  treatment String  @default("")
+  notes     String  @default("")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor  Doctor   @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  @@map("visits")
+}
+
+model Payment {
+  id          String   @id @default(cuid())
+  patientId   String   @map("patient_id")
+  amount      Int
+  method      String
+  status      String
+  date        DateTime @db.Date
+  description String
+  discount    Int?
+  serviceId   String?  @map("service_id")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  service Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  @@index([patientId])
+  @@index([status])
+  @@index([date])
+  @@map("payments")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  patientId String   @map("patient_id")
+  type      String
+  message   String
+  sentAt    DateTime @map("sent_at")
+  status    String
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
