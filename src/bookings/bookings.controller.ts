@@ -33,11 +33,29 @@ export class BookingsController {
   constructor(private readonly bookingsService: BookingsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Qabullar ro\'yxati' })
-  @ApiQuery({ name: 'search', required: false, description: 'Bemor ismi bo\'yicha' })
-  @ApiQuery({ name: 'status', required: false, example: 'all', description: 'all yoki holat' })
-  @ApiQuery({ name: 'source', required: false, example: 'all', description: 'all yoki manba' })
-  @ApiQuery({ name: 'patientId', required: false, description: 'Faqat shu bemorga tegishli qabullar' })
+  @ApiOperation({ summary: "Qabullar ro'yxati" })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description: "Bemor ismi bo'yicha",
+  })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    example: 'all',
+    description: 'all yoki holat',
+  })
+  @ApiQuery({
+    name: 'source',
+    required: false,
+    example: 'all',
+    description: 'all yoki manba',
+  })
+  @ApiQuery({
+    name: 'patientId',
+    required: false,
+    description: 'Faqat shu bemorga tegishli qabullar',
+  })
   @ApiQuery({ name: 'limit', required: false })
   findAll(
     @Query('search') search?: string,
@@ -47,7 +65,13 @@ export class BookingsController {
     @Query('limit') limitStr?: string,
   ) {
     const limit = limitStr != null ? Number.parseInt(limitStr, 10) : undefined;
-    return this.bookingsService.findAll({ search, status, source, patientId, limit });
+    return this.bookingsService.findAll({
+      search,
+      status,
+      source,
+      patientId,
+      limit,
+    });
   }
 
   @Get(':id')
@@ -64,14 +88,14 @@ export class BookingsController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Qabulni yangilash (holat o\'zgartirish)' })
+  @ApiOperation({ summary: "Qabulni yangilash (holat o'zgartirish)" })
   @ApiParam({ name: 'id' })
   update(@Param('id') id: string, @Body() dto: UpdateBookingDto) {
     return this.bookingsService.update(id, dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Qabulni o\'chirish' })
+  @ApiOperation({ summary: "Qabulni o'chirish" })
   @ApiParam({ name: 'id' })
   remove(@Param('id') id: string) {
     return this.bookingsService.remove(id);

@@ -13,9 +13,14 @@ describe('NotificationsService.sendReminders', () => {
     Pick<BookingsRepository, 'findAll' | 'markReminderSent'>
   >;
   let patientsRepo: jest.Mocked<
-    Pick<PatientsRepository, 'findSourcesByPatientIds' | 'findPhonesByPatientIds'>
+    Pick<
+      PatientsRepository,
+      'findSourcesByPatientIds' | 'findPhonesByPatientIds'
+    >
   >;
-  let eskiz: jest.Mocked<Pick<EskizService, 'isConfigured' | 'normalizeMobile' | 'sendSms'>>;
+  let eskiz: jest.Mocked<
+    Pick<EskizService, 'isConfigured' | 'normalizeMobile' | 'sendSms'>
+  >;
 
   beforeEach(() => {
     notificationsRepo = { createMany: jest.fn().mockResolvedValue(undefined) };

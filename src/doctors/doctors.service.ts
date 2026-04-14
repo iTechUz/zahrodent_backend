@@ -9,7 +9,9 @@ export class DoctorsService {
   constructor(private readonly doctorsRepository: DoctorsRepository) {}
 
   findAll() {
-    return this.doctorsRepository.findAll().then((rows) => rows.map((d) => this.toResponse(d)));
+    return this.doctorsRepository
+      .findAll()
+      .then((rows) => rows.map((d) => this.toResponse(d)));
   }
 
   async findOne(id: string) {
@@ -25,7 +27,8 @@ export class DoctorsService {
       phone: dto.phone,
       workingHours: dto.workingHours,
       avatar: dto.avatar,
-      schedule: dto.schedule === undefined ? undefined : (dto.schedule as object),
+      schedule:
+        dto.schedule === undefined ? undefined : (dto.schedule as object),
       daysOff: dto.daysOff === undefined ? undefined : dto.daysOff,
     });
     return this.toResponse(d);

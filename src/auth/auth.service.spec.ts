@@ -65,9 +65,16 @@ describe('AuthService', () => {
       }),
     );
 
-    const out = await service.login({ email: 'admin@test', password: 'secret' });
+    const out = await service.login({
+      email: 'admin@test',
+      password: 'secret',
+    });
     expect(out.access_token).toBe('signed-jwt');
-    expect(out.user).toMatchObject({ id: 'u1', email: 'admin@test', role: 'admin' });
+    expect(out.user).toMatchObject({
+      id: 'u1',
+      email: 'admin@test',
+      role: 'admin',
+    });
     expect(jwtService.signAsync).toHaveBeenCalledWith(
       expect.objectContaining({ sub: 'u1', role: 'admin' }),
     );

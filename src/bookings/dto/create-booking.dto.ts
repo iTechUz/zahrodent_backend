@@ -1,9 +1,4 @@
-import {
-  IsIn,
-  IsOptional,
-  IsString,
-  MinLength,
-} from 'class-validator';
+import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 
 const SOURCES = ['walk-in', 'telegram', 'website', 'phone'] as const;
 const STATUSES = [

@@ -37,7 +37,10 @@ const hasDb = !!process.env.DATABASE_URL;
 
   describe('Auth', () => {
     it('POST /auth/login — 400 bo‘sh body', () => {
-      return request(app.getHttpServer()).post('/auth/login').send({}).expect(400);
+      return request(app.getHttpServer())
+        .post('/auth/login')
+        .send({})
+        .expect(400);
     });
 
     it('POST /auth/login — 400 noto‘g‘ri email format', () => {

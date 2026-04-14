@@ -6,6 +6,9 @@ import { BookingsRepository } from '../bookings/bookings.repository';
 import { PatientsRepository } from '../patients/patients.repository';
 import { EskizService } from './eskiz.service';
 
+type ReminderType = 'sms' | 'telegram';
+type ReminderStatus = 'sent' | 'failed';
+
 @Injectable()
 export class NotificationsService {
   constructor(
@@ -57,20 +60,18 @@ export class NotificationsService {
     }
 
     const patientIds = bookings.map((b) => b.patientId);
-    const patientRows = await this.patientsRepository.findSourcesByPatientIds(
-      patientIds,
-    );
-    const phoneRows = await this.patientsRepository.findPhonesByPatientIds(
-      patientIds,
-    );
+    const patientRows =
+      await this.patientsRepository.findSourcesByPatientIds(patientIds);
+    const phoneRows =
+      await this.patientsRepository.findPhonesByPatientIds(patientIds);
     const sourceByPatientId = new Map(patientRows.map((p) => [p.id, p.source]));
     const phoneByPatientId = new Map(phoneRows.map((p) => [p.id, p.phone]));
 
     const rows: {
       patientId: string;
-      type: string;
+      type: ReminderType;
       message: string;
-      status: string;
+      status: ReminderStatus;
       sentAt: Date;
     }[] = [];
     const bookingIdsToMark: string[] = [];

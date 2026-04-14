@@ -37,10 +37,16 @@ export function isSwaggerEnabled(prod: boolean): boolean {
 export function buildCorsOptions(prod: boolean): CorsOptions {
   const raw = process.env.CORS_ORIGINS?.trim();
   const list = raw
-    ? raw.split(',').map((s) => s.trim()).filter(Boolean)
+    ? raw
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
     : [];
 
-  const common: Pick<CorsOptions, 'credentials' | 'methods' | 'allowedHeaders'> = {
+  const common: Pick<
+    CorsOptions,
+    'credentials' | 'methods' | 'allowedHeaders'
+  > = {
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
@@ -79,9 +85,13 @@ export function warnWeakJwtSecret(prod: boolean): void {
     secret === 'dev-secret-change-me';
   if (prod && weak) {
     logger.warn(
-      'JWT_SECRET standart yoki yo\'q — production\'da kuchli tasodifiy qator qo\'ying',
+      "JWT_SECRET standart yoki yo'q — production'da kuchli tasodifiy qator qo'ying",
     );
   }
+}
+
+export function getJwtSecret(): string {
+  return process.env.JWT_SECRET?.trim() || 'dev-secret-change-me';
 }
 
 export function enforceProductionJwtSecret(): void {

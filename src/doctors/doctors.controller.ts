@@ -21,7 +21,10 @@ import { UpdateDoctorDto } from './dto/update-doctor.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { ROLES_DOCTOR_WRITE, ROLES_STAFF } from '../common/constants/role-groups';
+import {
+  ROLES_DOCTOR_WRITE,
+  ROLES_STAFF,
+} from '../common/constants/role-groups';
 
 @ApiTags('doctors')
 @ApiBearerAuth('JWT')
@@ -32,7 +35,7 @@ export class DoctorsController {
   constructor(private readonly doctorsService: DoctorsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Shifokorlar ro\'yxati' })
+  @ApiOperation({ summary: "Shifokorlar ro'yxati" })
   findAll() {
     return this.doctorsService.findAll();
   }
@@ -63,7 +66,7 @@ export class DoctorsController {
 
   @Delete(':id')
   @Roles(...ROLES_DOCTOR_WRITE)
-  @ApiOperation({ summary: 'Shifokorni o\'chirish' })
+  @ApiOperation({ summary: "Shifokorni o'chirish" })
   @ApiParam({ name: 'id' })
   @ApiForbiddenResponse({ description: 'Faqat admin va doctor' })
   remove(@Param('id') id: string) {

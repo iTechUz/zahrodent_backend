@@ -44,7 +44,8 @@ export class PatientsService {
       allergies: dto.allergies,
       bloodType: dto.bloodType,
       avatar: dto.avatar,
-      toothChart: dto.toothChart === undefined ? undefined : (dto.toothChart as object),
+      toothChart:
+        dto.toothChart === undefined ? undefined : (dto.toothChart as object),
     });
     return this.toResponse(p);
   }

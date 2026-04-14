@@ -33,10 +33,14 @@ export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'To\'lovlar ro\'yxati' })
+  @ApiOperation({ summary: "To'lovlar ro'yxati" })
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'status', required: false, example: 'all' })
-  @ApiQuery({ name: 'patientId', required: false, description: 'Faqat shu bemorga tegishlilar' })
+  @ApiQuery({
+    name: 'patientId',
+    required: false,
+    description: 'Faqat shu bemorga tegishlilar',
+  })
   @ApiQuery({ name: 'limit', required: false })
   findAll(
     @Query('search') search?: string,
@@ -49,27 +53,27 @@ export class PaymentsController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Bitta to\'lov' })
+  @ApiOperation({ summary: "Bitta to'lov" })
   @ApiParam({ name: 'id' })
   findOne(@Param('id') id: string) {
     return this.paymentsService.findOne(id);
   }
 
   @Post()
-  @ApiOperation({ summary: 'Yangi to\'lov' })
+  @ApiOperation({ summary: "Yangi to'lov" })
   create(@Body() dto: CreatePaymentDto) {
     return this.paymentsService.create(dto);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'To\'lovni yangilash' })
+  @ApiOperation({ summary: "To'lovni yangilash" })
   @ApiParam({ name: 'id' })
   update(@Param('id') id: string, @Body() dto: UpdatePaymentDto) {
     return this.paymentsService.update(id, dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'To\'lovni o\'chirish' })
+  @ApiOperation({ summary: "To'lovni o'chirish" })
   @ApiParam({ name: 'id' })
   remove(@Param('id') id: string) {
     return this.paymentsService.remove(id);

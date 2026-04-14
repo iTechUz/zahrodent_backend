@@ -33,13 +33,18 @@ export class PatientsController {
   constructor(private readonly patientsService: PatientsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Bemorlar ro\'yxati' })
-  @ApiQuery({ name: 'search', required: false, description: 'Ism, familiya yoki telefon' })
-  @ApiQuery({ name: 'limit', required: false, description: 'Maks 500, ixtiyoriy' })
-  findAll(
-    @Query('search') search?: string,
-    @Query('limit') limitStr?: string,
-  ) {
+  @ApiOperation({ summary: "Bemorlar ro'yxati" })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description: 'Ism, familiya yoki telefon',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    description: 'Maks 500, ixtiyoriy',
+  })
+  findAll(@Query('search') search?: string, @Query('limit') limitStr?: string) {
     const limit = limitStr != null ? Number.parseInt(limitStr, 10) : undefined;
     return this.patientsService.findAll(search, limit);
   }
@@ -65,7 +70,7 @@ export class PatientsController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Bemorni o\'chirish' })
+  @ApiOperation({ summary: "Bemorni o'chirish" })
   @ApiParam({ name: 'id' })
   remove(@Param('id') id: string) {
     return this.patientsService.remove(id);

@@ -9,7 +9,12 @@ import { toDateOnlyString } from '../common/utils/date.util';
 export class PaymentsService {
   constructor(private readonly paymentsRepository: PaymentsRepository) {}
 
-  findAll(search?: string, status?: string, patientId?: string, limit?: number) {
+  findAll(
+    search?: string,
+    status?: string,
+    patientId?: string,
+    limit?: number,
+  ) {
     const where: Prisma.PaymentWhereInput = {};
     if (patientId) where.patientId = patientId;
     if (status && status !== 'all') {
@@ -54,9 +59,7 @@ export class PaymentsService {
       date: new Date(dateStr),
       description: dto.description,
       discount: dto.discount,
-      service: dto.serviceId
-        ? { connect: { id: dto.serviceId } }
-        : undefined,
+      service: dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
     });
     return this.toResponse(p);
   }

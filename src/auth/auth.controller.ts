@@ -13,9 +13,16 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('login')
-  @ApiOperation({ summary: 'Kirish', description: 'Email va parol bilan JWT olish' })
+  @ApiOperation({
+    summary: 'Kirish',
+    description: 'Email va parol bilan JWT olish',
+  })
   @ApiBody({ type: LoginDto })
-  @ApiResponse({ status: 200, description: 'Muvaffaqiyatli', type: LoginResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Muvaffaqiyatli',
+    type: LoginResponseDto,
+  })
   @ApiResponse({ status: 401, description: "Noto'g'ri email yoki parol" })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);

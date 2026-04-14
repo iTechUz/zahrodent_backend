@@ -35,7 +35,8 @@ export class NotificationsController {
   @Post('send-reminders')
   @ApiOperation({
     summary: 'Eslatmalar yuborish',
-    description: 'pending va confirmed qabullar uchun avtomatik xabar yaratish (frontend dagi tugma bilan bir xil)',
+    description:
+      'pending va confirmed qabullar uchun avtomatik xabar yaratish (frontend dagi tugma bilan bir xil)',
   })
   @ApiOkResponse({
     description: 'Yaratilgan yozuvlar soni',

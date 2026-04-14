@@ -35,7 +35,11 @@ export class ServicesController {
   @Get()
   @ApiOperation({ summary: 'Xizmatlar katalogi' })
   @ApiQuery({ name: 'search', required: false })
-  @ApiQuery({ name: 'category', required: false, description: 'all yoki kategoriya nomi' })
+  @ApiQuery({
+    name: 'category',
+    required: false,
+    description: 'all yoki kategoriya nomi',
+  })
   findAll(
     @Query('search') search?: string,
     @Query('category') category?: string,
@@ -64,7 +68,7 @@ export class ServicesController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Xizmatni o\'chirish' })
+  @ApiOperation({ summary: "Xizmatni o'chirish" })
   @ApiParam({ name: 'id' })
   remove(@Param('id') id: string) {
     return this.servicesService.remove(id);

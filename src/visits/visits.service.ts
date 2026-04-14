@@ -13,7 +13,8 @@ export class VisitsService {
     const where: Prisma.VisitWhereInput = {};
     if (patientId) where.patientId = patientId;
     if (doctorId) where.doctorId = doctorId;
-    return this.visitsRepository.findAll(where)
+    return this.visitsRepository
+      .findAll(where)
       .then((rows) => rows.map((v) => this.toResponse(v)));
   }
 
@@ -28,9 +29,7 @@ export class VisitsService {
     const v = await this.visitsRepository.create({
       patient: { connect: { id: dto.patientId } },
       doctor: { connect: { id: dto.doctorId } },
-      booking: dto.bookingId
-        ? { connect: { id: dto.bookingId } }
-        : undefined,
+      booking: dto.bookingId ? { connect: { id: dto.bookingId } } : undefined,
       date: new Date(dateStr),
       status: dto.status,
       diagnosis: dto.diagnosis ?? '',

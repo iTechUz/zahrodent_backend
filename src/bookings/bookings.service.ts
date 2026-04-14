@@ -58,9 +58,7 @@ export class BookingsService {
       source: dto.source,
       status: dto.status,
       notes: dto.notes ?? '',
-      service: dto.serviceId
-        ? { connect: { id: dto.serviceId } }
-        : undefined,
+      service: dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
     });
     return this.toResponse(b);
   }

@@ -91,7 +91,9 @@ async function bootstrap() {
 
   const publicUrl = getPublicBaseUrl(port);
   const listenLabel =
-    host === '0.0.0.0' ? `0.0.0.0:${port} (barcha interfeyslar)` : `${host}:${port}`;
+    host === '0.0.0.0'
+      ? `0.0.0.0:${port} (barcha interfeyslar)`
+      : `${host}:${port}`;
 
   logger.log(
     [
@@ -100,8 +102,10 @@ async function bootstrap() {
       `  Muhit:     ${prod ? 'production' : process.env.NODE_ENV || 'development'}`,
       `  Tinglash:  ${listenLabel}`,
       `  API URL:   ${publicUrl}`,
-      swaggerOn ? `  Swagger:   ${publicUrl}/${SWAGGER_PATH}` : `  Swagger:   (o'chirilgan)`,
-      `  Eski /docs → /${SWAGGER_PATH} ${swaggerOn ? '(301 redirect)' : '(swagger yo\'q)'}`,
+      swaggerOn
+        ? `  Swagger:   ${publicUrl}/${SWAGGER_PATH}`
+        : `  Swagger:   (o'chirilgan)`,
+      `  Eski /docs → /${SWAGGER_PATH} ${swaggerOn ? '(301 redirect)' : "(swagger yo'q)"}`,
       '──────────────────────────────────',
     ].join('\n'),
   );
@@ -111,6 +115,6 @@ bootstrap().catch((err: unknown) => {
   const logger = new Logger('Bootstrap');
   // eslint-disable-next-line no-console
   console.error(err);
-  logger.error(err instanceof Error ? err.stack ?? err.message : String(err));
+  logger.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
   process.exit(1);
 });

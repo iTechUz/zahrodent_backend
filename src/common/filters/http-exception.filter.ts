@@ -32,7 +32,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
       statusCode: status,
       path: req.url,
       timestamp: new Date().toISOString(),
-      message: Array.isArray(message) ? message.join('; ') : message || 'Internal server error',
+      message: Array.isArray(message)
+        ? message.join('; ')
+        : message || 'Internal server error',
     };
 
     if (!isHttp) {

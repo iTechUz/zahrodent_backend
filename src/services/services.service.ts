@@ -20,7 +20,8 @@ export class ServicesService {
         { category: { contains: s, mode: 'insensitive' } },
       ];
     }
-    return this.servicesRepository.findAll(where)
+    return this.servicesRepository
+      .findAll(where)
       .then((rows) => rows.map((x) => this.toResponse(x)));
   }
 

@@ -4,12 +4,15 @@ import { Injectable, Logger } from '@nestjs/common';
 export class EskizService {
   private readonly logger = new Logger(EskizService.name);
   private accessToken: string | null = null;
+  private readonly timeoutMs = Number.parseInt(
+    process.env.ESKIZ_HTTP_TIMEOUT_MS || '8000',
+    10,
+  );
 
   private get baseUrl(): string {
-    return (process.env.ESKIZ_BASE_URL?.trim() || 'https://notify.eskiz.uz').replace(
-      /\/$/,
-      '',
-    );
+    return (
+      process.env.ESKIZ_BASE_URL?.trim() || 'https://notify.eskiz.uz'
+    ).replace(/\/$/, '');
   }
 
   private get senderFrom(): string {
@@ -29,15 +32,31 @@ export class EskizService {
     return null;
   }
 
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   private async login(): Promise<string> {
     const email = process.env.ESKIZ_EMAIL?.trim();
     const password = process.env.ESKIZ_PASSWORD?.trim();
     if (!email || !password) {
       throw new Error('ESKIZ_EMAIL / ESKIZ_PASSWORD sozlanmagan');
     }
-    const res = await fetch(`${this.baseUrl}/api/auth/login`, {
+    const res = await this.fetchWithTimeout(`${this.baseUrl}/api/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
       body: JSON.stringify({ email, password }),
     });
     const raw = await res.text();
@@ -71,7 +90,9 @@ export class EskizService {
     if (!this.isConfigured()) {
       return { ok: false, error: 'Eskiz sozlanmagan' };
     }
-    const attempt = async (retryOn401: boolean): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const attempt = async (
+      retryOn401: boolean,
+    ): Promise<{ ok: true } | { ok: false; error: string }> => {
       let token: string;
       try {
         token = await this.getToken();
@@ -79,19 +100,22 @@ export class EskizService {
         const msg = e instanceof Error ? e.message : String(e);
         return { ok: false, error: msg };
       }
-      const res = await fetch(`${this.baseUrl}/api/message/sms/send`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          Authorization: `Bearer ${token}`,
+      const res = await this.fetchWithTimeout(
+        `${this.baseUrl}/api/message/sms/send`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            mobile_phone: mobilePhone,
+            message,
+            from: this.senderFrom,
+          }),
         },
-        body: JSON.stringify({
-          mobile_phone: mobilePhone,
-          message,
-          from: this.senderFrom,
-        }),
-      });
+      );
       if (res.status === 401 && retryOn401) {
         this.accessToken = null;
         return attempt(false);

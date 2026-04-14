@@ -39,6 +39,8 @@ describe('BookingsService', () => {
 
   it('findOne — topilmasa 404', async () => {
     repo.findById.mockResolvedValue(null);
-    await expect(service.findOne('x')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.findOne('x')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 });
