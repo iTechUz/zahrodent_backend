@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Visit } from '@prisma/client';
 import { VisitsRepository } from './visits.repository';
+import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
 import { CreateVisitDto } from './dto/create-visit.dto';
 import { UpdateVisitDto } from './dto/update-visit.dto';
 import { toDateOnlyString } from '../common/utils/date.util';
@@ -9,13 +10,25 @@ import { toDateOnlyString } from '../common/utils/date.util';
 export class VisitsService {
   constructor(private readonly visitsRepository: VisitsRepository) {}
 
-  findAll(patientId?: string, doctorId?: string) {
+  async findAll(query: PaginationQueryDto & { patientId?: string; doctorId?: string }): Promise<PaginatedResponse<any>> {
+    const { page = 0, limit = 10, search, patientId, doctorId } = query;
+    const skip = page * limit;
+
     const where: Prisma.VisitWhereInput = {};
+
     if (patientId) where.patientId = patientId;
     if (doctorId) where.doctorId = doctorId;
-    return this.visitsRepository
-      .findAll(where)
-      .then((rows) => rows.map((v) => this.toResponse(v)));
+
+    if (search?.trim()) {
+      const s = search.trim();
+      where.OR = [
+        { diagnosis: { contains: s, mode: 'insensitive' } },
+        { treatment: { contains: s, mode: 'insensitive' } },
+      ];
+    }
+
+    const { data, total } = await this.visitsRepository.findAll(where, { skip, take: limit });
+    return { data: data.map((v) => this.toResponse(v)), total };
   }
 
   async findOne(id: string) {

@@ -6,11 +6,20 @@ import { PrismaService } from '../database/prisma.service';
 export class VisitsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(where?: Prisma.VisitWhereInput): Promise<Visit[]> {
-    return this.prisma.visit.findMany({
-      where,
-      orderBy: { date: 'desc' },
-    });
+  async findAll(
+    where?: Prisma.VisitWhereInput,
+    opts?: { skip?: number; take?: number },
+  ): Promise<{ data: Visit[]; total: number }> {
+    const [data, total] = await Promise.all([
+      this.prisma.visit.findMany({
+        where,
+        orderBy: { date: 'desc' },
+        ...(opts?.skip != null ? { skip: opts.skip } : {}),
+        ...(opts?.take != null ? { take: opts.take } : {}),
+      }),
+      this.prisma.visit.count({ where }),
+    ]);
+    return { data, total };
   }
 
   findById(id: string): Promise<Visit | null> {

@@ -23,6 +23,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @ApiTags('bookings')
 @ApiBearerAuth('JWT')
@@ -34,44 +35,15 @@ export class BookingsController {
 
   @Get()
   @ApiOperation({ summary: "Qabullar ro'yxati" })
-  @ApiQuery({
-    name: 'search',
-    required: false,
-    description: "Bemor ismi bo'yicha",
-  })
-  @ApiQuery({
-    name: 'status',
-    required: false,
-    example: 'all',
-    description: 'all yoki holat',
-  })
-  @ApiQuery({
-    name: 'source',
-    required: false,
-    example: 'all',
-    description: 'all yoki manba',
-  })
-  @ApiQuery({
-    name: 'patientId',
-    required: false,
-    description: 'Faqat shu bemorga tegishli qabullar',
-  })
-  @ApiQuery({ name: 'limit', required: false })
   findAll(
-    @Query('search') search?: string,
-    @Query('status') status?: string,
-    @Query('source') source?: string,
-    @Query('patientId') patientId?: string,
-    @Query('limit') limitStr?: string,
+    @Query() query: PaginationQueryDto & {
+      status?: string;
+      source?: string;
+      patientId?: string;
+      dateRange?: 'today' | 'week' | 'month' | 'all';
+    },
   ) {
-    const limit = limitStr != null ? Number.parseInt(limitStr, 10) : undefined;
-    return this.bookingsService.findAll({
-      search,
-      status,
-      source,
-      patientId,
-      limit,
-    });
+    return this.bookingsService.findAll(query);
   }
 
   @Get(':id')

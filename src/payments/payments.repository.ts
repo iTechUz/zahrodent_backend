@@ -6,15 +6,20 @@ import { PrismaService } from '../database/prisma.service';
 export class PaymentsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(
+  async findAll(
     where?: Prisma.PaymentWhereInput,
-    opts?: { take?: number },
-  ): Promise<Payment[]> {
-    return this.prisma.payment.findMany({
-      where,
-      orderBy: { date: 'desc' },
-      ...(opts?.take != null ? { take: opts.take } : {}),
-    });
+    opts?: { skip?: number; take?: number },
+  ): Promise<{ data: Payment[]; total: number }> {
+    const [data, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        orderBy: { date: 'desc' },
+        ...(opts?.skip != null ? { skip: opts.skip } : {}),
+        ...(opts?.take != null ? { take: opts.take } : {}),
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+    return { data, total };
   }
 
   findById(id: string): Promise<Payment | null> {

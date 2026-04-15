@@ -6,11 +6,20 @@ import { PrismaService } from '../database/prisma.service';
 export class ServicesRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(where?: Prisma.ServiceWhereInput): Promise<Service[]> {
-    return this.prisma.service.findMany({
-      where,
-      orderBy: [{ category: 'asc' }, { name: 'asc' }],
-    });
+  async findAll(
+    where?: Prisma.ServiceWhereInput,
+    opts?: { skip?: number; take?: number },
+  ): Promise<{ data: Service[]; total: number }> {
+    const [data, total] = await Promise.all([
+      this.prisma.service.findMany({
+        where,
+        orderBy: [{ category: 'asc' }, { name: 'asc' }],
+        ...(opts?.skip != null ? { skip: opts.skip } : {}),
+        ...(opts?.take != null ? { take: opts.take } : {}),
+      }),
+      this.prisma.service.count({ where }),
+    ]);
+    return { data, total };
   }
 
   findById(id: string): Promise<Service | null> {

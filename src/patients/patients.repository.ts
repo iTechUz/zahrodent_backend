@@ -6,15 +6,20 @@ import { PrismaService } from '../database/prisma.service';
 export class PatientsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(
+  async findAll(
     where?: Prisma.PatientWhereInput,
-    opts?: { take?: number },
-  ): Promise<Patient[]> {
-    return this.prisma.patient.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      ...(opts?.take != null ? { take: opts.take } : {}),
-    });
+    opts?: { skip?: number; take?: number },
+  ): Promise<{ data: Patient[]; total: number }> {
+    const [data, total] = await Promise.all([
+      this.prisma.patient.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        ...(opts?.skip != null ? { skip: opts.skip } : {}),
+        ...(opts?.take != null ? { take: opts.take } : {}),
+      }),
+      this.prisma.patient.count({ where }),
+    ]);
+    return { data, total };
   }
 
   findById(id: string): Promise<Patient | null> {

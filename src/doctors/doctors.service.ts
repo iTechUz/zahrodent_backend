@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Doctor } from '@prisma/client';
+import { Doctor, Prisma } from '@prisma/client';
 import { DoctorsRepository } from './doctors.repository';
+import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
 
@@ -8,10 +9,22 @@ import { UpdateDoctorDto } from './dto/update-doctor.dto';
 export class DoctorsService {
   constructor(private readonly doctorsRepository: DoctorsRepository) {}
 
-  findAll() {
-    return this.doctorsRepository
-      .findAll()
-      .then((rows) => rows.map((d) => this.toResponse(d)));
+  async findAll(query: PaginationQueryDto & { specialty?: string }): Promise<PaginatedResponse<any>> {
+    const { page = 0, limit = 10, search, specialty } = query;
+    const skip = page * limit;
+
+    const where: Prisma.DoctorWhereInput = {};
+
+    if (specialty && specialty !== 'all') {
+      where.specialty = specialty;
+    }
+
+    if (search?.trim()) {
+      where.name = { contains: search, mode: 'insensitive' };
+    }
+
+    const { data, total } = await this.doctorsRepository.findAll(where, { skip, take: limit });
+    return { data: data.map((d) => this.toResponse(d)), total };
   }
 
   async findOne(id: string) {

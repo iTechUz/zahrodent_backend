@@ -4,43 +4,61 @@ import { BookingsRepository } from './bookings.repository';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 import { toDateOnlyString } from '../common/utils/date.util';
+import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
 
 @Injectable()
 export class BookingsService {
   constructor(private readonly bookingsRepository: BookingsRepository) {}
 
-  async findAll(query: {
-    search?: string;
+  async findAll(query: PaginationQueryDto & {
     status?: string;
     source?: string;
     patientId?: string;
-    limit?: number;
-  }) {
+    dateRange?: 'today' | 'week' | 'month' | 'all';
+  }): Promise<PaginatedResponse<any>> {
+    const { page = 0, limit = 10, search, status, source, patientId, dateRange = 'all' } = query;
+    const skip = page * limit;
+
     const where: Prisma.BookingWhereInput = {};
-    if (query.patientId) {
-      where.patientId = query.patientId;
-    }
-    if (query.status && query.status !== 'all') {
-      where.status = query.status;
-    }
-    if (query.source && query.source !== 'all') {
-      where.source = query.source;
-    }
-    if (query.search?.trim()) {
-      const s = query.search.trim();
+
+    if (patientId) where.patientId = patientId;
+    if (status && status !== 'all') where.status = status;
+    if (source && source !== 'all') where.source = source;
+
+    if (search?.trim()) {
       where.patient = {
         OR: [
-          { firstName: { contains: s, mode: 'insensitive' } },
-          { lastName: { contains: s, mode: 'insensitive' } },
+          { firstName: { contains: search.trim(), mode: 'insensitive' } },
+          { lastName: { contains: search.trim(), mode: 'insensitive' } },
         ],
       };
     }
-    const take =
-      query.limit != null && Number.isFinite(query.limit)
-        ? Math.min(500, Math.max(1, Math.floor(query.limit)))
-        : undefined;
-    const rows = await this.bookingsRepository.findAll(where, { take });
-    return rows.map((b) => this.toResponse(b));
+
+    if (dateRange !== 'all') {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const end = new Date();
+
+      if (dateRange === 'today') {
+        end.setHours(23, 59, 59, 999);
+      } else if (dateRange === 'week') {
+        // Start of week (Monday)
+        const day = start.getDay() || 7;
+        if (day !== 1) start.setHours(-24 * (day - 1));
+        end.setDate(start.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+      } else if (dateRange === 'month') {
+        start.setDate(1);
+        end.setMonth(start.getMonth() + 1);
+        end.setDate(0);
+        end.setHours(23, 59, 59, 999);
+      }
+
+      where.date = { gte: start, lte: end };
+    }
+
+    const { data, total } = await this.bookingsRepository.findAll(where, { skip, take: limit });
+    return { data: data.map((b) => this.toResponse(b)), total };
   }
 
   async findOne(id: string) {

@@ -5,6 +5,7 @@ import { CreateNotificationDto } from './dto/create-notification.dto';
 import { BookingsRepository } from '../bookings/bookings.repository';
 import { PatientsRepository } from '../patients/patients.repository';
 import { EskizService } from './eskiz.service';
+import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
 
 type ReminderType = 'sms' | 'telegram';
 type ReminderStatus = 'sent' | 'failed';
@@ -18,9 +19,12 @@ export class NotificationsService {
     private readonly eskiz: EskizService,
   ) {}
 
-  async findAll() {
-    const rows = await this.notificationsRepository.findAll();
-    return rows.map((n) => this.toResponse(n));
+  async findAll(query: PaginationQueryDto): Promise<PaginatedResponse<any>> {
+    const { page = 0, limit = 10 } = query;
+    const skip = page * limit;
+
+    const { data, total } = await this.notificationsRepository.findAll({ skip, take: limit });
+    return { data: data.map((n) => this.toResponse(n)), total };
   }
 
   async create(dto: CreateNotificationDto) {

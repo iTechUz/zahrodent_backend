@@ -4,27 +4,32 @@ import { PatientsRepository } from './patients.repository';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
 import { toDateOnlyString } from '../common/utils/date.util';
+import { PaginatedResponse, PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @Injectable()
 export class PatientsService {
   constructor(private readonly patientsRepository: PatientsRepository) {}
 
-  async findAll(search?: string, limit?: number) {
-    const where: Prisma.PatientWhereInput | undefined = search?.trim()
-      ? {
-          OR: [
-            { firstName: { contains: search, mode: 'insensitive' } },
-            { lastName: { contains: search, mode: 'insensitive' } },
-            { phone: { contains: search, mode: 'insensitive' } },
-          ],
-        }
-      : undefined;
-    const take =
-      limit != null && Number.isFinite(limit)
-        ? Math.min(500, Math.max(1, Math.floor(limit)))
-        : undefined;
-    const rows = await this.patientsRepository.findAll(where, { take });
-    return rows.map((p) => this.toResponse(p));
+  async findAll(query: PaginationQueryDto & { source?: string }): Promise<PaginatedResponse<any>> {
+    const { page = 0, limit = 10, search, source } = query;
+    const skip = page * limit;
+
+    const where: Prisma.PatientWhereInput = {};
+
+    if (source && source !== 'all') {
+      where.source = source;
+    }
+
+    if (search?.trim()) {
+      where.OR = [
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const { data, total } = await this.patientsRepository.findAll(where, { skip, take: limit });
+    return { data: data.map((p) => this.toResponse(p)), total };
   }
 
   async findOne(id: string) {

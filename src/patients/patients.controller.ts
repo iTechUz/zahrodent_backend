@@ -23,6 +23,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @ApiTags('patients')
 @ApiBearerAuth('JWT')
@@ -34,19 +35,8 @@ export class PatientsController {
 
   @Get()
   @ApiOperation({ summary: "Bemorlar ro'yxati" })
-  @ApiQuery({
-    name: 'search',
-    required: false,
-    description: 'Ism, familiya yoki telefon',
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    description: 'Maks 500, ixtiyoriy',
-  })
-  findAll(@Query('search') search?: string, @Query('limit') limitStr?: string) {
-    const limit = limitStr != null ? Number.parseInt(limitStr, 10) : undefined;
-    return this.patientsService.findAll(search, limit);
+  findAll(@Query() query: PaginationQueryDto & { source?: string }) {
+    return this.patientsService.findAll(query);
   }
 
   @Get(':id')

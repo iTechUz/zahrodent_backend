@@ -22,6 +22,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @ApiTags('visits')
 @ApiBearerAuth('JWT')
@@ -33,13 +34,8 @@ export class VisitsController {
 
   @Get()
   @ApiOperation({ summary: 'Tashriflar' })
-  @ApiQuery({ name: 'patientId', required: false })
-  @ApiQuery({ name: 'doctorId', required: false })
-  findAll(
-    @Query('patientId') patientId?: string,
-    @Query('doctorId') doctorId?: string,
-  ) {
-    return this.visitsService.findAll(patientId, doctorId);
+  findAll(@Query() query: PaginationQueryDto & { patientId?: string; doctorId?: string }) {
+    return this.visitsService.findAll(query);
   }
 
   @Get(':id')

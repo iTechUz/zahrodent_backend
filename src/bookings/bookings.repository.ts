@@ -6,15 +6,20 @@ import { PrismaService } from '../database/prisma.service';
 export class BookingsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(
+  async findAll(
     where?: Prisma.BookingWhereInput,
-    opts?: { take?: number },
-  ): Promise<Booking[]> {
-    return this.prisma.booking.findMany({
-      where,
-      orderBy: [{ date: 'desc' }, { time: 'desc' }],
-      ...(opts?.take != null ? { take: opts.take } : {}),
-    });
+    opts?: { skip?: number; take?: number },
+  ): Promise<{ data: Booking[]; total: number }> {
+    const [data, total] = await Promise.all([
+      this.prisma.booking.findMany({
+        where,
+        orderBy: [{ date: 'desc' }, { time: 'desc' }],
+        ...(opts?.skip != null ? { skip: opts.skip } : {}),
+        ...(opts?.take != null ? { take: opts.take } : {}),
+      }),
+      this.prisma.booking.count({ where }),
+    ]);
+    return { data, total };
   }
 
   markReminderSent(bookingIds: string[], at: Date): Promise<void> {

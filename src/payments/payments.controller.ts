@@ -23,6 +23,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_FINANCE } from '../common/constants/role-groups';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @ApiTags('payments')
 @ApiBearerAuth('JWT')
@@ -34,22 +35,15 @@ export class PaymentsController {
 
   @Get()
   @ApiOperation({ summary: "To'lovlar ro'yxati" })
-  @ApiQuery({ name: 'search', required: false })
-  @ApiQuery({ name: 'status', required: false, example: 'all' })
-  @ApiQuery({
-    name: 'patientId',
-    required: false,
-    description: 'Faqat shu bemorga tegishlilar',
-  })
-  @ApiQuery({ name: 'limit', required: false })
   findAll(
-    @Query('search') search?: string,
-    @Query('status') status?: string,
-    @Query('patientId') patientId?: string,
-    @Query('limit') limitStr?: string,
+    @Query() query: PaginationQueryDto & {
+      status?: string;
+      patientId?: string;
+      method?: string;
+      dateRange?: 'today' | 'week' | 'month' | 'all';
+    },
   ) {
-    const limit = limitStr != null ? Number.parseInt(limitStr, 10) : undefined;
-    return this.paymentsService.findAll(search, status, patientId, limit);
+    return this.paymentsService.findAll(query);
   }
 
   @Get(':id')

@@ -23,6 +23,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @ApiTags('services')
 @ApiBearerAuth('JWT')
@@ -34,17 +35,8 @@ export class ServicesController {
 
   @Get()
   @ApiOperation({ summary: 'Xizmatlar katalogi' })
-  @ApiQuery({ name: 'search', required: false })
-  @ApiQuery({
-    name: 'category',
-    required: false,
-    description: 'all yoki kategoriya nomi',
-  })
-  findAll(
-    @Query('search') search?: string,
-    @Query('category') category?: string,
-  ) {
-    return this.servicesService.findAll(search, category);
+  findAll(@Query() query: PaginationQueryDto & { category?: string }) {
+    return this.servicesService.findAll(query);
   }
 
   @Get(':id')

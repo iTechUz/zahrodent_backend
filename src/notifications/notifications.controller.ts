@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards, Query } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -11,6 +11,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @ApiTags('notifications')
 @ApiBearerAuth('JWT')
@@ -22,8 +23,8 @@ export class NotificationsController {
 
   @Get()
   @ApiOperation({ summary: 'Bildirishnomalar tarixi' })
-  findAll() {
-    return this.notificationsService.findAll();
+  findAll(@Query() query: PaginationQueryDto) {
+    return this.notificationsService.findAll(query);
   }
 
   @Post()

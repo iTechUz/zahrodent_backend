@@ -4,22 +4,27 @@ import { PaymentsRepository } from './payments.repository';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { toDateOnlyString } from '../common/utils/date.util';
+import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
 
 @Injectable()
 export class PaymentsService {
   constructor(private readonly paymentsRepository: PaymentsRepository) {}
 
-  findAll(
-    search?: string,
-    status?: string,
-    patientId?: string,
-    limit?: number,
-  ) {
+  async findAll(query: PaginationQueryDto & {
+    status?: string;
+    patientId?: string;
+    method?: string;
+    dateRange?: 'today' | 'week' | 'month' | 'all';
+  }): Promise<PaginatedResponse<any>> {
+    const { page = 0, limit = 10, search, status, patientId, method, dateRange = 'all' } = query;
+    const skip = page * limit;
+
     const where: Prisma.PaymentWhereInput = {};
+
     if (patientId) where.patientId = patientId;
-    if (status && status !== 'all') {
-      where.status = status;
-    }
+    if (status && status !== 'all') where.status = status;
+    if (method && method !== 'all') where.method = method;
+
     if (search?.trim()) {
       const s = search.trim();
       where.OR = [
@@ -34,13 +39,31 @@ export class PaymentsService {
         },
       ];
     }
-    const take =
-      limit != null && Number.isFinite(limit)
-        ? Math.min(500, Math.max(1, Math.floor(limit)))
-        : undefined;
-    return this.paymentsRepository
-      .findAll(where, { take })
-      .then((rows) => rows.map((p) => this.toResponse(p)));
+
+    if (dateRange !== 'all') {
+      const start = new Date();
+      start.setHours(0, 0, 0, 0);
+      const end = new Date();
+
+      if (dateRange === 'today') {
+        end.setHours(23, 59, 59, 999);
+      } else if (dateRange === 'week') {
+        const day = start.getDay() || 7;
+        if (day !== 1) start.setHours(-24 * (day - 1));
+        end.setDate(start.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+      } else if (dateRange === 'month') {
+        start.setDate(1);
+        end.setMonth(start.getMonth() + 1);
+        end.setDate(0);
+        end.setHours(23, 59, 59, 999);
+      }
+
+      where.date = { gte: start, lte: end };
+    }
+
+    const { data, total } = await this.paymentsRepository.findAll(where, { skip, take: limit });
+    return { data: data.map((p) => this.toResponse(p)), total };
   }
 
   async findOne(id: string) {

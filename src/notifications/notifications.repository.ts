@@ -6,10 +6,18 @@ import { PrismaService } from '../database/prisma.service';
 export class NotificationsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(): Promise<Notification[]> {
-    return this.prisma.notification.findMany({
-      orderBy: { sentAt: 'desc' },
-    });
+  async findAll(
+    opts?: { skip?: number; take?: number },
+  ): Promise<{ data: Notification[]; total: number }> {
+    const [data, total] = await Promise.all([
+      this.prisma.notification.findMany({
+        orderBy: { sentAt: 'desc' },
+        ...(opts?.skip != null ? { skip: opts.skip } : {}),
+        ...(opts?.take != null ? { take: opts.take } : {}),
+      }),
+      this.prisma.notification.count(),
+    ]);
+    return { data, total };
   }
 
   create(data: Prisma.NotificationCreateInput): Promise<Notification> {

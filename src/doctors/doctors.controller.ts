@@ -6,8 +6,10 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import {
   ApiBearerAuth,
   ApiForbiddenResponse,
@@ -36,8 +38,8 @@ export class DoctorsController {
 
   @Get()
   @ApiOperation({ summary: "Shifokorlar ro'yxati" })
-  findAll() {
-    return this.doctorsService.findAll();
+  findAll(@Query() query: PaginationQueryDto & { specialty?: string }) {
+    return this.doctorsService.findAll(query);
   }
 
   @Get(':id')
