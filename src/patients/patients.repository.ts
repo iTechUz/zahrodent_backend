@@ -22,6 +22,19 @@ export class PatientsRepository {
     return { data, total };
   }
 
+  count(where?: Prisma.PatientWhereInput): Promise<number> {
+    return this.prisma.patient.count({ where });
+  }
+
+  groupBySource() {
+    return this.prisma.patient.groupBy({
+      by: ['source'],
+      _count: { source: true },
+      orderBy: { _count: { source: 'desc' } },
+      take: 1,
+    });
+  }
+
   findById(id: string): Promise<Patient | null> {
     return this.prisma.patient.findUnique({ where: { id } });
   }

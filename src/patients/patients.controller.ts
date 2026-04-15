@@ -33,6 +33,12 @@ import { PaginationQueryDto } from '../common/dto/pagination.dto';
 export class PatientsController {
   constructor(private readonly patientsService: PatientsService) {}
 
+  @Get('stats')
+  @ApiOperation({ summary: 'Stats for patients page' })
+  getStats() {
+    return this.patientsService.getStats();
+  }
+
   @Get()
   @ApiOperation({ summary: "Bemorlar ro'yxati" })
   findAll(@Query() query: PaginationQueryDto & { source?: string }) {

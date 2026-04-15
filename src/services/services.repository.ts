@@ -22,6 +22,24 @@ export class ServicesRepository {
     return { data, total };
   }
 
+  count(where?: Prisma.ServiceWhereInput): Promise<number> {
+    return this.prisma.service.count({ where });
+  }
+
+  async countCategories(): Promise<number> {
+    const result = await this.prisma.service.groupBy({
+      by: ['category'],
+    });
+    return result.length;
+  }
+
+  async getAvgPrice(): Promise<number> {
+    const result = await this.prisma.service.aggregate({
+      _avg: { price: true },
+    });
+    return Math.round(result._avg.price || 0);
+  }
+
   findById(id: string): Promise<Service | null> {
     return this.prisma.service.findUnique({ where: { id } });
   }

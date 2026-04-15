@@ -22,6 +22,14 @@ export class PaymentsRepository {
     return { data, total };
   }
 
+  async sumAmount(where: Prisma.PaymentWhereInput): Promise<number> {
+    const result = await this.prisma.payment.aggregate({
+      where,
+      _sum: { amount: true },
+    });
+    return result._sum.amount || 0;
+  }
+
   findById(id: string): Promise<Payment | null> {
     return this.prisma.payment.findUnique({ where: { id } });
   }

@@ -118,6 +118,32 @@ export class BookingsService {
     if (!b) throw new NotFoundException('Booking not found');
   }
 
+  async getStats() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+
+    const [todayCount, pendingCount, completedToday] = await Promise.all([
+      this.bookingsRepository.count({
+        date: { gte: today, lt: tomorrow },
+      }),
+      this.bookingsRepository.count({
+        status: 'pending',
+      }),
+      this.bookingsRepository.count({
+        status: 'completed',
+        date: { gte: today, lt: tomorrow },
+      }),
+    ]);
+
+    return {
+      today: todayCount,
+      pending: pendingCount,
+      completedToday,
+    };
+  }
+
   private toResponse(b: Booking) {
     return {
       id: b.id,

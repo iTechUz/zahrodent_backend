@@ -116,6 +116,28 @@ export class PaymentsService {
     return { id };
   }
 
+  async getStats() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+
+    const [totalRevenue, pendingAmount, todayRevenue] = await Promise.all([
+      this.paymentsRepository.sumAmount({ status: 'completed' }),
+      this.paymentsRepository.sumAmount({ status: 'pending' }),
+      this.paymentsRepository.sumAmount({
+        status: 'completed',
+        date: { gte: today, lt: tomorrow },
+      }),
+    ]);
+
+    return {
+      totalRevenue: totalRevenue || 0,
+      pendingAmount: pendingAmount || 0,
+      todayRevenue: todayRevenue || 0,
+    };
+  }
+
   private async ensureExists(id: string) {
     const p = await this.paymentsRepository.findById(id);
     if (!p) throw new NotFoundException('Payment not found');

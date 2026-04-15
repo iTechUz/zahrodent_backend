@@ -22,6 +22,10 @@ export class BookingsRepository {
     return { data, total };
   }
 
+  count(where?: Prisma.BookingWhereInput): Promise<number> {
+    return this.prisma.booking.count({ where });
+  }
+
   markReminderSent(bookingIds: string[], at: Date): Promise<void> {
     if (!bookingIds.length) return Promise.resolve();
     return this.prisma.booking

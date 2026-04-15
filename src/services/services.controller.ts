@@ -33,6 +33,12 @@ import { PaginationQueryDto } from '../common/dto/pagination.dto';
 export class ServicesController {
   constructor(private readonly servicesService: ServicesService) {}
 
+  @Get('stats')
+  @ApiOperation({ summary: 'Stats for services page' })
+  getStats() {
+    return this.servicesService.getStats();
+  }
+
   @Get()
   @ApiOperation({ summary: 'Xizmatlar katalogi' })
   findAll(@Query() query: PaginationQueryDto & { category?: string }) {

@@ -66,6 +66,18 @@ export class ServicesService {
     return { id };
   }
 
+  async getStats() {
+    const totalCount = await this.servicesRepository.count();
+    const categoriesCount = await this.servicesRepository.countCategories();
+    const avgPrice = await this.servicesRepository.getAvgPrice();
+
+    return {
+      totalCount,
+      categoriesCount,
+      avgPrice,
+    };
+  }
+
   private async ensureExists(id: string) {
     const s = await this.servicesRepository.findById(id);
     if (!s) throw new NotFoundException('Service not found');

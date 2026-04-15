@@ -73,6 +73,22 @@ export class DoctorsService {
     if (!d) throw new NotFoundException('Doctor not found');
   }
 
+  async getStats() {
+    const total = await this.doctorsRepository.count();
+    
+    // Active today: doctors with at least one booking today
+    const { count: activeToday } = await this.doctorsRepository.getActiveCountToday();
+    
+    // Total visits count (historical)
+    const { count: totalVisits } = await this.doctorsRepository.getTotalVisitsCount();
+
+    return {
+      total,
+      activeToday,
+      totalVisits,
+    };
+  }
+
   private toResponse(d: Doctor) {
     return {
       id: d.id,

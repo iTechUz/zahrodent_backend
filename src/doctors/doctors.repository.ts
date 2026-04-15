@@ -22,6 +22,33 @@ export class DoctorsRepository {
     return { data, total };
   }
 
+  count(where?: Prisma.DoctorWhereInput): Promise<number> {
+    return this.prisma.doctor.count({ where });
+  }
+
+  async getActiveCountToday() {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+
+    const count = await this.prisma.doctor.count({
+      where: {
+        bookings: {
+          some: {
+            date: { gte: today, lt: tomorrow },
+          },
+        },
+      },
+    });
+    return { count };
+  }
+
+  async getTotalVisitsCount() {
+    const count = await this.prisma.visit.count();
+    return { count };
+  }
+
   findById(id: string): Promise<Doctor | null> {
     return this.prisma.doctor.findUnique({ where: { id } });
   }

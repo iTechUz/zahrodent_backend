@@ -36,6 +36,12 @@ import {
 export class DoctorsController {
   constructor(private readonly doctorsService: DoctorsService) {}
 
+  @Get('stats')
+  @ApiOperation({ summary: 'Stats for doctors page' })
+  getStats() {
+    return this.doctorsService.getStats();
+  }
+
   @Get()
   @ApiOperation({ summary: "Shifokorlar ro'yxati" })
   findAll(@Query() query: PaginationQueryDto & { specialty?: string }) {

@@ -33,6 +33,12 @@ import { PaginationQueryDto } from '../common/dto/pagination.dto';
 export class BookingsController {
   constructor(private readonly bookingsService: BookingsService) {}
 
+  @Get('stats')
+  @ApiOperation({ summary: 'Stats for bookings page' })
+  getStats() {
+    return this.bookingsService.getStats();
+  }
+
   @Get()
   @ApiOperation({ summary: "Qabullar ro'yxati" })
   findAll(

@@ -84,6 +84,27 @@ export class PatientsService {
     if (!p) throw new NotFoundException('Patient not found');
   }
 
+  async getStats() {
+    const total = await this.patientsRepository.count();
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const newThisMonth = await this.patientsRepository.count({
+      createdAt: { gte: startOfMonth },
+    });
+
+    // Top source
+    const sources = await this.patientsRepository.groupBySource();
+    const topSource = sources[0]?.source || 'N/A';
+
+    return {
+      total,
+      newThisMonth,
+      topSource,
+    };
+  }
+
   private toResponse(p: Patient) {
     return {
       id: p.id,
