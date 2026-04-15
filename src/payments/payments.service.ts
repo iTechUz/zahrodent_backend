@@ -16,8 +16,10 @@ export class PaymentsService {
     method?: string;
     dateRange?: 'today' | 'week' | 'month' | 'all';
   }): Promise<PaginatedResponse<any>> {
-    const { page = 0, limit = 10, search, status, patientId, method, dateRange = 'all' } = query;
-    const skip = page * limit;
+    const { search, status, patientId, method, dateRange = 'all' } = query;
+    const pageNum = Number(query.page || 0);
+    const limitNum = Number(query.limit || 10);
+    const skip = pageNum * limitNum;
 
     const where: Prisma.PaymentWhereInput = {};
 
@@ -62,7 +64,7 @@ export class PaymentsService {
       where.date = { gte: start, lte: end };
     }
 
-    const { data, total } = await this.paymentsRepository.findAll(where, { skip, take: limit });
+    const { data, total } = await this.paymentsRepository.findAll(where, { skip, take: limitNum });
     return { data: data.map((p) => this.toResponse(p)), total };
   }
 
@@ -83,6 +85,7 @@ export class PaymentsService {
       description: dto.description,
       discount: dto.discount,
       service: dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
+      visit: dto.visitId ? { connect: { id: dto.visitId } } : undefined,
     });
     return this.toResponse(p);
   }
@@ -105,6 +108,12 @@ export class PaymentsService {
           ? undefined
           : dto.serviceId
             ? { connect: { id: dto.serviceId } }
+            : { disconnect: true },
+      visit:
+        dto.visitId === undefined
+          ? undefined
+          : dto.visitId
+            ? { connect: { id: dto.visitId } }
             : { disconnect: true },
     });
     return this.toResponse(p);
@@ -138,6 +147,10 @@ export class PaymentsService {
     };
   }
 
+  async getDoctorStats() {
+    return this.paymentsRepository.getDoctorStats();
+  }
+
   private async ensureExists(id: string) {
     const p = await this.paymentsRepository.findById(id);
     if (!p) throw new NotFoundException('Payment not found');
@@ -154,6 +167,7 @@ export class PaymentsService {
       description: p.description,
       discount: p.discount ?? undefined,
       serviceId: p.serviceId ?? undefined,
+      visitId: p.visitId ?? undefined,
     };
   }
 }

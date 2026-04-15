@@ -16,8 +16,10 @@ export class BookingsService {
     patientId?: string;
     dateRange?: 'today' | 'week' | 'month' | 'all';
   }): Promise<PaginatedResponse<any>> {
-    const { page = 0, limit = 10, search, status, source, patientId, dateRange = 'all' } = query;
-    const skip = page * limit;
+    const { search, status, source, patientId, dateRange = 'all' } = query;
+    const pageNum = Number(query.page || 0);
+    const limitNum = Number(query.limit || 10);
+    const skip = pageNum * limitNum;
 
     const where: Prisma.BookingWhereInput = {};
 
@@ -57,7 +59,7 @@ export class BookingsService {
       where.date = { gte: start, lte: end };
     }
 
-    const { data, total } = await this.bookingsRepository.findAll(where, { skip, take: limit });
+    const { data, total } = await this.bookingsRepository.findAll(where, { skip, take: limitNum });
     return { data: data.map((b) => this.toResponse(b)), total };
   }
 

@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsInt, IsIn, IsOptional, IsString, Min, MinLength } from 'class-validator';
 
 const STATUSES = ['not-started', 'in-progress', 'completed'] as const;
 
@@ -33,4 +33,9 @@ export class CreateVisitDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  price?: number;
 }

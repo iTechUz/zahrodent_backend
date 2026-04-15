@@ -11,8 +11,10 @@ export class VisitsService {
   constructor(private readonly visitsRepository: VisitsRepository) {}
 
   async findAll(query: PaginationQueryDto & { patientId?: string; doctorId?: string }): Promise<PaginatedResponse<any>> {
-    const { page = 0, limit = 10, search, patientId, doctorId } = query;
-    const skip = page * limit;
+    const { search, patientId, doctorId } = query;
+    const pageNum = Number(query.page || 0);
+    const limitNum = Number(query.limit || 10);
+    const skip = pageNum * limitNum;
 
     const where: Prisma.VisitWhereInput = {};
 
@@ -27,7 +29,7 @@ export class VisitsService {
       ];
     }
 
-    const { data, total } = await this.visitsRepository.findAll(where, { skip, take: limit });
+    const { data, total } = await this.visitsRepository.findAll(where, { skip, take: limitNum });
     return { data: data.map((v) => this.toResponse(v)), total };
   }
 
@@ -48,6 +50,7 @@ export class VisitsService {
       diagnosis: dto.diagnosis ?? '',
       treatment: dto.treatment ?? '',
       notes: dto.notes ?? '',
+      price: dto.price ?? 0,
     });
     return this.toResponse(v);
   }
@@ -60,6 +63,7 @@ export class VisitsService {
       diagnosis: dto.diagnosis,
       treatment: dto.treatment,
       notes: dto.notes,
+      price: dto.price,
       patient:
         dto.patientId === undefined
           ? undefined
@@ -94,6 +98,7 @@ export class VisitsService {
       diagnosis: v.diagnosis,
       treatment: v.treatment,
       notes: v.notes,
+      price: v.price || 0,
     };
   }
 }

@@ -20,10 +20,11 @@ export class NotificationsService {
   ) {}
 
   async findAll(query: PaginationQueryDto): Promise<PaginatedResponse<any>> {
-    const { page = 0, limit = 10 } = query;
-    const skip = page * limit;
+    const pageNum = Number(query.page || 0);
+    const limitNum = Number(query.limit || 10);
+    const skip = pageNum * limitNum;
 
-    const { data, total } = await this.notificationsRepository.findAll({ skip, take: limit });
+    const { data, total } = await this.notificationsRepository.findAll({ skip, take: limitNum });
     return { data: data.map((n) => this.toResponse(n)), total };
   }
 
@@ -55,8 +56,8 @@ export class NotificationsService {
   }
 
   async sendReminders() {
-    const bookings = await this.bookingsRepository.findAll({
-      status: { in: ['confirmed', 'pending'] },
+    const { data: bookings } = await this.bookingsRepository.findAll({
+      status: { in: ['confirmed', 'pending'] } as any,
       reminderSentAt: null,
     });
     if (!bookings.length) {

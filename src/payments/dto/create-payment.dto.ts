@@ -44,4 +44,8 @@ export class CreatePaymentDto {
   @IsOptional()
   @IsString()
   date?: string;
+
+  @IsOptional()
+  @IsString()
+  visitId?: string;
 }

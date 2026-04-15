@@ -39,6 +39,12 @@ export class PaymentsController {
     return this.paymentsService.getStats();
   }
 
+  @Get('doctor-stats')
+  @ApiOperation({ summary: 'Revenue breakdown per doctor' })
+  getDoctorStats() {
+    return this.paymentsService.getDoctorStats();
+  }
+
   @Get()
   @ApiOperation({ summary: "To'lovlar ro'yxati" })
   findAll(

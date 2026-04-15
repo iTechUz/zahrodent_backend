@@ -11,8 +11,10 @@ export class PatientsService {
   constructor(private readonly patientsRepository: PatientsRepository) {}
 
   async findAll(query: PaginationQueryDto & { source?: string }): Promise<PaginatedResponse<any>> {
-    const { page = 0, limit = 10, search, source } = query;
-    const skip = page * limit;
+    const { search, source } = query;
+    const pageNum = Number(query.page || 0);
+    const limitNum = Number(query.limit || 10);
+    const skip = pageNum * limitNum;
 
     const where: Prisma.PatientWhereInput = {};
 
@@ -28,7 +30,7 @@ export class PatientsService {
       ];
     }
 
-    const { data, total } = await this.patientsRepository.findAll(where, { skip, take: limit });
+    const { data, total } = await this.patientsRepository.findAll(where, { skip, take: limitNum });
     return { data: data.map((p) => this.toResponse(p)), total };
   }
 

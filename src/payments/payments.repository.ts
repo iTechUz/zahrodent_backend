@@ -30,6 +30,34 @@ export class PaymentsRepository {
     return result._sum.amount || 0;
   }
 
+  async getDoctorStats(): Promise<{ doctorId: string; total: number }[]> {
+    const result = await this.prisma.payment.groupBy({
+      by: ['visitId'],
+      where: { status: 'paid', visitId: { not: null } },
+      _sum: { amount: true },
+    });
+
+    // Map visitId → doctorId via visits table
+    const visitIds = result.map((r) => r.visitId).filter(Boolean) as string[];
+    const visits = await this.prisma.visit.findMany({
+      where: { id: { in: visitIds } },
+      select: { id: true, doctorId: true },
+    });
+
+    const visitDoctorMap = new Map(visits.map((v) => [v.id, v.doctorId]));
+
+    // Aggregate by doctorId
+    const doctorTotals = new Map<string, number>();
+    for (const row of result) {
+      if (!row.visitId) continue;
+      const doctorId = visitDoctorMap.get(row.visitId);
+      if (!doctorId) continue;
+      doctorTotals.set(doctorId, (doctorTotals.get(doctorId) ?? 0) + (row._sum.amount ?? 0));
+    }
+
+    return Array.from(doctorTotals.entries()).map(([doctorId, total]) => ({ doctorId, total }));
+  }
+
   findById(id: string): Promise<Payment | null> {
     return this.prisma.payment.findUnique({ where: { id } });
   }
