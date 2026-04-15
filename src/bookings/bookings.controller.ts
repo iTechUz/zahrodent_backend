@@ -24,6 +24,8 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
 
 @ApiTags('bookings')
 @ApiBearerAuth('JWT')
@@ -35,8 +37,8 @@ export class BookingsController {
 
   @Get('stats')
   @ApiOperation({ summary: 'Stats for bookings page' })
-  getStats() {
-    return this.bookingsService.getStats();
+  getStats(@GetUser() user: AuthUserView) {
+    return this.bookingsService.getStats(user);
   }
 
   @Get()
@@ -48,15 +50,16 @@ export class BookingsController {
       patientId?: string;
       dateRange?: 'today' | 'week' | 'month' | 'all';
     },
+    @GetUser() user: AuthUserView,
   ) {
-    return this.bookingsService.findAll(query);
+    return this.bookingsService.findAll(query, user);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Bitta qabul' })
   @ApiParam({ name: 'id' })
-  findOne(@Param('id') id: string) {
-    return this.bookingsService.findOne(id);
+  findOne(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.bookingsService.findOne(id, user);
   }
 
   @Post()
@@ -68,14 +71,14 @@ export class BookingsController {
   @Patch(':id')
   @ApiOperation({ summary: "Qabulni yangilash (holat o'zgartirish)" })
   @ApiParam({ name: 'id' })
-  update(@Param('id') id: string, @Body() dto: UpdateBookingDto) {
-    return this.bookingsService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdateBookingDto, @GetUser() user: AuthUserView) {
+    return this.bookingsService.update(id, dto, user);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: "Qabulni o'chirish" })
   @ApiParam({ name: 'id' })
-  remove(@Param('id') id: string) {
-    return this.bookingsService.remove(id);
+  remove(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.bookingsService.remove(id, user);
   }
 }

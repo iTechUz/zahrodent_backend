@@ -5,12 +5,16 @@ import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
 import { toDateOnlyString } from '../common/utils/date.util';
 import { PaginatedResponse, PaginationQueryDto } from '../common/dto/pagination.dto';
+import { AuthUserView } from '../auth/auth.service';
 
 @Injectable()
 export class PatientsService {
   constructor(private readonly patientsRepository: PatientsRepository) {}
 
-  async findAll(query: PaginationQueryDto & { source?: string }): Promise<PaginatedResponse<any>> {
+  async findAll(
+    query: PaginationQueryDto & { source?: string },
+    user: AuthUserView,
+  ): Promise<PaginatedResponse<any>> {
     const { search, source } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
@@ -30,13 +34,48 @@ export class PatientsService {
       ];
     }
 
+    if (user.role === 'doctor') {
+      where.OR = undefined; // Clear the previous OR to avoid conflicts if needed, but better to combine
+      where.AND = [
+        {
+          OR: [
+            { bookings: { some: { doctorId: user.id } } },
+            { visits: { some: { doctorId: user.id } } },
+          ],
+        },
+      ];
+      if (search?.trim()) {
+        (where.AND as any[]).push({
+          OR: [
+            { firstName: { contains: search, mode: 'insensitive' } },
+            { lastName: { contains: search, mode: 'insensitive' } },
+            { phone: { contains: search, mode: 'insensitive' } },
+          ],
+        });
+      }
+    }
+
     const { data, total } = await this.patientsRepository.findAll(where, { skip, take: limitNum });
     return { data: data.map((p) => this.toResponse(p)), total };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUserView) {
     const p = await this.patientsRepository.findById(id);
     if (!p) throw new NotFoundException('Patient not found');
+
+    if (user.role === 'doctor') {
+      // Check if patient has any association with this doctor
+      const hasAccess = await this.patientsRepository.count({
+        id,
+        OR: [
+          { bookings: { some: { doctorId: user.id } } },
+          { visits: { some: { doctorId: user.id } } },
+        ],
+      });
+      if (!hasAccess) {
+        throw new NotFoundException('Patient not found (access restricted)');
+      }
+    }
     return this.toResponse(p);
   }
 
@@ -57,8 +96,8 @@ export class PatientsService {
     return this.toResponse(p);
   }
 
-  async update(id: string, dto: UpdatePatientDto) {
-    await this.ensureExists(id);
+  async update(id: string, dto: UpdatePatientDto, user: AuthUserView) {
+    await this.ensureExists(id, user);
     const p = await this.patientsRepository.update(id, {
       firstName: dto.firstName,
       lastName: dto.lastName,
@@ -75,24 +114,32 @@ export class PatientsService {
     return this.toResponse(p);
   }
 
-  async remove(id: string) {
-    await this.ensureExists(id);
+  async remove(id: string, user: AuthUserView) {
+    await this.ensureExists(id, user);
     await this.patientsRepository.delete(id);
     return { id };
   }
 
-  private async ensureExists(id: string) {
-    const p = await this.patientsRepository.findById(id);
-    if (!p) throw new NotFoundException('Patient not found');
+  private async ensureExists(id: string, user: AuthUserView) {
+    await this.findOne(id, user);
   }
 
-  async getStats() {
-    const total = await this.patientsRepository.count();
+  async getStats(user: AuthUserView) {
+    const where: Prisma.PatientWhereInput = {};
+    if (user.role === 'doctor') {
+      where.OR = [
+        { bookings: { some: { doctorId: user.id } } },
+        { visits: { some: { doctorId: user.id } } },
+      ];
+    }
+
+    const total = await this.patientsRepository.count(where);
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
     const newThisMonth = await this.patientsRepository.count({
+      ...where,
       createdAt: { gte: startOfMonth },
     });
 

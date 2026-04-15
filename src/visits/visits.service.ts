@@ -5,12 +5,16 @@ import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.
 import { CreateVisitDto } from './dto/create-visit.dto';
 import { UpdateVisitDto } from './dto/update-visit.dto';
 import { toDateOnlyString } from '../common/utils/date.util';
+import { AuthUserView } from '../auth/auth.service';
 
 @Injectable()
 export class VisitsService {
   constructor(private readonly visitsRepository: VisitsRepository) {}
 
-  async findAll(query: PaginationQueryDto & { patientId?: string; doctorId?: string }): Promise<PaginatedResponse<any>> {
+  async findAll(
+    query: PaginationQueryDto & { patientId?: string; doctorId?: string },
+    user: AuthUserView,
+  ): Promise<PaginatedResponse<any>> {
     const { search, patientId, doctorId } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
@@ -19,7 +23,12 @@ export class VisitsService {
     const where: Prisma.VisitWhereInput = {};
 
     if (patientId) where.patientId = patientId;
-    if (doctorId) where.doctorId = doctorId;
+
+    if (user.role === 'doctor') {
+      where.doctorId = user.id;
+    } else if (doctorId) {
+      where.doctorId = doctorId;
+    }
 
     if (search?.trim()) {
       const s = search.trim();
@@ -33,9 +42,12 @@ export class VisitsService {
     return { data: data.map((v) => this.toResponse(v)), total };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user: AuthUserView) {
     const v = await this.visitsRepository.findById(id);
     if (!v) throw new NotFoundException('Visit not found');
+    if (user.role === 'doctor' && v.doctorId !== user.id) {
+      throw new NotFoundException('Visit not found (access restricted)');
+    }
     return this.toResponse(v);
   }
 
@@ -55,8 +67,8 @@ export class VisitsService {
     return this.toResponse(v);
   }
 
-  async update(id: string, dto: UpdateVisitDto) {
-    await this.ensureExists(id);
+  async update(id: string, dto: UpdateVisitDto, user: AuthUserView) {
+    await this.ensureExists(id, user);
     const v = await this.visitsRepository.update(id, {
       date: dto.date === undefined ? undefined : new Date(dto.date),
       status: dto.status,
@@ -82,9 +94,12 @@ export class VisitsService {
     return this.toResponse(v);
   }
 
-  private async ensureExists(id: string) {
+  private async ensureExists(id: string, user: AuthUserView) {
     const v = await this.visitsRepository.findById(id);
     if (!v) throw new NotFoundException('Visit not found');
+    if (user.role === 'doctor' && v.doctorId !== user.id) {
+      throw new NotFoundException('Visit not found (access restricted)');
+    }
   }
 
   private toResponse(v: Visit) {

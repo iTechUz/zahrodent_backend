@@ -32,11 +32,12 @@ import {
 @ApiBearerAuth('JWT')
 @Controller('doctors')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(...ROLES_STAFF)
+@Roles('admin', 'receptionist')
 export class DoctorsController {
   constructor(private readonly doctorsService: DoctorsService) {}
 
   @Get('stats')
+  @Roles('admin')
   @ApiOperation({ summary: 'Stats for doctors page' })
   getStats() {
     return this.doctorsService.getStats();
@@ -56,27 +57,27 @@ export class DoctorsController {
   }
 
   @Post()
-  @Roles(...ROLES_DOCTOR_WRITE)
+  @Roles('admin')
   @ApiOperation({ summary: 'Yangi shifokor' })
-  @ApiForbiddenResponse({ description: 'Faqat admin va doctor' })
+  @ApiForbiddenResponse({ description: 'Faqat admin' })
   create(@Body() dto: CreateDoctorDto) {
     return this.doctorsService.create(dto);
   }
 
   @Patch(':id')
-  @Roles(...ROLES_DOCTOR_WRITE)
+  @Roles('admin')
   @ApiOperation({ summary: 'Shifokorni yangilash' })
   @ApiParam({ name: 'id' })
-  @ApiForbiddenResponse({ description: 'Faqat admin va doctor' })
+  @ApiForbiddenResponse({ description: 'Faqat admin' })
   update(@Param('id') id: string, @Body() dto: UpdateDoctorDto) {
     return this.doctorsService.update(id, dto);
   }
 
   @Delete(':id')
-  @Roles(...ROLES_DOCTOR_WRITE)
+  @Roles('admin')
   @ApiOperation({ summary: "Shifokorni o'chirish" })
   @ApiParam({ name: 'id' })
-  @ApiForbiddenResponse({ description: 'Faqat admin va doctor' })
+  @ApiForbiddenResponse({ description: 'Faqat admin' })
   remove(@Param('id') id: string) {
     return this.doctorsService.remove(id);
   }

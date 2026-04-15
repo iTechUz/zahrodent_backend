@@ -22,6 +22,8 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
 @ApiTags('visits')
@@ -34,15 +36,18 @@ export class VisitsController {
 
   @Get()
   @ApiOperation({ summary: 'Tashriflar' })
-  findAll(@Query() query: PaginationQueryDto & { patientId?: string; doctorId?: string }) {
-    return this.visitsService.findAll(query);
+  findAll(
+    @Query() query: PaginationQueryDto & { patientId?: string; doctorId?: string },
+    @GetUser() user: AuthUserView,
+  ) {
+    return this.visitsService.findAll(query, user);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Bitta tashrif' })
   @ApiParam({ name: 'id' })
-  findOne(@Param('id') id: string) {
-    return this.visitsService.findOne(id);
+  findOne(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.visitsService.findOne(id, user);
   }
 
   @Post()
@@ -54,7 +59,11 @@ export class VisitsController {
   @Patch(':id')
   @ApiOperation({ summary: 'Tashrifni yangilash' })
   @ApiParam({ name: 'id' })
-  update(@Param('id') id: string, @Body() dto: UpdateVisitDto) {
-    return this.visitsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateVisitDto,
+    @GetUser() user: AuthUserView,
+  ) {
+    return this.visitsService.update(id, dto, user);
   }
 }
