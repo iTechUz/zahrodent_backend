@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Notification } from '@prisma/client';
+import { startOfDay } from 'date-fns';
 import { NotificationsRepository } from './notifications.repository';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { BookingsRepository } from '../bookings/bookings.repository';
@@ -220,9 +221,22 @@ export class NotificationsService {
     const results = { sent: 0, failed: 0 };
     const markAt = new Date();
 
+    // Fetch patients and their earliest upcoming booking to get date/time
     const patients = await this.prisma.patient.findMany({
       where: { id: { in: patientIds } },
-      select: { id: true, phone: true },
+      select: { 
+        id: true, 
+        phone: true,
+        bookings: {
+          where: {
+            date: { gte: startOfDay(new Date()) },
+            status: { in: ['confirmed', 'pending'] },
+            reminderSentAt: null,
+          },
+          orderBy: { date: 'asc' },
+          take: 1,
+        }
+      },
     });
 
     const notificationRows: any[] = [];
@@ -231,9 +245,18 @@ export class NotificationsService {
     for (const patient of patients) {
       const mobile = this.eskiz.normalizeMobile(patient.phone);
       let status: ReminderStatus = 'sent';
+      const booking = patient.bookings[0];
+      
+      // Replace placeholders
+      let personalizedMessage = message;
+      if (booking) {
+        personalizedMessage = personalizedMessage
+          .replace(/\[sana\]/g, booking.date.toISOString().slice(0, 10))
+          .replace(/\[vaqt\]/g, booking.time);
+      }
 
       if (eskizOn && mobile) {
-        const r = await this.eskiz.sendSms(mobile, message);
+        const r = await this.eskiz.sendSms(mobile, personalizedMessage);
         status = r.ok ? 'sent' : 'failed';
         if (r.ok) {
           results.sent++;
@@ -242,7 +265,6 @@ export class NotificationsService {
           results.failed++;
         }
       } else {
-        // If not configured, we simulate success for dev or fail if no phone
         status = mobile ? 'sent' : 'failed';
         if (status === 'sent') {
           results.sent++;
@@ -255,7 +277,7 @@ export class NotificationsService {
       notificationRows.push({
         patientId: patient.id,
         type: 'sms',
-        message,
+        message: personalizedMessage,
         status,
         sentAt: markAt,
       });
@@ -266,7 +288,6 @@ export class NotificationsService {
     }
 
     if (patientIdsToMark.length) {
-      // Mark reminder sent for all upcoming bookings of these patients
       await this.prisma.booking.updateMany({
         where: {
           patientId: { in: patientIdsToMark },
