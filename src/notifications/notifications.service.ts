@@ -6,6 +6,7 @@ import { BookingsRepository } from '../bookings/bookings.repository';
 import { PatientsRepository } from '../patients/patients.repository';
 import { EskizService } from './eskiz.service';
 import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
+import { RecipientQueryDto, BulkSendDto } from './dto/bulk-sms.dto';
 
 type ReminderType = 'sms' | 'telegram';
 type ReminderStatus = 'sent' | 'failed';
@@ -168,6 +169,115 @@ export class NotificationsService {
     return eskizOn
       ? { created: rows.length, smsSent, smsFailed }
       : { created: rows.length };
+  }
+
+  async findRecipients(query: RecipientQueryDto) {
+    const { startDate, endDate } = query;
+    const dateStart = new Date(startDate);
+    const dateEnd = new Date(endDate);
+
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        date: {
+          gte: dateStart,
+          lte: dateEnd,
+        },
+        status: { in: ['confirmed', 'pending'] },
+        reminderSentAt: null,
+      },
+      include: {
+        patient: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+          },
+        },
+      },
+      orderBy: { date: 'asc' },
+    });
+
+    // Reduce to unique patients since a patient might have multiple bookings
+    const patientMap = new Map();
+    bookings.forEach((b) => {
+      if (!patientMap.has(b.patientId)) {
+        patientMap.set(b.patientId, {
+          ...b.patient,
+          bookingId: b.id,
+          bookingDate: b.date,
+          bookingTime: b.time,
+        });
+      }
+    });
+
+    return Array.from(patientMap.values());
+  }
+
+  async bulkSend(dto: BulkSendDto) {
+    const { patientIds, message } = dto;
+    const eskizOn = this.eskiz.isConfigured();
+    const results = { sent: 0, failed: 0 };
+    const markAt = new Date();
+
+    const patients = await this.prisma.patient.findMany({
+      where: { id: { in: patientIds } },
+      select: { id: true, phone: true },
+    });
+
+    const notificationRows: any[] = [];
+    const patientIdsToMark: string[] = [];
+
+    for (const patient of patients) {
+      const mobile = this.eskiz.normalizeMobile(patient.phone);
+      let status: ReminderStatus = 'sent';
+
+      if (eskizOn && mobile) {
+        const r = await this.eskiz.sendSms(mobile, message);
+        status = r.ok ? 'sent' : 'failed';
+        if (r.ok) {
+          results.sent++;
+          patientIdsToMark.push(patient.id);
+        } else {
+          results.failed++;
+        }
+      } else {
+        // If not configured, we simulate success for dev or fail if no phone
+        status = mobile ? 'sent' : 'failed';
+        if (status === 'sent') {
+          results.sent++;
+          patientIdsToMark.push(patient.id);
+        } else {
+          results.failed++;
+        }
+      }
+
+      notificationRows.push({
+        patientId: patient.id,
+        type: 'sms',
+        message,
+        status,
+        sentAt: markAt,
+      });
+    }
+
+    if (notificationRows.length) {
+      await this.notificationsRepository.createMany(notificationRows);
+    }
+
+    if (patientIdsToMark.length) {
+      // Mark reminder sent for all upcoming bookings of these patients
+      await this.prisma.booking.updateMany({
+        where: {
+          patientId: { in: patientIdsToMark },
+          date: { gte: new Date() },
+          reminderSentAt: null,
+        },
+        data: { reminderSentAt: markAt },
+      });
+    }
+
+    return { ...results, total: patientIds.length };
   }
 
   private formatBookingDate(d: Date) {

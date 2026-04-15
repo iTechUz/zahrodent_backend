@@ -12,6 +12,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { RecipientQueryDto, BulkSendDto } from './dto/bulk-sms.dto';
 
 @ApiTags('notifications')
 @ApiBearerAuth('JWT')
@@ -48,5 +49,17 @@ export class NotificationsController {
   })
   sendReminders() {
     return this.notificationsService.sendReminders();
+  }
+
+  @Get('recipients')
+  @ApiOperation({ summary: 'SMS yuborish mumkin bo\'lgan mijozlar ro\'yxati' })
+  findRecipients(@Query() query: RecipientQueryDto) {
+    return this.notificationsService.findRecipients(query);
+  }
+
+  @Post('bulk-send')
+  @ApiOperation({ summary: 'Tanlangan mijozlarga ommaviy SMS yuborish' })
+  bulkSend(@Body() dto: BulkSendDto) {
+    return this.notificationsService.bulkSend(dto);
   }
 }
