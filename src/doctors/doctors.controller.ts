@@ -43,6 +43,13 @@ export class DoctorsController {
     return this.doctorsService.getStats();
   }
 
+  @Get('efficiency')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Doctor efficiency and performance stats' })
+  getEfficiency() {
+    return this.doctorsService.getEfficiency();
+  }
+
   @Get()
   @ApiOperation({ summary: "Shifokorlar ro'yxati" })
   findAll(@Query() query: PaginationQueryDto & { specialty?: string }) {

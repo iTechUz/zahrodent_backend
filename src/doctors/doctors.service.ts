@@ -91,6 +91,26 @@ export class DoctorsService {
     };
   }
 
+  async getEfficiency() {
+    const rawStats = await this.doctorsRepository.getDetailedEfficiencyStats();
+    
+    return rawStats.map(s => {
+      const conversionRate = s.totalBookings > 0 
+        ? Math.round((s.totalVisits / s.totalBookings) * 100) 
+        : 0;
+        
+      const avgCheck = s.totalVisits > 0 
+        ? Math.round(s.totalRevenue / s.totalVisits) 
+        : 0;
+
+      return {
+        ...s,
+        conversionRate,
+        avgCheck,
+      };
+    }).sort((a, b) => b.totalRevenue - a.totalRevenue); // Sort by revenue by default
+  }
+
   private toResponse(d: Doctor) {
     return {
       id: d.id,
