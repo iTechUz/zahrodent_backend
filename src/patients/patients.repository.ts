@@ -13,13 +13,17 @@ export class PatientsRepository {
     const [data, total] = await Promise.all([
       this.prisma.patient.findMany({
         where,
+        include: {
+          payments: { where: { status: 'paid' }, select: { amount: true } },
+          visits: { where: { status: 'completed' }, select: { price: true } },
+        },
         orderBy: { createdAt: 'desc' },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
       this.prisma.patient.count({ where }),
     ]);
-    return { data, total };
+    return { data: data as any[], total };
   }
 
   count(where?: Prisma.PatientWhereInput): Promise<number> {
@@ -36,7 +40,13 @@ export class PatientsRepository {
   }
 
   findById(id: string): Promise<Patient | null> {
-    return this.prisma.patient.findUnique({ where: { id } });
+    return this.prisma.patient.findUnique({ 
+      where: { id },
+      include: {
+        payments: { where: { status: 'paid' }, select: { amount: true } },
+        visits: { where: { status: 'completed' }, select: { price: true } },
+      },
+    }) as any;
   }
 
   findSourcesByPatientIds(ids: string[]) {

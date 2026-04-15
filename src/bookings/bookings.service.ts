@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { Booking, Prisma } from '@prisma/client';
 import { BookingsRepository } from './bookings.repository';
 import { CreateBookingDto } from './dto/create-booking.dto';
@@ -81,6 +81,8 @@ export class BookingsService {
   }
 
   async create(dto: CreateBookingDto) {
+    await this.checkConflicts(dto.doctorId, dto.date, dto.time, dto.serviceId);
+
     const b = await this.bookingsRepository.create({
       patient: { connect: { id: dto.patientId } },
       doctor: { connect: { id: dto.doctorId } },
@@ -96,6 +98,18 @@ export class BookingsService {
 
   async update(id: string, dto: UpdateBookingDto, user: AuthUserView) {
     await this.ensureExists(id, user);
+
+    if (dto.date || dto.time || dto.doctorId || dto.serviceId) {
+      const current = await this.bookingsRepository.findById(id);
+      await this.checkConflicts(
+        dto.doctorId ?? current!.doctorId,
+        dto.date ?? current!.date,
+        dto.time ?? current!.time,
+        dto.serviceId === undefined ? current!.serviceId : dto.serviceId,
+        id,
+      );
+    }
+
     const b = await this.bookingsRepository.update(id, {
       date: dto.date === undefined ? undefined : new Date(dto.date),
       time: dto.time,
@@ -166,6 +180,60 @@ export class BookingsService {
       pending: pendingCount,
       completedToday,
     };
+  }
+
+  private async checkConflicts(
+    doctorId: string,
+    date: Date | string,
+    time: string,
+    serviceId: string | null | undefined,
+    excludeId?: string,
+  ) {
+    const bookingDate = new Date(date);
+    bookingDate.setHours(0, 0, 0, 0);
+
+    // Get new booking duration
+    let duration = 30; // Default
+    if (serviceId) {
+      const service = await this.bookingsRepository.findServiceById(serviceId);
+      if (service) duration = service.duration;
+    }
+
+    const newStart = this.timeToMinutes(time);
+    const newEnd = newStart + duration;
+
+    // Get all bookings for that doctor on that day
+    // We need to fetch services too to know their durations
+    const dayBookings = await this.bookingsRepository.findManyWithService({
+      doctorId,
+      date: bookingDate,
+      id: excludeId ? { not: excludeId } : undefined,
+      status: { in: ['pending', 'confirmed'] }, // Only check active ones
+    });
+
+    for (const b of dayBookings) {
+      const bStart = this.timeToMinutes(b.time);
+      const bDuration = (b as any).service?.duration || 30;
+      const bEnd = bStart + bDuration;
+
+      // Overlap? (Start1 < End2) && (End1 > Start2)
+      if (newStart < bEnd && newEnd > bStart) {
+        throw new ConflictException(
+          `Vaqtlar to'qnashuvi: Shifokor bu vaqtda band (${b.time}${bDuration > 30 ? ' - ' + this.minutesToTime(bEnd) : ''})`,
+        );
+      }
+    }
+  }
+
+  private timeToMinutes(time: string): number {
+    const [h, m] = time.split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  private minutesToTime(mins: number): string {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
   }
 
   private toResponse(b: Booking) {

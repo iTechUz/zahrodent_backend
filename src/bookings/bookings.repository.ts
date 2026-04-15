@@ -40,6 +40,17 @@ export class BookingsRepository {
     return this.prisma.booking.findUnique({ where: { id } });
   }
 
+  findServiceById(id: string) {
+    return this.prisma.service.findUnique({ where: { id } });
+  }
+
+  findManyWithService(where: Prisma.BookingWhereInput) {
+    return this.prisma.booking.findMany({
+      where,
+      include: { service: true },
+    });
+  }
+
   create(data: Prisma.BookingCreateInput): Promise<Booking> {
     return this.prisma.booking.create({ data });
   }

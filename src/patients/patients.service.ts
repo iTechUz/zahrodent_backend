@@ -154,7 +154,11 @@ export class PatientsService {
     };
   }
 
-  private toResponse(p: Patient) {
+  private toResponse(p: any) {
+    const paid = (p.payments || []).reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0);
+    const owed = (p.visits || []).reduce((acc: number, curr: any) => acc + (curr.price || 0), 0);
+    const balance = paid - owed;
+
     return {
       id: p.id,
       firstName: p.firstName,
@@ -164,6 +168,7 @@ export class PatientsService {
       source: p.source,
       notes: p.notes,
       avatar: p.avatar ?? undefined,
+      balance,
       createdAt: toDateOnlyString(p.createdAt),
       allergies: p.allergies ?? undefined,
       bloodType: p.bloodType ?? undefined,
