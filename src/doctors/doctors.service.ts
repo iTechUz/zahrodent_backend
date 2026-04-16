@@ -1,7 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Doctor, Prisma } from '@prisma/client';
 import { DoctorsRepository } from './doctors.repository';
-import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
+import {
+  PaginationQueryDto,
+  PaginatedResponse,
+} from '../common/dto/pagination.dto';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
 
@@ -9,7 +12,9 @@ import { UpdateDoctorDto } from './dto/update-doctor.dto';
 export class DoctorsService {
   constructor(private readonly doctorsRepository: DoctorsRepository) {}
 
-  async findAll(query: PaginationQueryDto & { specialty?: string }): Promise<PaginatedResponse<any>> {
+  async findAll(
+    query: PaginationQueryDto & { specialty?: string },
+  ): Promise<PaginatedResponse<any>> {
     const { search, specialty } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
@@ -25,7 +30,10 @@ export class DoctorsService {
       where.name = { contains: search, mode: 'insensitive' };
     }
 
-    const { data, total } = await this.doctorsRepository.findAll(where, { skip, take: limitNum });
+    const { data, total } = await this.doctorsRepository.findAll(where, {
+      skip,
+      take: limitNum,
+    });
     return { data: data.map((d) => this.toResponse(d)), total };
   }
 
@@ -77,12 +85,14 @@ export class DoctorsService {
 
   async getStats() {
     const total = await this.doctorsRepository.count();
-    
+
     // Active today: doctors with at least one booking today
-    const { count: activeToday } = await this.doctorsRepository.getActiveCountToday();
-    
+    const { count: activeToday } =
+      await this.doctorsRepository.getActiveCountToday();
+
     // Total visits count (historical)
-    const { count: totalVisits } = await this.doctorsRepository.getTotalVisitsCount();
+    const { count: totalVisits } =
+      await this.doctorsRepository.getTotalVisitsCount();
 
     return {
       total,
@@ -93,22 +103,24 @@ export class DoctorsService {
 
   async getEfficiency() {
     const rawStats = await this.doctorsRepository.getDetailedEfficiencyStats();
-    
-    return rawStats.map(s => {
-      const conversionRate = s.totalBookings > 0 
-        ? Math.round((s.totalVisits / s.totalBookings) * 100) 
-        : 0;
-        
-      const avgCheck = s.totalVisits > 0 
-        ? Math.round(s.totalRevenue / s.totalVisits) 
-        : 0;
 
-      return {
-        ...s,
-        conversionRate,
-        avgCheck,
-      };
-    }).sort((a, b) => b.totalRevenue - a.totalRevenue); // Sort by revenue by default
+    return rawStats
+      .map((s) => {
+        const conversionRate =
+          s.totalBookings > 0
+            ? Math.round((s.totalVisits / s.totalBookings) * 100)
+            : 0;
+
+        const avgCheck =
+          s.totalVisits > 0 ? Math.round(s.totalRevenue / s.totalVisits) : 0;
+
+        return {
+          ...s,
+          conversionRate,
+          avgCheck,
+        };
+      })
+      .sort((a, b) => b.totalRevenue - a.totalRevenue); // Sort by revenue by default
   }
 
   private toResponse(d: Doctor) {

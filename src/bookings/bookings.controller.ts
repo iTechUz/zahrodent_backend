@@ -13,7 +13,6 @@ import {
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
-  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { BookingsService } from './bookings.service';
@@ -44,7 +43,8 @@ export class BookingsController {
   @Get()
   @ApiOperation({ summary: "Qabullar ro'yxati" })
   findAll(
-    @Query() query: PaginationQueryDto & {
+    @Query()
+    query: PaginationQueryDto & {
       status?: string;
       source?: string;
       patientId?: string;
@@ -73,7 +73,11 @@ export class BookingsController {
   @Roles('admin', 'receptionist')
   @ApiOperation({ summary: "Qabulni yangilash (holat o'zgartirish)" })
   @ApiParam({ name: 'id' })
-  update(@Param('id') id: string, @Body() dto: UpdateBookingDto, @GetUser() user: AuthUserView) {
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateBookingDto,
+    @GetUser() user: AuthUserView,
+  ) {
     return this.bookingsService.update(id, dto, user);
   }
 

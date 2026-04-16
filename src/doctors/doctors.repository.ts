@@ -64,14 +64,14 @@ export class DoctorsRepository {
   async getDetailedEfficiencyStats() {
     // Get all doctors first
     const doctors = await this.prisma.doctor.findMany({
-      select: { id: true, name: true, specialty: true }
+      select: { id: true, name: true, specialty: true },
     });
 
     // Get booking stats per doctor
     const bookingStats = await this.prisma.booking.groupBy({
       by: ['doctorId'],
       _count: { id: true },
-      where: { status: { in: ['pending', 'confirmed', 'completed'] } }
+      where: { status: { in: ['pending', 'confirmed', 'completed'] } },
     });
 
     // Get visit stats per doctor
@@ -79,18 +79,18 @@ export class DoctorsRepository {
       by: ['doctorId'],
       _count: { id: true },
       _sum: { price: true },
-      where: { status: 'completed' }
+      where: { status: 'completed' },
     });
 
     // Get payment stats (real revenue)
     // Actually using visit price sum for revenue is fine if visits are completed
-    // but we can also check payments if needed. Let's stick to visit price as 'potential revenue' 
-    // and we can cross reference with payments if wanted. 
+    // but we can also check payments if needed. Let's stick to visit price as 'potential revenue'
+    // and we can cross reference with payments if wanted.
     // For simplicity and business logic: Revenue = Sum(Visit.price where status=completed)
 
-    return doctors.map(d => {
-      const bStat = bookingStats.find(s => s.doctorId === d.id);
-      const vStat = visitStats.find(s => s.doctorId === d.id);
+    return doctors.map((d) => {
+      const bStat = bookingStats.find((s) => s.doctorId === d.id);
+      const vStat = visitStats.find((s) => s.doctorId === d.id);
 
       return {
         id: d.id,

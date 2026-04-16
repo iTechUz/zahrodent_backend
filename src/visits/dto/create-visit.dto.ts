@@ -1,4 +1,12 @@
-import { IsInt, IsIn, IsOptional, IsString, Min, MinLength, Matches } from 'class-validator';
+import {
+  IsInt,
+  IsIn,
+  IsOptional,
+  IsString,
+  Min,
+  MinLength,
+  Matches,
+} from 'class-validator';
 
 const STATUSES = ['not-started', 'in-progress', 'completed'] as const;
 
@@ -16,7 +24,9 @@ export class CreateVisitDto {
   bookingId?: string;
 
   @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date YYYY-MM-DD formatida bo‘lishi kerak' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'date YYYY-MM-DD formatida bo‘lishi kerak',
+  })
   date?: string;
 
   @IsIn(STATUSES)

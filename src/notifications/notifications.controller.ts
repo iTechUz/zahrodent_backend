@@ -10,7 +10,6 @@ import { CreateNotificationDto } from './dto/create-notification.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { ROLES_STAFF } from '../common/constants/role-groups';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { RecipientQueryDto, BulkSendDto } from './dto/bulk-sms.dto';
 
@@ -52,7 +51,7 @@ export class NotificationsController {
   }
 
   @Get('recipients')
-  @ApiOperation({ summary: 'SMS yuborish mumkin bo\'lgan mijozlar ro\'yxati' })
+  @ApiOperation({ summary: "SMS yuborish mumkin bo'lgan mijozlar ro'yxati" })
   findRecipients(@Query() query: RecipientQueryDto) {
     return this.notificationsService.findRecipients(query);
   }

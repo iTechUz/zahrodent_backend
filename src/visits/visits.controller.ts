@@ -12,7 +12,6 @@ import {
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
-  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { VisitsService } from './visits.service';
@@ -37,7 +36,8 @@ export class VisitsController {
   @Get()
   @ApiOperation({ summary: 'Tashriflar' })
   findAll(
-    @Query() query: PaginationQueryDto & { patientId?: string; doctorId?: string },
+    @Query()
+    query: PaginationQueryDto & { patientId?: string; doctorId?: string },
     @GetUser() user: AuthUserView,
   ) {
     return this.visitsService.findAll(query, user);

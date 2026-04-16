@@ -3,19 +3,29 @@ import { Payment, Prisma } from '@prisma/client';
 import { PaymentsRepository } from './payments.repository';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
-import { endOfUTCDayInclusive, parseDateOnlyToUTC, startOfUTCDay, toDateOnlyString } from '../common/utils/date.util';
-import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
+import {
+  endOfUTCDayInclusive,
+  parseDateOnlyToUTC,
+  startOfUTCDay,
+  toDateOnlyString,
+} from '../common/utils/date.util';
+import {
+  PaginationQueryDto,
+  PaginatedResponse,
+} from '../common/dto/pagination.dto';
 
 @Injectable()
 export class PaymentsService {
   constructor(private readonly paymentsRepository: PaymentsRepository) {}
 
-  async findAll(query: PaginationQueryDto & {
-    status?: string;
-    patientId?: string;
-    method?: string;
-    dateRange?: 'today' | 'week' | 'month' | 'all';
-  }): Promise<PaginatedResponse<any>> {
+  async findAll(
+    query: PaginationQueryDto & {
+      status?: string;
+      patientId?: string;
+      method?: string;
+      dateRange?: 'today' | 'week' | 'month' | 'all';
+    },
+  ): Promise<PaginatedResponse<any>> {
     const { search, status, patientId, method, dateRange = 'all' } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
@@ -66,7 +76,10 @@ export class PaymentsService {
       where.date = { gte: start, lte: end };
     }
 
-    const { data, total } = await this.paymentsRepository.findAll(where, { skip, take: limitNum });
+    const { data, total } = await this.paymentsRepository.findAll(where, {
+      skip,
+      take: limitNum,
+    });
     return { data: data.map((p) => this.toResponse(p)), total };
   }
 

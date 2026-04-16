@@ -1,10 +1,16 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Visit } from '@prisma/client';
 import { VisitsRepository } from './visits.repository';
-import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
+import {
+  PaginationQueryDto,
+  PaginatedResponse,
+} from '../common/dto/pagination.dto';
 import { CreateVisitDto } from './dto/create-visit.dto';
 import { UpdateVisitDto } from './dto/update-visit.dto';
-import { parseDateOnlyToUTC, toDateOnlyString } from '../common/utils/date.util';
+import {
+  parseDateOnlyToUTC,
+  toDateOnlyString,
+} from '../common/utils/date.util';
 import { AuthUserView } from '../auth/auth.service';
 
 @Injectable()
@@ -38,7 +44,10 @@ export class VisitsService {
       ];
     }
 
-    const { data, total } = await this.visitsRepository.findAll(where, { skip, take: limitNum });
+    const { data, total } = await this.visitsRepository.findAll(where, {
+      skip,
+      take: limitNum,
+    });
     return { data: data.map((v) => this.toResponse(v)), total };
   }
 

@@ -1,10 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Patient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PatientsRepository } from './patients.repository';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
 import { toDateOnlyString } from '../common/utils/date.util';
-import { PaginatedResponse, PaginationQueryDto } from '../common/dto/pagination.dto';
+import {
+  PaginatedResponse,
+  PaginationQueryDto,
+} from '../common/dto/pagination.dto';
 import { AuthUserView } from '../auth/auth.service';
 
 @Injectable()
@@ -55,7 +58,10 @@ export class PatientsService {
       }
     }
 
-    const { data, total } = await this.patientsRepository.findAll(where, { skip, take: limitNum });
+    const { data, total } = await this.patientsRepository.findAll(where, {
+      skip,
+      take: limitNum,
+    });
     return { data: data.map((p) => this.toResponse(p)), total };
   }
 
@@ -155,8 +161,14 @@ export class PatientsService {
   }
 
   private toResponse(p: any) {
-    const paid = (p.payments || []).reduce((acc: number, curr: any) => acc + (curr.amount || 0), 0);
-    const owed = (p.visits || []).reduce((acc: number, curr: any) => acc + (curr.price || 0), 0);
+    const paid = (p.payments || []).reduce(
+      (acc: number, curr: any) => acc + (curr.amount || 0),
+      0,
+    );
+    const owed = (p.visits || []).reduce(
+      (acc: number, curr: any) => acc + (curr.price || 0),
+      0,
+    );
     const balance = paid - owed;
 
     return {

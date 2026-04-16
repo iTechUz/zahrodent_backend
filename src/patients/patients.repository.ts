@@ -40,7 +40,7 @@ export class PatientsRepository {
   }
 
   findById(id: string): Promise<Patient | null> {
-    return this.prisma.patient.findUnique({ 
+    return this.prisma.patient.findUnique({
       where: { id },
       include: {
         payments: { where: { status: 'paid' }, select: { amount: true } },

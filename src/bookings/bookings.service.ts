@@ -1,10 +1,22 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { Booking, Prisma } from '@prisma/client';
 import { BookingsRepository } from './bookings.repository';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
-import { endOfUTCDayInclusive, parseDateOnlyToUTC, startOfUTCDay, toDateOnlyString } from '../common/utils/date.util';
-import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
+import {
+  endOfUTCDayInclusive,
+  parseDateOnlyToUTC,
+  startOfUTCDay,
+  toDateOnlyString,
+} from '../common/utils/date.util';
+import {
+  PaginationQueryDto,
+  PaginatedResponse,
+} from '../common/dto/pagination.dto';
 import { AuthUserView } from '../auth/auth.service';
 
 @Injectable()
@@ -69,7 +81,10 @@ export class BookingsService {
       where.date = { gte: start, lte: end };
     }
 
-    const { data, total } = await this.bookingsRepository.findAll(where, { skip, take: limitNum });
+    const { data, total } = await this.bookingsRepository.findAll(where, {
+      skip,
+      take: limitNum,
+    });
     return { data: data.map((b) => this.toResponse(b)), total };
   }
 
@@ -191,7 +206,8 @@ export class BookingsService {
     serviceId: string | null | undefined,
     excludeId?: string,
   ) {
-    const bookingDate = typeof date === 'string' ? parseDateOnlyToUTC(date) : date;
+    const bookingDate =
+      typeof date === 'string' ? parseDateOnlyToUTC(date) : date;
     bookingDate.setUTCHours(0, 0, 0, 0);
 
     // Get new booking duration

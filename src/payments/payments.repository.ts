@@ -52,10 +52,16 @@ export class PaymentsRepository {
       if (!row.visitId) continue;
       const doctorId = visitDoctorMap.get(row.visitId);
       if (!doctorId) continue;
-      doctorTotals.set(doctorId, (doctorTotals.get(doctorId) ?? 0) + (row._sum.amount ?? 0));
+      doctorTotals.set(
+        doctorId,
+        (doctorTotals.get(doctorId) ?? 0) + (row._sum.amount ?? 0),
+      );
     }
 
-    return Array.from(doctorTotals.entries()).map(([doctorId, total]) => ({ doctorId, total }));
+    return Array.from(doctorTotals.entries()).map(([doctorId, total]) => ({
+      doctorId,
+      total,
+    }));
   }
 
   findById(id: string): Promise<Payment | null> {

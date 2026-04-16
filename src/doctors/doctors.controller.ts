@@ -23,10 +23,6 @@ import { UpdateDoctorDto } from './dto/update-doctor.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import {
-  ROLES_DOCTOR_WRITE,
-  ROLES_STAFF,
-} from '../common/constants/role-groups';
 
 @ApiTags('doctors')
 @ApiBearerAuth('JWT')

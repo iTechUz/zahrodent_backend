@@ -43,7 +43,9 @@ export class CreatePaymentDto {
   serviceId?: string;
 
   @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date YYYY-MM-DD formatida bo‘lishi kerak' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'date YYYY-MM-DD formatida bo‘lishi kerak',
+  })
   date?: string;
 
   @IsOptional()

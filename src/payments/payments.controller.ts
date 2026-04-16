@@ -13,7 +13,6 @@ import {
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
-  ApiQuery,
   ApiTags,
 } from '@nestjs/swagger';
 import { PaymentsService } from './payments.service';
@@ -48,7 +47,8 @@ export class PaymentsController {
   @Get()
   @ApiOperation({ summary: "To'lovlar ro'yxati" })
   findAll(
-    @Query() query: PaginationQueryDto & {
+    @Query()
+    query: PaginationQueryDto & {
       status?: string;
       patientId?: string;
       method?: string;

@@ -6,9 +6,10 @@ import { PrismaService } from '../database/prisma.service';
 export class NotificationsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(
-    opts?: { skip?: number; take?: number },
-  ): Promise<{ data: Notification[]; total: number }> {
+  async findAll(opts?: {
+    skip?: number;
+    take?: number;
+  }): Promise<{ data: Notification[]; total: number }> {
     const [data, total] = await Promise.all([
       this.prisma.notification.findMany({
         orderBy: { sentAt: 'desc' },

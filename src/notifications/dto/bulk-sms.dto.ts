@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import { IsArray, IsISO8601, IsString, MinLength } from 'class-validator';
 
 export class RecipientQueryDto {
@@ -12,7 +12,10 @@ export class RecipientQueryDto {
 }
 
 export class BulkSendDto {
-  @ApiProperty({ example: ['cuid1', 'cuid2'], description: 'Bemorlar ID ro\'yxati' })
+  @ApiProperty({
+    example: ['cuid1', 'cuid2'],
+    description: "Bemorlar ID ro'yxati",
+  })
   @IsArray()
   @IsString({ each: true })
   patientIds: string[];

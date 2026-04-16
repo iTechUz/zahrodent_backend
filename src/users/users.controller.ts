@@ -8,7 +8,7 @@ import {
   Delete,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -31,7 +31,7 @@ export class UsersController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Xodim ma\'lumotlarini olish' })
+  @ApiOperation({ summary: "Xodim ma'lumotlarini olish" })
   findOne(@Param('id') id: string) {
     return this.usersService.findOne(id);
   }
@@ -43,13 +43,13 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Xodim ma\'lumotlarini yangilash' })
+  @ApiOperation({ summary: "Xodim ma'lumotlarini yangilash" })
   update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
     return this.usersService.update(id, dto);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Xodimni o\'chirish' })
+  @ApiOperation({ summary: "Xodimni o'chirish" })
   remove(@Param('id') id: string) {
     return this.usersService.remove(id);
   }
