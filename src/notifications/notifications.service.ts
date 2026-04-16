@@ -223,20 +223,6 @@ export class NotificationsService {
   async findRecipients(query: RecipientQueryDto) {
     const { startDate, endDate, targetType } = query;
 
-    if (targetType === 'doctor') {
-      const doctors = await this.prisma.doctor.findMany({
-        select: { id: true, name: true, phone: true }
-      });
-      return doctors.map(d => ({
-        id: d.id,
-        firstName: d.name,
-        lastName: '',
-        phone: d.phone,
-        bookingDate: new Date().toISOString(),
-        bookingTime: '-',
-      }));
-    }
-
     const dateStart = new Date(startDate || new Date().toISOString());
     dateStart.setUTCHours(0, 0, 0, 0);
     const dateEnd = new Date(endDate || new Date().toISOString());
@@ -244,25 +230,41 @@ export class NotificationsService {
 
     const bookings = await this.prisma.booking.findMany({
       where: {
-        date: {
-          gte: dateStart,
-          lte: dateEnd,
-        },
+        date: { gte: dateStart, lte: dateEnd },
         status: { in: ['confirmed', 'pending'] },
-        reminderSentAt: null,
+        // Only filter by reminderSentAt for patients
+        ...(targetType === 'patient' ? { reminderSentAt: null } : {}),
       },
       include: {
         patient: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            phone: true,
-          },
+          select: { id: true, firstName: true, lastName: true, phone: true },
         },
+        doctor: {
+          select: { id: true, name: true, phone: true },
+        }
       },
       orderBy: { date: 'asc' },
     });
+
+    if (targetType === 'doctor') {
+      const doctorMap = new Map();
+      bookings.forEach((b) => {
+        if (!b.doctorId) return;
+        if (!doctorMap.has(b.doctorId)) {
+          doctorMap.set(b.doctorId, {
+            id: b.doctorId,
+            firstName: b.doctor?.name || '',
+            lastName: '',
+            phone: b.doctor?.phone || '',
+            bookingId: b.id,
+            bookingDate: toDateOnlyString(b.date),
+            bookingTime: b.time,
+            patientName: b.patient ? `${b.patient.firstName} ${b.patient.lastName}` : '',
+          });
+        }
+      });
+      return Array.from(doctorMap.values());
+    }
 
     const patientMap = new Map();
     bookings.forEach((b) => {
@@ -288,7 +290,19 @@ export class NotificationsService {
     const targets = targetType === 'doctor' 
       ? await this.prisma.doctor.findMany({
           where: { id: { in: targetIds } },
-          select: { id: true, phone: true }
+          select: { 
+            id: true, 
+            phone: true,
+            bookings: {
+              where: {
+                date: { gte: startOfUTCDay(new Date()) },
+                status: { in: ['confirmed', 'pending'] },
+              },
+              include: { patient: true },
+              orderBy: { date: 'asc' },
+              take: 1,
+            }
+          }
         })
       : await this.prisma.patient.findMany({
           where: { id: { in: targetIds } },
@@ -301,6 +315,7 @@ export class NotificationsService {
                 status: { in: ['confirmed', 'pending'] },
                 reminderSentAt: null,
               },
+              include: { patient: true },
               orderBy: { date: 'asc' },
               take: 1,
             },
@@ -317,13 +332,16 @@ export class NotificationsService {
       async (target) => {
         const mobile = this.eskiz.normalizeMobile(target.phone);
         let status: ReminderStatus = 'sent';
-        const booking = targetType === 'patient' ? target.bookings?.[0] : null;
+        const booking = target.bookings?.[0];
 
         let personalizedMessage = message;
         if (booking) {
           personalizedMessage = personalizedMessage
             .replace(/\[sana\]/g, toDateOnlyString(booking.date))
             .replace(/\[vaqt\]/g, booking.time);
+          if (booking.patient) {
+            personalizedMessage = personalizedMessage.replace(/\[bemor\]/g, `${booking.patient.firstName} ${booking.patient.lastName}`);
+          }
         }
 
         let sentInc = 0;
