@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, MinLength, Matches } from 'class-validator';
+import { IsOptional, IsString, MinLength, Matches } from 'class-validator';
 
 export class CreateUserDto {
   @ApiProperty({ example: 'Shokir Xodjayev' })
@@ -8,7 +8,9 @@ export class CreateUserDto {
 
   @ApiProperty({ example: '+998901234567' })
   @IsString()
-  @Matches(/^\+998\d{9}$/, { message: 'Telefon raqami noto\'g\'ri formatda (+998XXXXXXXXX)' })
+  @Matches(/^\+998\d{9}$/, {
+    message: "Telefon raqami noto'g'ri formatda (+998XXXXXXXXX)",
+  })
   phone: string;
 
   @ApiProperty({ example: 'password123', description: 'Kamida 6 belgi' })

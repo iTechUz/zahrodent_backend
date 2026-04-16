@@ -4,7 +4,6 @@ import {
   IsString,
   MinLength,
   Matches,
-  IsEmail,
 } from 'class-validator';
 
 export class CreateDoctorDto {
@@ -22,7 +21,9 @@ export class CreateDoctorDto {
   specialty: string;
 
   @IsString()
-  @Matches(/^\+998\d{9}$/, { message: 'Telefon raqami noto\'g\'ri formatda (+998XXXXXXXXX)' })
+  @Matches(/^\+998\d{9}$/, {
+    message: "Telefon raqami noto'g'ri formatda (+998XXXXXXXXX)",
+  })
   phone: string;
 
   @IsString()

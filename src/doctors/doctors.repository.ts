@@ -49,21 +49,28 @@ export class DoctorsRepository {
     return { count };
   }
 
-  findById(id: string): Promise<(Doctor & { user?: { phone: string } | null }) | null> {
+  findById(
+    id: string,
+  ): Promise<(Doctor & { user?: { phone: string } | null }) | null> {
     return this.prisma.doctor.findUnique({
       where: { id },
       include: { user: { select: { phone: true } } },
     });
   }
 
-  create(data: Prisma.DoctorCreateInput): Promise<Doctor & { user?: { phone: string } | null }> {
+  create(
+    data: Prisma.DoctorCreateInput,
+  ): Promise<Doctor & { user?: { phone: string } | null }> {
     return this.prisma.doctor.create({
       data,
       include: { user: { select: { phone: true } } },
     });
   }
 
-  update(id: string, data: Prisma.DoctorUpdateInput): Promise<Doctor & { user?: { phone: string } | null }> {
+  update(
+    id: string,
+    data: Prisma.DoctorUpdateInput,
+  ): Promise<Doctor & { user?: { phone: string } | null }> {
     return this.prisma.doctor.update({
       where: { id },
       data,

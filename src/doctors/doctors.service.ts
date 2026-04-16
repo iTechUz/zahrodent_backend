@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
-import { Doctor, Prisma, User } from '@prisma/client';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { Doctor, Prisma } from '@prisma/client';
 import { DoctorsRepository } from './doctors.repository';
 import { UsersService } from '../users/users.service';
 import {
