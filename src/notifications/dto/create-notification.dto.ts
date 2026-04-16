@@ -10,9 +10,15 @@ const TYPES = ['sms', 'telegram'] as const;
 const STATUSES = ['sent', 'delivered', 'failed'] as const;
 
 export class CreateNotificationDto {
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  patientId: string;
+  patientId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  doctorId?: string;
 
   @IsIn(TYPES)
   type: (typeof TYPES)[number];
