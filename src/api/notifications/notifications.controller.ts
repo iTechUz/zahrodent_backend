@@ -1,51 +1,55 @@
-import {
-	Body,
-	Controller,
-	Delete,
-	Get,
-	Inject,
-	Param,
-	Post,
-	Put,
-	Query,
-	UseGuards
-} from '@nestjs/common'
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
-
-import { PaginationDto } from 'src/utils/paginations'
+import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common'
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { ApiController } from '../jwt.check.controller'
 import { NotificationsService } from './notifications.service'
-import { NotificationsCreateDto } from './dto'
-@ApiTags('Branch')
+import {
+  BookingReminderDto,
+  BulkNotificationDto,
+  CreateNotificationDto,
+  NotificationFilterDto,
+} from './dto'
+
+@ApiTags('Notifications')
 @ApiBearerAuth('JWT-auth')
 @Controller('notifications')
-
 export class NotificationsController extends ApiController {
-	constructor(private readonly notificationsService: NotificationsService){
-		super()
-	}
+  constructor(private readonly notificationsService: NotificationsService) {
+    super()
+  }
 
-	@Get()
-	async getAllNotifications(@Query() pagination: PaginationDto) {
-		return this.notificationsService.findAll(pagination)
-	}
-	@Get(':id')
-	async getNotificationById(@Param('id') id: string) {
-		return this.notificationsService.findOne(id)
-	}
+  @Get()
+  @ApiOperation({ summary: 'Barcha bildirishnomalar' })
+  findAll(@Query() pagination: NotificationFilterDto) {
+    return this.notificationsService.findAll(pagination)
+  }
 
-	@Post()
-	async createNotification(@Body() data: NotificationsCreateDto) {
-		return this.notificationsService.create(data)
-	}
+  @Get(':id')
+  @ApiOperation({ summary: 'Bitta bildirishnoma' })
+  findOne(@Param('id') id: string) {
+    return this.notificationsService.findOne(id)
+  }
 
-	@Put(':id')
-	async updateNotification(@Param('id') id: string, @Body() data: NotificationsCreateDto) {
-		return this.notificationsService.update(id, data)
-	}
+  @Post()
+  @ApiOperation({ summary: 'Bildirishnoma yuborish (SMS / Telegram)' })
+  send(@Body() data: CreateNotificationDto) {
+    return this.notificationsService.send(data)
+  }
 
-	@Delete(':id')
-	async deleteNotification(@Param('id') id: string) {
-		return this.notificationsService.remove(id)
-	}
+  @Post('bulk')
+  @ApiOperation({ summary: 'Ommaviy bildirishnoma yuborish' })
+  sendBulk(@Body() dto: BulkNotificationDto) {
+    return this.notificationsService.sendBulk(dto)
+  }
+
+  @Post('reminder')
+  @ApiOperation({ summary: 'Bron eslatmasini yuborish' })
+  sendBookingReminder(@Body() dto: BookingReminderDto) {
+    return this.notificationsService.sendBookingReminder(dto)
+  }
+
+  @Delete(':id')
+  @ApiOperation({ summary: 'Bildirishnomani o\'chirish' })
+  remove(@Param('id') id: string) {
+    return this.notificationsService.remove(id)
+  }
 }

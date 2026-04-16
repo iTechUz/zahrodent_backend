@@ -1,26 +1,69 @@
-import { ApiProperty } from "@nestjs/swagger";
-import { IsOptional, IsString } from "class-validator";
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger'
+import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator'
+import { Gender, PatientSource } from 'src/constantis'
+import { IsCuid } from 'src/validator/cuid'
+import { PaginationDto } from 'src/utils/paginations'
 
 export class PatientCreateDto {
-    @ApiProperty({ example: 'Main Branch', description: 'Name of the branch' })
-    @IsString()
-    name: string;
+  @ApiProperty({ example: 'Nodira', description: 'Bemor ismi' })
+  @IsString()
+  firstName: string
 
-    @ApiProperty({ example: '123 Main St, City, Country', description: 'Address of the branch' })
-    @IsString()
-    @IsOptional()
-    address: string;
+  @ApiPropertyOptional({ example: 'Karimova' })
+  @IsOptional()
+  @IsString()
+  lastName?: string
 
+  @ApiProperty({ example: '+998901234567' })
+  @IsString()
+  phone: string
 
-    @ApiProperty({ example: '+1234567890', description: 'Contact number of the branch' })
-    @IsString()
-    @IsOptional()
-    phone: string;
+  @ApiPropertyOptional({ example: 'Yunusobod tumani' })
+  @IsOptional()
+  @IsString()
+  address?: string
 
+  @ApiPropertyOptional({ example: '1990-05-20' })
+  @IsOptional()
+  @IsDateString()
+  birthDate?: string
 
-    @ApiProperty({ example: 'This is the main branch of our organization.', description: 'Description of the branch' })
-    @IsString()
-    @IsOptional()
-    description: string;
-  
+  @ApiPropertyOptional({ enum: Gender })
+  @IsOptional()
+  @IsEnum(Gender)
+  gender?: Gender
+
+  @ApiProperty({ enum: PatientSource, default: PatientSource.ADMIN })
+  @IsOptional()
+  @IsEnum(PatientSource)
+  source?: PatientSource
+
+  @ApiPropertyOptional({ example: 'Birinchi tashrif' })
+  @IsOptional()
+  @IsString()
+  notes?: string
+
+  @ApiPropertyOptional({ example: 'cuid...' })
+  @IsOptional()
+  @IsCuid()
+  branchId?: string
+}
+
+export class PatientUpdateDto extends PartialType(PatientCreateDto) {}
+
+export class PatientFilterDto extends PaginationDto {
+  @ApiPropertyOptional({ enum: PatientSource })
+  @IsOptional()
+  @IsEnum(PatientSource)
+  source?: PatientSource
+
+  @ApiPropertyOptional({ enum: Gender })
+  @IsOptional()
+  @IsEnum(Gender)
+  gender?: Gender
+
+  @ApiPropertyOptional({ example: 'cuid...' })
+  @IsOptional()
+  @IsCuid()
+  branchId?: string
 }

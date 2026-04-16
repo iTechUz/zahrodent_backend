@@ -26,7 +26,65 @@ export const initilRoles = [
 export enum RolesEnum {
 	ADMIN = 'ADMIN',
 	SUPER_ADMIN = 'SUPER_ADMIN',
+	DOCTOR = 'DOCTOR',
+	CLIENT = 'CLIENT',
+}
 
+export enum BookingStatus {
+	PENDING = 'PENDING',
+	CONFIRMED = 'CONFIRMED',
+	CANCELLED = 'CANCELLED',
+	COMPLETED = 'COMPLETED',
+	NO_SHOW = 'NO_SHOW',
+}
+
+export enum BookingSource {
+	WEB = 'WEB',
+	BOT = 'BOT',
+	ADMIN = 'ADMIN',
+	INSTAGRAM = 'INSTAGRAM',
+	RECOMMENDATION = 'RECOMMENDATION',
+	WALK_IN = 'WALK_IN',
+}
+
+export enum PatientSource {
+	INSTAGRAM = 'INSTAGRAM',
+	RECOMMENDATION = 'RECOMMENDATION',
+	WALK_IN = 'WALK_IN',
+	WEB = 'WEB',
+	BOT = 'BOT',
+	ADMIN = 'ADMIN',
+}
+
+export enum Gender {
+	MALE = 'MALE',
+	FEMALE = 'FEMALE',
+}
+
+export enum PaymentMethod {
+	CASH = 'CASH',
+	CARD = 'CARD',
+	TRANSFER = 'TRANSFER',
+}
+
+export enum PaymentStatus {
+	PENDING = 'PENDING',
+	PAID = 'PAID',
+	CANCELLED = 'CANCELLED',
+	REFUNDED = 'REFUNDED',
+}
+
+export enum NotificationType {
+	SMS = 'SMS',
+	TELEGRAM = 'TELEGRAM',
+	PUSH = 'PUSH',
+}
+
+export enum NotificationStatus {
+	PENDING = 'PENDING',
+	SENT = 'SENT',
+	FAILED = 'FAILED',
+	CANCELLED = 'CANCELLED',
 }
 
 export const monthNumbersObj = {

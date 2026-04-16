@@ -1,73 +1,119 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { add } from "date-fns";
-import { PrismaService } from '@/prisma.service'; // ✅ If using path aliases
-import { PaginationDto } from "src/utils/paginations";
-import { PatientCreateDto } from "./dto";
+import { Injectable, NotFoundException } from '@nestjs/common'
+import { PrismaService } from '@/prisma.service'
+import { PaginationDto } from 'src/utils/paginations'
+import { PatientCreateDto, PatientFilterDto, PatientUpdateDto } from './dto'
 
 @Injectable()
 export class PatientService {
-    constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-    async findAll(pagination:PaginationDto) {
-        const { page, pageSize, search, sortBy } = pagination;
+  async findAll(pagination: PatientFilterDto) {
+    const { page, pageSize, search, sortBy, source, gender, branchId } = pagination
 
-        let where: any = {};
-        if (search) {
-            where.OR = [
-                { name: { contains: search, mode: 'insensitive' } },
-                { address: { contains: search, mode: 'insensitive' } }
-            ];
-        }
+    const where: any = {}
 
-        const data = await this.prisma.branch.findMany({
-            where,
-            take: pageSize,
-            skip: (page - 1) * pageSize,
-            orderBy: {
-                createdAt: sortBy.toLowerCase() === 'asc' ? 'asc' : 'desc'
-            }
-        });
-
-        const total = await this.prisma.branch.count({ where });
-
-        return {
-            data,
-            total,
-            page,
-            pageSize
-        };
+    if (search) {
+      where.OR = [
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+        { address: { contains: search, mode: 'insensitive' } },
+      ]
     }
+    if (source) where.source = source
+    if (gender) where.gender = gender
+    if (branchId) where.branchId = branchId
 
+    const [data, total] = await Promise.all([
+      this.prisma.patient.findMany({
+        where,
+        take: pageSize,
+        skip: (page - 1) * pageSize,
+        orderBy: { createdAt: sortBy?.toLowerCase() === 'asc' ? 'asc' : 'desc' },
+        include: { branch: { select: { id: true, name: true } } },
+      }),
+      this.prisma.patient.count({ where }),
+    ])
 
-    async findOne(id: string) {
-        const branch = await this.prisma.branch.findUnique({
-            where: { id },
-        });
-        if (!branch) {
-            throw new NotFoundException(`Branch with ID ${id} not found`);
-        }
-        return branch;
+    return {
+      data,
+      meta: { total, page, pageSize, pageCount: Math.ceil(total / pageSize) },
     }
+  }
 
+  async findOne(id: string) {
+    const patient = await this.prisma.patient.findUnique({
+      where: { id },
+      include: {
+        branch: { select: { id: true, name: true } },
+        _count: { select: { bookings: true, medicalRecs: true, payments: true } },
+      },
+    })
+    if (!patient) throw new NotFoundException(`Bemor topilmadi: ${id}`)
+    return patient
+  }
 
-    async create(data: PatientCreateDto) {
-        return this.prisma.branch.create({
-            data,
-        });
-    }
+  async findPatientBookings(patientId: string, pagination: PaginationDto) {
+    await this.findOne(patientId)
+    const { page, pageSize } = pagination
+    const [data, total] = await Promise.all([
+      this.prisma.booking.findMany({
+        where: { patientId },
+        take: pageSize,
+        skip: (page - 1) * pageSize,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          doctor: { select: { id: true, firstName: true, lastName: true } },
+          service: { select: { id: true, name: true, price: true } },
+        },
+      }),
+      this.prisma.booking.count({ where: { patientId } }),
+    ])
+    return { data, meta: { total, page, pageSize, pageCount: Math.ceil(total / pageSize) } }
+  }
 
-    async update(id: string, data: PatientCreateDto) {
-        await this.findOne(id);
-        return this.prisma.branch.update({
-            where: { id },
-            data,
-        });
-    }
+  async findPatientMedicalRecords(patientId: string, pagination: PaginationDto) {
+    await this.findOne(patientId)
+    const { page, pageSize } = pagination
+    const [data, total] = await Promise.all([
+      this.prisma.medicalRecord.findMany({
+        where: { patientId },
+        take: pageSize,
+        skip: (page - 1) * pageSize,
+        orderBy: { visitDate: 'desc' },
+        include: { doctor: { select: { id: true, firstName: true, lastName: true } } },
+      }),
+      this.prisma.medicalRecord.count({ where: { patientId } }),
+    ])
+    return { data, meta: { total, page, pageSize, pageCount: Math.ceil(total / pageSize) } }
+  }
 
-    async remove(id: string) {
-        await this.findOne(id);
-        return this.prisma.branch.delete({
-            where: { id },
-        });
-    }
+  async findPatientPayments(patientId: string, pagination: PaginationDto) {
+    await this.findOne(patientId)
+    const { page, pageSize } = pagination
+    const [data, total] = await Promise.all([
+      this.prisma.payment.findMany({
+        where: { patientId },
+        take: pageSize,
+        skip: (page - 1) * pageSize,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.payment.count({ where: { patientId } }),
+    ])
+    return { data, meta: { total, page, pageSize, pageCount: Math.ceil(total / pageSize) } }
+  }
+
+  async create(data: PatientCreateDto) {
+    return this.prisma.patient.create({ data })
+  }
+
+  async update(id: string, data: PatientUpdateDto) {
+    await this.findOne(id)
+    return this.prisma.patient.update({ where: { id }, data })
+  }
+
+  async remove(id: string) {
+    await this.findOne(id)
+    return this.prisma.patient.delete({ where: { id } })
+  }
 }
