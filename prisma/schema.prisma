@@ -10,13 +10,15 @@ datasource db {
 model User {
   id           String   @id @default(cuid())
   name         String
-  email        String   @unique
+  phone        String   @unique
   passwordHash String   @map("password_hash")
   role         String
   specialty    String?
   avatar       String?
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
+
+  doctor Doctor?
 
   @@map("users")
 }
@@ -57,6 +59,8 @@ model Doctor {
 
   bookings Booking[]
   visits   Visit[]
+  user     User?    @relation(fields: [userId], references: [id])
+  userId   String?  @unique @map("user_id")
 
   @@map("doctors")
 }

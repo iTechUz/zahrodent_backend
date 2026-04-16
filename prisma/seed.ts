@@ -16,11 +16,11 @@ async function main() {
   await prisma.patient.deleteMany();
 
   const users = [
-    { id: 'u1', name: 'Dr. Zahro Admin', email: 'admin@zahro.dental', password: 'admin123', role: 'admin' },
-    { id: 'u2', name: 'Dr. Kamila Usmanova', email: 'kamila@zahro.dental', password: 'doctor123', role: 'doctor', specialty: 'Umumiy stomatologiya' },
-    { id: 'u3', name: 'Dr. Farrukh Ismoilov', email: 'farrukh@zahro.dental', password: 'doctor123', role: 'doctor', specialty: 'Ortodontiya' },
-    { id: 'u4', name: 'Gulnora Qabulxona', email: 'gulnora@zahro.dental', password: 'reception123', role: 'receptionist' },
-    { id: 'u5', name: 'Madina Qabulxona', email: 'madina@zahro.dental', password: 'reception123', role: 'receptionist' },
+    { id: 'u1', name: 'Dr. Zahro Admin', phone: '+998901234567', password: 'admin123', role: 'admin' },
+    { id: 'u2', name: 'Dr. Kamila Usmanova', phone: '+998901112233', password: 'doctor123', role: 'doctor', specialty: 'Umumiy stomatologiya' },
+    { id: 'u3', name: 'Dr. Farrukh Ismoilov', phone: '+998912223344', password: 'doctor123', role: 'doctor', specialty: 'Ortodontiya' },
+    { id: 'u4', name: 'Gulnora Qabulxona', phone: '+998901234568', password: 'reception123', role: 'receptionist' },
+    { id: 'u5', name: 'Madina Qabulxona', phone: '+998901234569', password: 'reception123', role: 'receptionist' },
   ];
 
   for (const u of users) {
@@ -28,10 +28,10 @@ async function main() {
       data: {
         id: u.id,
         name: u.name,
-        email: u.email,
+        phone: u.phone,
         passwordHash: await hash(u.password),
         role: u.role,
-        specialty: 'specialty' in u ? u.specialty : null,
+        specialty: 'specialty' in u ? (u as any).specialty : null,
       },
     });
   }

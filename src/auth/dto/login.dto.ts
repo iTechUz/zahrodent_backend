@@ -1,8 +1,9 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsString, MinLength, Matches } from 'class-validator';
 
 export class LoginDto {
-  @IsEmail()
-  email: string;
+  @IsString()
+  @Matches(/^\+998\d{9}$/, { message: 'Telefon raqami noto\'g\'ri formatda (+998XXXXXXXXX)' })
+  phone: string;
 
   @IsString()
   @MinLength(1, { message: 'password is required' })

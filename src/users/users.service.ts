@@ -17,7 +17,7 @@ export class UsersService {
       select: {
         id: true,
         name: true,
-        email: true,
+        phone: true,
         role: true,
         specialty: true,
         avatar: true,
@@ -33,7 +33,7 @@ export class UsersService {
       select: {
         id: true,
         name: true,
-        email: true,
+        phone: true,
         role: true,
         specialty: true,
         avatar: true,
@@ -46,11 +46,11 @@ export class UsersService {
 
   async create(dto: CreateUserDto) {
     const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+      where: { phone: dto.phone },
     });
     if (existing)
       throw new ConflictException(
-        'Ushbu email bilan foydalanuvchi allaqachon mavjud',
+        'Ushbu telefon raqami bilan foydalanuvchi allaqachon mavjud',
       );
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
@@ -65,7 +65,7 @@ export class UsersService {
       select: {
         id: true,
         name: true,
-        email: true,
+        phone: true,
         role: true,
       },
     });
@@ -87,7 +87,7 @@ export class UsersService {
       select: {
         id: true,
         name: true,
-        email: true,
+        phone: true,
         role: true,
       },
     });

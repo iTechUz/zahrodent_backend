@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Doctor, Prisma } from '@prisma/client';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Doctor, Prisma, User } from '@prisma/client';
 import { DoctorsRepository } from './doctors.repository';
+import { UsersService } from '../users/users.service';
 import {
   PaginationQueryDto,
   PaginatedResponse,
@@ -10,7 +11,10 @@ import { UpdateDoctorDto } from './dto/update-doctor.dto';
 
 @Injectable()
 export class DoctorsService {
-  constructor(private readonly doctorsRepository: DoctorsRepository) {}
+  constructor(
+    private readonly doctorsRepository: DoctorsRepository,
+    private readonly usersService: UsersService,
+  ) {}
 
   async findAll(
     query: PaginationQueryDto & { specialty?: string },
@@ -34,7 +38,7 @@ export class DoctorsService {
       skip,
       take: limitNum,
     });
-    return { data: data.map((d) => this.toResponse(d)), total };
+    return { data: data.map((d) => this.toResponse(d as any)), total };
   }
 
   async findOne(id: string) {
@@ -44,12 +48,27 @@ export class DoctorsService {
   }
 
   async create(dto: CreateDoctorDto) {
+    let userId: string | undefined;
+
+    if (dto.password) {
+      const user = await this.usersService.create({
+        name: dto.name,
+        phone: dto.phone,
+        password: dto.password,
+        role: 'doctor',
+        specialty: dto.specialty,
+        avatar: dto.avatar,
+      });
+      userId = user.id;
+    }
+
     const d = await this.doctorsRepository.create({
       name: dto.name,
       specialty: dto.specialty,
       phone: dto.phone,
       workingHours: dto.workingHours,
       avatar: dto.avatar,
+      user: userId ? { connect: { id: userId } } : undefined,
       schedule:
         dto.schedule === undefined ? undefined : (dto.schedule as object),
       daysOff: dto.daysOff === undefined ? undefined : dto.daysOff,
@@ -58,13 +77,43 @@ export class DoctorsService {
   }
 
   async update(id: string, dto: UpdateDoctorDto) {
-    await this.ensureExists(id);
+    const existingDoctor = await this.doctorsRepository.findById(id);
+    if (!existingDoctor) throw new NotFoundException('Doctor not found');
+
+    let userId = existingDoctor.userId;
+
+    // Handle user account updates or creation
+    if (dto.password) {
+      if (userId) {
+        // Update existing user
+        await this.usersService.update(userId, {
+          name: dto.name,
+          phone: dto.phone || existingDoctor.phone,
+          password: dto.password,
+          specialty: dto.specialty,
+          avatar: dto.avatar,
+        });
+      } else {
+        // Create new user if not exists but credentials provided
+        const user = await this.usersService.create({
+          name: dto.name || existingDoctor.name,
+          phone: dto.phone || existingDoctor.phone,
+          password: dto.password,
+          role: 'doctor',
+          specialty: dto.specialty || existingDoctor.specialty,
+          avatar: dto.avatar || existingDoctor.avatar || undefined,
+        });
+        userId = user.id;
+      }
+    }
+
     const d = await this.doctorsRepository.update(id, {
       name: dto.name,
       specialty: dto.specialty,
       phone: dto.phone,
       workingHours: dto.workingHours,
       avatar: dto.avatar,
+      user: userId ? { connect: { id: userId } } : undefined,
       schedule:
         dto.schedule === undefined ? undefined : (dto.schedule as object),
       daysOff: dto.daysOff === undefined ? undefined : dto.daysOff,
@@ -73,7 +122,13 @@ export class DoctorsService {
   }
 
   async remove(id: string) {
-    await this.ensureExists(id);
+    const d = await this.doctorsRepository.findById(id);
+    if (!d) throw new NotFoundException('Doctor not found');
+
+    if (d.userId) {
+      await this.usersService.remove(d.userId);
+    }
+
     await this.doctorsRepository.delete(id);
     return { id };
   }
@@ -123,12 +178,13 @@ export class DoctorsService {
       .sort((a, b) => b.totalRevenue - a.totalRevenue); // Sort by revenue by default
   }
 
-  private toResponse(d: Doctor) {
+  private toResponse(d: Doctor & { user?: { phone: string } | null }) {
     return {
       id: d.id,
       name: d.name,
       specialty: d.specialty,
       phone: d.phone,
+      loginPhone: d.user?.phone,
       workingHours: d.workingHours,
       avatar: d.avatar ?? undefined,
       schedule: d.schedule ?? undefined,

@@ -11,7 +11,7 @@ function isJwtAccessPayload(p: unknown): p is JwtAccessPayload {
   const o = p as Record<string, unknown>;
   return (
     typeof o.sub === 'string' &&
-    typeof o.email === 'string' &&
+    typeof o.phone === 'string' &&
     typeof o.name === 'string' &&
     typeof o.role === 'string' &&
     ['admin', 'doctor', 'receptionist'].includes(o.role as string)
@@ -37,7 +37,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     return {
       id: payload.sub,
       name: payload.name,
-      email: payload.email,
+      phone: payload.phone,
       role: payload.role as AppRole,
       specialty: payload.specialty,
       avatar: payload.avatar,
