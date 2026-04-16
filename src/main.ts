@@ -2,7 +2,9 @@ import 'dotenv/config';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { requestIdMiddleware } from './common/middleware/request-id.middleware';
@@ -50,6 +52,8 @@ async function bootstrap() {
   );
   app.useGlobalFilters(new AllExceptionsFilter());
   app.enableCors(buildCorsOptions(prod));
+  app.useGlobalGuards(app.get(ThrottlerGuard));
+  app.use(helmet({ contentSecurityPolicy: false }));
 
   const swaggerOn = isSwaggerEnabled(prod);
   if (swaggerOn) {

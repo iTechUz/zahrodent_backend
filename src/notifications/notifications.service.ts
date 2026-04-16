@@ -6,6 +6,7 @@ import { CreateNotificationDto } from './dto/create-notification.dto';
 import { BookingsRepository } from '../bookings/bookings.repository';
 import { PatientsRepository } from '../patients/patients.repository';
 import { EskizService } from './eskiz.service';
+import { PrismaService } from '../database/prisma.service';
 import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
 import { RecipientQueryDto, BulkSendDto } from './dto/bulk-sms.dto';
 
@@ -19,6 +20,7 @@ export class NotificationsService {
     private readonly bookingsRepository: BookingsRepository,
     private readonly patientsRepository: PatientsRepository,
     private readonly eskiz: EskizService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async findAll(query: PaginationQueryDto): Promise<PaginatedResponse<any>> {
@@ -240,7 +242,7 @@ export class NotificationsService {
     });
 
     const notificationRows: any[] = [];
-    const patientIdsToMark: string[] = [];
+    const bookingIdsToMark: string[] = [];
 
     for (const patient of patients) {
       const mobile = this.eskiz.normalizeMobile(patient.phone);
@@ -260,7 +262,7 @@ export class NotificationsService {
         status = r.ok ? 'sent' : 'failed';
         if (r.ok) {
           results.sent++;
-          patientIdsToMark.push(patient.id);
+          if (booking?.id) bookingIdsToMark.push(booking.id);
         } else {
           results.failed++;
         }
@@ -268,7 +270,7 @@ export class NotificationsService {
         status = mobile ? 'sent' : 'failed';
         if (status === 'sent') {
           results.sent++;
-          patientIdsToMark.push(patient.id);
+          if (booking?.id) bookingIdsToMark.push(booking.id);
         } else {
           results.failed++;
         }
@@ -287,11 +289,10 @@ export class NotificationsService {
       await this.notificationsRepository.createMany(notificationRows);
     }
 
-    if (patientIdsToMark.length) {
+    if (bookingIdsToMark.length) {
       await this.prisma.booking.updateMany({
         where: {
-          patientId: { in: patientIdsToMark },
-          date: { gte: new Date() },
+          id: { in: bookingIdsToMark },
           reminderSentAt: null,
         },
         data: { reminderSentAt: markAt },

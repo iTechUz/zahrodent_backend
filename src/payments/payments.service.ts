@@ -132,10 +132,12 @@ export class PaymentsService {
     tomorrow.setDate(today.getDate() + 1);
 
     const [totalRevenue, pendingAmount, todayRevenue] = await Promise.all([
-      this.paymentsRepository.sumAmount({ status: 'completed' }),
-      this.paymentsRepository.sumAmount({ status: 'pending' }),
+      this.paymentsRepository.sumAmount({ status: 'paid' }),
       this.paymentsRepository.sumAmount({
-        status: 'completed',
+        status: { in: ['partial', 'unpaid'] },
+      }),
+      this.paymentsRepository.sumAmount({
+        status: 'paid',
         date: { gte: today, lt: tomorrow },
       }),
     ]);
