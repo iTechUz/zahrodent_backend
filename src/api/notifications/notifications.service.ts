@@ -1,73 +1,108 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { add } from "date-fns";
-import { PrismaService } from '@/prisma.service'; // ✅ If using path aliases
-import { PaginationDto } from "src/utils/paginations";
-import { NotificationsCreateDto } from "./dto";
+import { Injectable, NotFoundException } from '@nestjs/common'
+import { PrismaService } from '@/prisma.service'
+import { NotificationStatus, NotificationType } from 'src/constantis'
+import {
+  BookingReminderDto,
+  BulkNotificationDto,
+  CreateNotificationDto,
+  NotificationFilterDto,
+} from './dto'
 
 @Injectable()
 export class NotificationsService {
-    constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-    async findAll(pagination:PaginationDto) {
-        const { page, pageSize, search, sortBy } = pagination;
+  async findAll(pagination: NotificationFilterDto) {
+    const { page, pageSize, search, sortBy, type, recipientId } = pagination
 
-        let where: any = {};
-        if (search) {
-            where.OR = [
-                { name: { contains: search, mode: 'insensitive' } },
-                { address: { contains: search, mode: 'insensitive' } }
-            ];
-        }
+    const where: any = {}
+    if (type) where.type = type
+    if (recipientId) where.recipientId = recipientId
+    if (search) where.message = { contains: search, mode: 'insensitive' }
 
-        const data = await this.prisma.branch.findMany({
-            where,
-            take: pageSize,
-            skip: (page - 1) * pageSize,
-            orderBy: {
-                createdAt: sortBy.toLowerCase() === 'asc' ? 'asc' : 'desc'
-            }
-        });
+    const [data, total] = await Promise.all([
+      this.prisma.notification.findMany({
+        where,
+        take: pageSize,
+        skip: (page - 1) * pageSize,
+        orderBy: { createdAt: sortBy?.toLowerCase() === 'asc' ? 'asc' : 'desc' },
+      }),
+      this.prisma.notification.count({ where }),
+    ])
 
-        const total = await this.prisma.branch.count({ where });
+    return { data, meta: { total, page, pageSize, pageCount: Math.ceil(total / pageSize) } }
+  }
 
-        return {
-            data,
-            total,
-            page,
-            pageSize
-        };
+  async findOne(id: string) {
+    const notification = await this.prisma.notification.findUnique({ where: { id } })
+    if (!notification) throw new NotFoundException(`Bildirishnoma topilmadi: ${id}`)
+    return notification
+  }
+
+  async send(data: CreateNotificationDto) {
+    const notification = await this.prisma.notification.create({
+      data: {
+        ...data,
+        scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
+        status: data.scheduledAt ? NotificationStatus.PENDING : NotificationStatus.SENT,
+        sentAt: data.scheduledAt ? null : new Date(),
+      },
+    })
+
+    if (!data.scheduledAt) {
+      await this.dispatchNotification(notification.type, notification.recipientId, notification.message)
     }
 
+    return notification
+  }
 
-    async findOne(id: string) {
-        const branch = await this.prisma.branch.findUnique({
-            where: { id },
-        });
-        if (!branch) {
-            throw new NotFoundException(`Branch with ID ${id} not found`);
-        }
-        return branch;
-    }
+  async sendBulk(dto: BulkNotificationDto) {
+    const notifications = await this.prisma.$transaction(
+      dto.recipientIds.map((recipientId) =>
+        this.prisma.notification.create({
+          data: {
+            type: dto.type,
+            recipientId,
+            message: dto.message,
+            status: NotificationStatus.SENT,
+            sentAt: new Date(),
+          },
+        }),
+      ),
+    )
 
+    await Promise.allSettled(
+      dto.recipientIds.map((id) => this.dispatchNotification(dto.type, id, dto.message)),
+    )
 
-    async create(data: NotificationsCreateDto) {
-        return this.prisma.branch.create({
-            data,
-        });
-    }
+    return { sent: notifications.length }
+  }
 
-    async update(id: string, data: NotificationsCreateDto) {
-        await this.findOne(id);
-        return this.prisma.branch.update({
-            where: { id },
-            data,
-        });
-    }
+  async sendBookingReminder(dto: BookingReminderDto) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: dto.bookingId },
+      include: { patient: true, doctor: true },
+    })
+    if (!booking) throw new NotFoundException(`Bron topilmadi: ${dto.bookingId}`)
 
-    async remove(id: string) {
-        await this.findOne(id);
-        return this.prisma.branch.delete({
-            where: { id },
-        });
-    }
+    const dateStr = new Date(booking.date).toLocaleDateString('uz-UZ')
+    const message = `Hurmatli ${booking.patient.firstName}, ${dateStr} kuni soat ${booking.startTime} da qabulingiz bor.`
+
+    return this.send({
+      type: NotificationType.SMS,
+      recipientId: booking.patient.id,
+      message,
+    })
+  }
+
+  async remove(id: string) {
+    await this.findOne(id)
+    return this.prisma.notification.delete({ where: { id } })
+  }
+
+  private async dispatchNotification(type: string, recipientId: string, message: string) {
+    // SMS va Telegram integratsiya shu yerda amalga oshiriladi
+    // Masalan: await this.smsService.send(phone, message)
+    // await this.telegramService.send(chatId, message)
+  }
 }

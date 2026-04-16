@@ -1,26 +1,61 @@
-import { ApiProperty } from "@nestjs/swagger";
-import { IsOptional, IsString } from "class-validator";
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
+import { IsArray, IsDateString, IsEnum, IsOptional, IsString } from 'class-validator'
+import { NotificationType } from 'src/constantis'
+import { IsCuid } from 'src/validator/cuid'
+import { PaginationDto } from 'src/utils/paginations'
 
-export class NotificationsCreateDto {
-    @ApiProperty({ example: 'Main Branch', description: 'Name of the branch' })
-    @IsString()
-    name: string;
+export class CreateNotificationDto {
+  @ApiProperty({ enum: NotificationType })
+  @IsEnum(NotificationType)
+  type: NotificationType
 
-    @ApiProperty({ example: '123 Main St, City, Country', description: 'Address of the branch' })
-    @IsString()
-    @IsOptional()
-    address: string;
+  @ApiProperty({ example: 'cuid...' })
+  @IsString()
+  recipientId: string
 
+  @ApiProperty({ example: 'Qabul eslatmasi: 15-iyun soat 10:00' })
+  @IsString()
+  message: string
 
-    @ApiProperty({ example: '+1234567890', description: 'Contact number of the branch' })
-    @IsString()
-    @IsOptional()
-    phone: string;
+  @ApiPropertyOptional({ example: '2025-06-14T18:00:00' })
+  @IsOptional()
+  @IsDateString()
+  scheduledAt?: string
+}
 
+export class BulkNotificationDto {
+  @ApiProperty({ enum: NotificationType })
+  @IsEnum(NotificationType)
+  type: NotificationType
 
-    @ApiProperty({ example: 'This is the main branch of our organization.', description: 'Description of the branch' })
-    @IsString()
-    @IsOptional()
-    description: string;
-  
+  @ApiProperty({ example: ['cuid1', 'cuid2'] })
+  @IsArray()
+  @IsString({ each: true })
+  recipientIds: string[]
+
+  @ApiProperty({ example: 'Ertangi qabul soat 10:00 da bo\'ladi' })
+  @IsString()
+  message: string
+}
+
+export class BookingReminderDto {
+  @ApiProperty({ example: 'cuid...' })
+  @IsCuid()
+  bookingId: string
+
+  @ApiPropertyOptional({ example: 24, description: 'Brondan necha soat oldin' })
+  @IsOptional()
+  hoursBeforeAppointment?: number
+}
+
+export class NotificationFilterDto extends PaginationDto {
+  @ApiPropertyOptional({ enum: NotificationType })
+  @IsOptional()
+  @IsEnum(NotificationType)
+  type?: NotificationType
+
+  @ApiPropertyOptional({ example: 'cuid...' })
+  @IsOptional()
+  @IsString()
+  recipientId?: string
 }
