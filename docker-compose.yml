@@ -1,35 +1,35 @@
-
-
 services:
-  api:
-    build:
-      dockerfile: Dockerfile
-    container_name: nest_api
-    ports:
-      - "3000:3000"
-    env_file:
-      - .env
-    depends_on:
-      - redis
-      - minio
-    networks:
-      - backend
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    ports:
-      - "6379:6379"
-    networks:
-      - backend
 
+  # ─── PostgreSQL ────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: zahrodent_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: zahrodent_backend_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d zahrodent_backend_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── MinIO ─────────────────────────────────
   minio:
     image: minio/minio
-    container_name: minio
+    container_name: zahrodent_minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: admin123
-      command: server /data --console-address ":9001"
+      MINIO_ROOT_PASSWORD: admin12345
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -37,9 +37,52 @@ services:
       - minio_data:/data
     networks:
       - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── NestJS API ────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zahrodent_api
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgresql://postgres:root@postgres:5432/zahrodent_backend_db
+      PORT: 4000
+      TZ: Asia/Tashkent
+      NODE_ENV: production
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: admin12345
+      MINIO_BUCKET: zahrodent
+      RUN_SEED: "true"
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
 
 networks:
   backend:
+    driver: bridge
 
 volumes:
   postgres_data:

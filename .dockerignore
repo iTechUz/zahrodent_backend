@@ -1,4 +1,40 @@
-.git/
+# Git
+.git
+.gitignore
+
+# Docker
 Dockerfile
-.gitlab-ci.yml
-node_modules/
+docker-compose.yml
+.dockerignore
+
+# Dependencies (container ichida o'rnatiladi)
+node_modules
+
+# Build artifacts
+dist
+
+# Logs
+*.log
+logs/
+
+# Test
+test/
+coverage/
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env (docker-compose orqali beriladi)
+.env.local
+.env.*.local
+
+# Docs
+*.md
+DOCUMENTATION.md
+MODULES_DOC.md
