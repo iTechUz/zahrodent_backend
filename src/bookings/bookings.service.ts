@@ -3,7 +3,7 @@ import { Booking, Prisma } from '@prisma/client';
 import { BookingsRepository } from './bookings.repository';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
-import { toDateOnlyString } from '../common/utils/date.util';
+import { endOfUTCDayInclusive, parseDateOnlyToUTC, startOfUTCDay, toDateOnlyString } from '../common/utils/date.util';
 import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
 import { AuthUserView } from '../auth/auth.service';
 
@@ -45,23 +45,25 @@ export class BookingsService {
     }
 
     if (dateRange !== 'all') {
-      const start = new Date();
-      start.setHours(0, 0, 0, 0);
-      const end = new Date();
+      const now = new Date();
+      const start = startOfUTCDay(now);
+      let end = endOfUTCDayInclusive(now);
 
-      if (dateRange === 'today') {
-        end.setHours(23, 59, 59, 999);
-      } else if (dateRange === 'week') {
-        // Start of week (Monday)
-        const day = start.getDay() || 7;
-        if (day !== 1) start.setHours(-24 * (day - 1));
-        end.setDate(start.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
+      if (dateRange === 'week') {
+        // Start of week (Monday) in UTC
+        const day = start.getUTCDay() || 7; // 1=Mon ... 0=Sun => 7
+        if (day !== 1) start.setUTCDate(start.getUTCDate() - (day - 1));
+        end = new Date(start);
+        end.setUTCDate(start.getUTCDate() + 6);
+        end = endOfUTCDayInclusive(end);
       } else if (dateRange === 'month') {
-        start.setDate(1);
-        end.setMonth(start.getMonth() + 1);
-        end.setDate(0);
-        end.setHours(23, 59, 59, 999);
+        const year = now.getUTCFullYear();
+        const month = now.getUTCMonth();
+        const monthStart = new Date(Date.UTC(year, month, 1));
+        const monthEndDate = new Date(Date.UTC(year, month + 1, 0));
+        // Ensure full-day boundaries in UTC
+        start.setTime(monthStart.getTime());
+        end = endOfUTCDayInclusive(monthEndDate);
       }
 
       where.date = { gte: start, lte: end };
@@ -86,7 +88,7 @@ export class BookingsService {
     const b = await this.bookingsRepository.create({
       patient: { connect: { id: dto.patientId } },
       doctor: { connect: { id: dto.doctorId } },
-      date: new Date(dto.date),
+      date: parseDateOnlyToUTC(dto.date),
       time: dto.time,
       source: dto.source,
       status: dto.status,
@@ -111,7 +113,7 @@ export class BookingsService {
     }
 
     const b = await this.bookingsRepository.update(id, {
-      date: dto.date === undefined ? undefined : new Date(dto.date),
+      date: dto.date === undefined ? undefined : parseDateOnlyToUTC(dto.date),
       time: dto.time,
       source: dto.source,
       status: dto.status,
@@ -149,10 +151,10 @@ export class BookingsService {
   }
 
   async getStats(user: AuthUserView) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+    const today = startOfUTCDay(now);
     const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
+    tomorrow.setUTCDate(today.getUTCDate() + 1);
 
     const baseWhere: Prisma.BookingWhereInput = {};
     if (user.role === 'doctor') {
@@ -189,8 +191,8 @@ export class BookingsService {
     serviceId: string | null | undefined,
     excludeId?: string,
   ) {
-    const bookingDate = new Date(date);
-    bookingDate.setHours(0, 0, 0, 0);
+    const bookingDate = typeof date === 'string' ? parseDateOnlyToUTC(date) : date;
+    bookingDate.setUTCHours(0, 0, 0, 0);
 
     // Get new booking duration
     let duration = 30; // Default

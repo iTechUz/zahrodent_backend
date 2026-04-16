@@ -23,6 +23,7 @@ describe('NotificationsService.sendReminders', () => {
     Pick<EskizService, 'isConfigured' | 'normalizeMobile' | 'sendSms'>
   >;
   let prisma: PrismaService;
+  let txMock: any;
 
   beforeEach(() => {
     notificationsRepo = { createMany: jest.fn().mockResolvedValue(undefined) };
@@ -39,14 +40,14 @@ describe('NotificationsService.sendReminders', () => {
       normalizeMobile: jest.fn(),
       sendSms: jest.fn(),
     };
+
+    txMock = {
+      notification: { createMany: jest.fn().mockResolvedValue(undefined) },
+      booking: { updateMany: jest.fn().mockResolvedValue(undefined) },
+    };
+
     prisma = {
-      booking: {
-        findMany: jest.fn(),
-        updateMany: jest.fn(),
-      },
-      patient: {
-        findMany: jest.fn(),
-      },
+      $transaction: jest.fn(async (cb: any) => cb(txMock)),
     } as unknown as PrismaService;
     service = new NotificationsService(
       notificationsRepo as unknown as NotificationsRepository,
@@ -61,8 +62,7 @@ describe('NotificationsService.sendReminders', () => {
     bookingsRepo.findAll.mockResolvedValue({ data: [], total: 0 } as any);
     const out = await service.sendReminders();
     expect(out).toEqual(expect.objectContaining({ created: 0 }));
-    expect(notificationsRepo.createMany).not.toHaveBeenCalled();
-    expect(bookingsRepo.markReminderSent).not.toHaveBeenCalled();
+    expect((prisma as any).$transaction).not.toHaveBeenCalled();
   });
 
   it('bir marta patients batch, createMany bitta chaqiruv', async () => {
@@ -97,19 +97,19 @@ describe('NotificationsService.sendReminders', () => {
     expect(patientsRepo.findSourcesByPatientIds).toHaveBeenCalledTimes(1);
     expect(patientsRepo.findPhonesByPatientIds).toHaveBeenCalledWith(['p1']);
     expect(patientsRepo.findSourcesByPatientIds).toHaveBeenCalledWith(['p1']);
-    expect(notificationsRepo.createMany).toHaveBeenCalledWith(
-      expect.arrayContaining([
+    expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
+    expect(txMock.notification.createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
         expect.objectContaining({
           patientId: 'p1',
           type: 'telegram',
           status: 'sent',
         }),
       ]),
-    );
-    expect(bookingsRepo.markReminderSent).toHaveBeenCalledTimes(1);
-    expect(bookingsRepo.markReminderSent).toHaveBeenCalledWith(
-      ['b1'],
-      expect.any(Date),
-    );
+    });
+    expect(txMock.booking.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['b1'] }, reminderSentAt: null },
+      data: { reminderSentAt: expect.any(Date) },
+    });
   });
 });

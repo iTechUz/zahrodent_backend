@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsIn, IsISO8601, IsOptional, IsString, MinLength } from 'class-validator';
 
 const TYPES = ['sms', 'telegram'] as const;
 const STATUSES = ['sent', 'delivered', 'failed'] as const;
@@ -20,6 +20,6 @@ export class CreateNotificationDto {
   status?: (typeof STATUSES)[number];
 
   @IsOptional()
-  @IsString()
+  @IsISO8601({ strict: true })
   sentAt?: string;
 }

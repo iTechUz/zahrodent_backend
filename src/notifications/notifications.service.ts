@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { Notification } from '@prisma/client';
-import { startOfDay } from 'date-fns';
 import { NotificationsRepository } from './notifications.repository';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { BookingsRepository } from '../bookings/bookings.repository';
 import { PatientsRepository } from '../patients/patients.repository';
 import { EskizService } from './eskiz.service';
 import { PrismaService } from '../database/prisma.service';
+import { endOfUTCDayInclusive, parseDateOnlyToUTC, startOfUTCDay, toDateOnlyString } from '../common/utils/date.util';
 import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
 import { RecipientQueryDto, BulkSendDto } from './dto/bulk-sms.dto';
 
@@ -88,85 +88,114 @@ export class NotificationsService {
     let smsFailed = 0;
     const eskizOn = this.eskiz.isConfigured();
 
-    for (const b of bookings) {
+    const concurrency = 5;
+    const results = await mapWithConcurrency(bookings, concurrency, async (b) => {
       const source = sourceByPatientId.get(b.patientId);
-      if (source === undefined) continue;
+      if (source === undefined) return null;
 
       const message = `Eslatma: Sizning qabulingiz ${this.formatBookingDate(b.date)} kuni soat ${b.time} da`;
       const sentAt = new Date();
 
+      // Telegram => immediate "sent" and mark booking.
       if (source === 'telegram') {
-        rows.push({
-          patientId: b.patientId,
-          type: 'telegram',
-          message,
-          status: 'sent',
-          sentAt,
-        });
-        bookingIdsToMark.push(b.id);
-        continue;
+        return {
+          row: {
+            patientId: b.patientId,
+            type: 'telegram' as const,
+            message,
+            status: 'sent' as const,
+            sentAt,
+          },
+          bookingIdToMark: b.id,
+          smsSentInc: 0,
+          smsFailedInc: 0,
+        };
       }
 
-      const type = 'sms';
+      // SMS path
+      const type: ReminderType = 'sms';
 
       if (!eskizOn) {
-        rows.push({
-          patientId: b.patientId,
-          type,
-          message,
-          status: 'sent',
-          sentAt,
-        });
-        bookingIdsToMark.push(b.id);
-        continue;
+        return {
+          row: {
+            patientId: b.patientId,
+            type,
+            message,
+            status: 'sent' as const,
+            sentAt,
+          },
+          bookingIdToMark: b.id,
+          smsSentInc: 0,
+          smsFailedInc: 0,
+        };
       }
 
       const rawPhone = phoneByPatientId.get(b.patientId);
       const mobile = rawPhone ? this.eskiz.normalizeMobile(rawPhone) : null;
       if (!mobile) {
-        rows.push({
-          patientId: b.patientId,
-          type,
-          message,
-          status: 'failed',
-          sentAt,
-        });
-        smsFailed += 1;
-        continue;
+        return {
+          row: {
+            patientId: b.patientId,
+            type,
+            message,
+            status: 'failed' as const,
+            sentAt,
+          },
+          bookingIdToMark: null,
+          smsSentInc: 0,
+          smsFailedInc: 1,
+        };
       }
 
       const r = await this.eskiz.sendSms(mobile, message);
       if (r.ok) {
-        rows.push({
-          patientId: b.patientId,
-          type,
-          message,
-          status: 'sent',
-          sentAt,
-        });
-        bookingIdsToMark.push(b.id);
-        smsSent += 1;
-      } else {
-        rows.push({
-          patientId: b.patientId,
-          type,
-          message,
-          status: 'failed',
-          sentAt,
-        });
-        smsFailed += 1;
+        return {
+          row: {
+            patientId: b.patientId,
+            type,
+            message,
+            status: 'sent' as const,
+            sentAt,
+          },
+          bookingIdToMark: b.id,
+          smsSentInc: 1,
+          smsFailedInc: 0,
+        };
       }
+
+      return {
+        row: {
+          patientId: b.patientId,
+          type,
+          message,
+          status: 'failed' as const,
+          sentAt,
+        },
+        bookingIdToMark: null,
+        smsSentInc: 0,
+        smsFailedInc: 1,
+      };
+    });
+
+    for (const r of results) {
+      if (!r) continue;
+      rows.push(r.row);
+      if (r.bookingIdToMark) bookingIdsToMark.push(r.bookingIdToMark);
+      smsSent += r.smsSentInc;
+      smsFailed += r.smsFailedInc;
     }
 
     if (rows.length) {
       const markAt = new Date();
-      await this.notificationsRepository.createMany(rows);
-      if (bookingIdsToMark.length) {
-        await this.bookingsRepository.markReminderSent(
-          bookingIdsToMark,
-          markAt,
-        );
-      }
+      await this.prisma.$transaction(async (tx) => {
+        await tx.notification.createMany({ data: rows });
+        if (bookingIdsToMark.length) {
+          await tx.booking.updateMany({
+            where: { id: { in: bookingIdsToMark }, reminderSentAt: null },
+            data: { reminderSentAt: markAt },
+          });
+        }
+      });
     }
 
     return eskizOn
@@ -177,7 +206,9 @@ export class NotificationsService {
   async findRecipients(query: RecipientQueryDto) {
     const { startDate, endDate } = query;
     const dateStart = new Date(startDate);
+    dateStart.setUTCHours(0, 0, 0, 0);
     const dateEnd = new Date(endDate);
+    dateEnd.setUTCHours(23, 59, 59, 999);
 
     const bookings = await this.prisma.booking.findMany({
       where: {
@@ -208,7 +239,7 @@ export class NotificationsService {
         patientMap.set(b.patientId, {
           ...b.patient,
           bookingId: b.id,
-          bookingDate: b.date,
+          bookingDate: toDateOnlyString(b.date),
           bookingTime: b.time,
         });
       }
@@ -231,7 +262,7 @@ export class NotificationsService {
         phone: true,
         bookings: {
           where: {
-            date: { gte: startOfDay(new Date()) },
+            date: { gte: startOfUTCDay(new Date()) },
             status: { in: ['confirmed', 'pending'] },
             reminderSentAt: null,
           },
@@ -244,58 +275,75 @@ export class NotificationsService {
     const notificationRows: any[] = [];
     const bookingIdsToMark: string[] = [];
 
-    for (const patient of patients) {
+    const concurrency = 5;
+    const taskResults = await mapWithConcurrency(patients, concurrency, async (patient) => {
       const mobile = this.eskiz.normalizeMobile(patient.phone);
       let status: ReminderStatus = 'sent';
       const booking = patient.bookings[0];
-      
+
       // Replace placeholders
       let personalizedMessage = message;
       if (booking) {
         personalizedMessage = personalizedMessage
-          .replace(/\[sana\]/g, booking.date.toISOString().slice(0, 10))
+          .replace(/\[sana\]/g, toDateOnlyString(booking.date))
           .replace(/\[vaqt\]/g, booking.time);
       }
+
+      let sentInc = 0;
+      let failedInc = 0;
+      let bookingIdToMark: string | null = null;
 
       if (eskizOn && mobile) {
         const r = await this.eskiz.sendSms(mobile, personalizedMessage);
         status = r.ok ? 'sent' : 'failed';
         if (r.ok) {
-          results.sent++;
-          if (booking?.id) bookingIdsToMark.push(booking.id);
+          sentInc = 1;
+          bookingIdToMark = booking?.id ?? null;
         } else {
-          results.failed++;
+          failedInc = 1;
         }
       } else {
         status = mobile ? 'sent' : 'failed';
         if (status === 'sent') {
-          results.sent++;
-          if (booking?.id) bookingIdsToMark.push(booking.id);
+          sentInc = 1;
+          bookingIdToMark = booking?.id ?? null;
         } else {
-          results.failed++;
+          failedInc = 1;
         }
       }
 
-      notificationRows.push({
+      const row = {
         patientId: patient.id,
-        type: 'sms',
+        type: 'sms' as const,
         message: personalizedMessage,
         status,
         sentAt: markAt,
-      });
+      };
+
+      return { row, bookingIdToMark, sentInc, failedInc };
+    });
+
+    for (const tr of taskResults) {
+      notificationRows.push(tr.row);
+      if (tr.bookingIdToMark) bookingIdsToMark.push(tr.bookingIdToMark);
+      results.sent += tr.sentInc;
+      results.failed += tr.failedInc;
     }
 
-    if (notificationRows.length) {
-      await this.notificationsRepository.createMany(notificationRows);
-    }
-
-    if (bookingIdsToMark.length) {
-      await this.prisma.booking.updateMany({
-        where: {
-          id: { in: bookingIdsToMark },
-          reminderSentAt: null,
-        },
-        data: { reminderSentAt: markAt },
+    if (notificationRows.length || bookingIdsToMark.length) {
+      await this.prisma.$transaction(async (tx) => {
+        if (notificationRows.length) {
+          await tx.notification.createMany({ data: notificationRows });
+        }
+        if (bookingIdsToMark.length) {
+          await tx.booking.updateMany({
+            where: {
+              id: { in: bookingIdsToMark },
+              reminderSentAt: null,
+            },
+            data: { reminderSentAt: markAt },
+          });
+        }
       });
     }
 
@@ -303,7 +351,7 @@ export class NotificationsService {
   }
 
   private formatBookingDate(d: Date) {
-    return d.toISOString().slice(0, 10);
+    return toDateOnlyString(d);
   }
 
   private toResponse(n: Notification) {
@@ -316,4 +364,24 @@ export class NotificationsService {
       status: n.status,
     };
   }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let idx = 0;
+
+  const worker = async () => {
+    while (idx < items.length) {
+      const current = idx++;
+      results[current] = await fn(items[current]);
+    }
+  };
+
+  const workers = Array.from({ length: Math.max(1, concurrency) }, () => worker());
+  await Promise.all(workers);
+  return results;
 }

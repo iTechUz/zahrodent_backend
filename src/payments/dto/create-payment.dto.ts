@@ -3,6 +3,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   Min,
   MinLength,
 } from 'class-validator';
@@ -42,7 +43,7 @@ export class CreatePaymentDto {
   serviceId?: string;
 
   @IsOptional()
-  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date YYYY-MM-DD formatida bo‘lishi kerak' })
   date?: string;
 
   @IsOptional()

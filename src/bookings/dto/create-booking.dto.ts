@@ -1,4 +1,4 @@
-import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsIn, IsOptional, IsString, MinLength, Matches } from 'class-validator';
 
 const SOURCES = ['walk-in', 'telegram', 'website', 'phone'] as const;
 const STATUSES = [
@@ -20,7 +20,7 @@ export class CreateBookingDto {
   doctorId: string;
 
   @IsString()
-  @MinLength(10)
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date YYYY-MM-DD formatida bo‘lishi kerak' })
   date: string;
 
   @IsString()

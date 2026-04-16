@@ -4,7 +4,7 @@ import { VisitsRepository } from './visits.repository';
 import { PaginationQueryDto, PaginatedResponse } from '../common/dto/pagination.dto';
 import { CreateVisitDto } from './dto/create-visit.dto';
 import { UpdateVisitDto } from './dto/update-visit.dto';
-import { toDateOnlyString } from '../common/utils/date.util';
+import { parseDateOnlyToUTC, toDateOnlyString } from '../common/utils/date.util';
 import { AuthUserView } from '../auth/auth.service';
 
 @Injectable()
@@ -57,7 +57,7 @@ export class VisitsService {
       patient: { connect: { id: dto.patientId } },
       doctor: { connect: { id: dto.doctorId } },
       booking: dto.bookingId ? { connect: { id: dto.bookingId } } : undefined,
-      date: new Date(dateStr),
+      date: parseDateOnlyToUTC(dateStr),
       status: dto.status,
       diagnosis: dto.diagnosis ?? '',
       treatment: dto.treatment ?? '',
@@ -70,7 +70,7 @@ export class VisitsService {
   async update(id: string, dto: UpdateVisitDto, user: AuthUserView) {
     await this.ensureExists(id, user);
     const v = await this.visitsRepository.update(id, {
-      date: dto.date === undefined ? undefined : new Date(dto.date),
+      date: dto.date === undefined ? undefined : parseDateOnlyToUTC(dto.date),
       status: dto.status,
       diagnosis: dto.diagnosis,
       treatment: dto.treatment,
