@@ -3,13 +3,15 @@ import { ConfigModule } from '@nestjs/config'
 import { ScheduleModule } from '@nestjs/schedule'
 import { AppController } from './app.controller'
 import { AppService } from './app.service'
-
 import { ApiModule } from './api/api.module'
+import { GatewayModule } from './gateway/gateway.module'
+
 @Module({
 	imports: [
 		ConfigModule.forRoot({ isGlobal: true }),
-			ScheduleModule.forRoot(),
-			ApiModule,
+		ScheduleModule.forRoot(),
+		ApiModule,
+		GatewayModule,
 	],
 	controllers: [AppController],
 	providers: [AppService],

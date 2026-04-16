@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/prisma.service'
 import { BookingStatus } from 'src/constantis'
+import { GatewayService, WsEvent } from 'src/gateway/gateway.service'
 import {
   AvailableSlotsDto,
   BookingFilterDto,
@@ -11,7 +12,10 @@ import {
 
 @Injectable()
 export class BookingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gatewayService: GatewayService,
+  ) {}
 
   async findAll(pagination: BookingFilterDto) {
     const { page, pageSize, search, sortBy, doctorId, patientId, branchId, status, source, dateFrom, dateTo } =
@@ -124,7 +128,7 @@ export class BookingService {
     })
     if (existing) throw new BadRequestException('Bu vaqtda bron mavjud')
 
-    return this.prisma.booking.create({
+    const booking = await this.prisma.booking.create({
       data: { ...data, date: new Date(data.date) },
       include: {
         patient: { select: { id: true, firstName: true, lastName: true, phone: true } },
@@ -132,13 +136,19 @@ export class BookingService {
         service: { select: { id: true, name: true, price: true } },
       },
     })
+
+    this.gatewayService.emitToBranch(booking.branchId, WsEvent.BOOKING_CREATED, booking)
+    this.gatewayService.emitToDoctor(booking.doctorId, WsEvent.BOOKING_CREATED, booking)
+    return booking
   }
 
   async update(id: string, data: UpdateBookingDto) {
     await this.findOne(id)
     const updateData: any = { ...data }
     if (data.date) updateData.date = new Date(data.date)
-    return this.prisma.booking.update({ where: { id }, data: updateData })
+    const updated = await this.prisma.booking.update({ where: { id }, data: updateData })
+    this.gatewayService.emitToBranch(updated.branchId, WsEvent.BOOKING_UPDATED, updated)
+    return updated
   }
 
   async confirm(id: string) {
@@ -146,7 +156,10 @@ export class BookingService {
     if (booking.status !== BookingStatus.PENDING) {
       throw new BadRequestException('Faqat kutilayotgan bronni tasdiqlash mumkin')
     }
-    return this.prisma.booking.update({ where: { id }, data: { status: BookingStatus.CONFIRMED } })
+    const updated = await this.prisma.booking.update({ where: { id }, data: { status: BookingStatus.CONFIRMED } })
+    this.gatewayService.emitToBranch(updated.branchId, WsEvent.BOOKING_CONFIRMED, updated)
+    this.gatewayService.emitToDoctor(updated.doctorId, WsEvent.BOOKING_CONFIRMED, updated)
+    return updated
   }
 
   async cancel(id: string, dto: CancelBookingDto) {
@@ -154,10 +167,13 @@ export class BookingService {
     if (booking.status === BookingStatus.COMPLETED) {
       throw new BadRequestException('Yakunlangan bronni bekor qilib bo\'lmaydi')
     }
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id },
       data: { status: BookingStatus.CANCELLED, cancelReason: dto.cancelReason },
     })
+    this.gatewayService.emitToBranch(updated.branchId, WsEvent.BOOKING_CANCELLED, updated)
+    this.gatewayService.emitToDoctor(updated.doctorId, WsEvent.BOOKING_CANCELLED, updated)
+    return updated
   }
 
   async complete(id: string) {
@@ -165,7 +181,9 @@ export class BookingService {
     if (booking.status !== BookingStatus.CONFIRMED) {
       throw new BadRequestException('Faqat tasdiqlangan bronni yakunlash mumkin')
     }
-    return this.prisma.booking.update({ where: { id }, data: { status: BookingStatus.COMPLETED } })
+    const updated = await this.prisma.booking.update({ where: { id }, data: { status: BookingStatus.COMPLETED } })
+    this.gatewayService.emitToBranch(updated.branchId, WsEvent.BOOKING_COMPLETED, updated)
+    return updated
   }
 
   async remove(id: string) {

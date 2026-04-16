@@ -1,11 +1,15 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { PrismaService } from '@/prisma.service'
 import { PaymentStatus } from 'src/constantis'
+import { GatewayService, WsEvent } from 'src/gateway/gateway.service'
 import { CreatePaymentDto, PaymentFilterDto, UpdatePaymentDto } from './dto'
 
 @Injectable()
 export class PaymentService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gatewayService: GatewayService,
+  ) {}
 
   async findAll(pagination: PaymentFilterDto) {
     const { page, pageSize, sortBy, patientId, bookingId, status, paymentMethod, dateFrom, dateTo } = pagination
@@ -86,12 +90,12 @@ export class PaymentService {
   }
 
   async create(data: CreatePaymentDto) {
-    return this.prisma.payment.create({
+    const payment = await this.prisma.payment.create({
       data,
-      include: {
-        patient: { select: { id: true, firstName: true, lastName: true } },
-      },
+      include: { patient: { select: { id: true, firstName: true, lastName: true } } },
     })
+    this.gatewayService.emitToUser(payment.patientId, WsEvent.PAYMENT_CREATED, payment)
+    return payment
   }
 
   async update(id: string, data: UpdatePaymentDto) {
@@ -104,10 +108,12 @@ export class PaymentService {
     if (payment.status !== PaymentStatus.PENDING) {
       throw new BadRequestException('Faqat kutilayotgan to\'lovni tasdiqlash mumkin')
     }
-    return this.prisma.payment.update({
+    const updated = await this.prisma.payment.update({
       where: { id },
       data: { status: PaymentStatus.PAID, paidAt: new Date() },
     })
+    this.gatewayService.emitToUser(updated.patientId, WsEvent.PAYMENT_CONFIRMED, updated)
+    return updated
   }
 
   async cancel(id: string) {
