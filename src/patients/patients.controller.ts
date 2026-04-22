@@ -18,6 +18,7 @@ import {
 import { PatientsService } from './patients.service';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
+import { CreatePatientCommentDto } from './dto/create-patient-comment.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -80,5 +81,23 @@ export class PatientsController {
   @ApiParam({ name: 'id' })
   remove(@Param('id') id: string, @GetUser() user: AuthUserView) {
     return this.patientsService.remove(id, user);
+  }
+
+  @Post(':id/comments')
+  @ApiOperation({ summary: "Izoh qo'shish" })
+  @ApiParam({ name: 'id' })
+  addComment(
+    @Param('id') id: string,
+    @Body() dto: CreatePatientCommentDto,
+    @GetUser() user: AuthUserView,
+  ) {
+    return this.patientsService.addComment({ ...dto, patientId: id }, user.id);
+  }
+
+  @Get(':id/comments')
+  @ApiOperation({ summary: "Bemor izohlari ro'yxati" })
+  @ApiParam({ name: 'id' })
+  findComments(@Param('id') id: string) {
+    return this.patientsService.findComments(id);
   }
 }

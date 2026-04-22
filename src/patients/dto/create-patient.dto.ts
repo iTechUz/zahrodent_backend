@@ -37,13 +37,17 @@ export class CreatePatientDto {
   @IsString()
   notes?: string;
 
-  @IsOptional()
   @IsString()
-  allergies?: string;
+  @MinLength(3)
+  address: string;
+
+  @IsString()
+  @MinLength(1)
+  workplace: string;
 
   @IsOptional()
   @IsString()
-  bloodType?: string;
+  assignedDoctorId?: string;
 
   @IsOptional()
   @IsString()

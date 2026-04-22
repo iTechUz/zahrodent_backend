@@ -18,29 +18,34 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  doctor Doctor?
+  doctor   Doctor?
+  comments PatientComment[]
 
   @@map("users")
 }
 
 model Patient {
-  id         String   @id @default(cuid())
-  firstName  String   @map("first_name")
-  lastName   String   @map("last_name")
-  age        Int
-  phone      String
-  source     String
-  notes      String   @default("")
-  avatar     String?
-  createdAt  DateTime @default(now()) @map("created_at") @db.Date
-  allergies  String?
-  bloodType  String?  @map("blood_type")
-  toothChart Json?    @map("tooth_chart")
+  id               String   @id @default(cuid())
+  firstName        String   @map("first_name")
+  lastName         String   @map("last_name")
+  age              Int
+  phone            String
+  address          String   @default("")
+  workplace        String   @default("")
+  source           String
+  notes            String   @default("")
+  avatar           String?
+  createdAt        DateTime @default(now()) @map("created_at") @db.Date
+  toothChart       Json?    @map("tooth_chart")
+
+  assignedDoctorId String?  @map("assigned_doctor_id")
+  assignedDoctor   Doctor?  @relation("AssignedDoctor", fields: [assignedDoctorId], references: [id])
 
   bookings      Booking[]
   visits        Visit[]
   payments      Payment[]
   notifications Notification[]
+  comments      PatientComment[]
 
   @@index([createdAt])
   @@index([phone])
@@ -48,20 +53,22 @@ model Patient {
 }
 
 model Doctor {
-  id           String  @id @default(cuid())
-  name         String
-  specialty    String
-  phone        String
-  workingHours String  @map("working_hours")
-  avatar       String?
-  schedule     Json?
-  daysOff      Json?   @map("days_off")
+  id        String  @id @default(cuid())
+  firstName String  @map("first_name") @default("")
+  lastName  String  @map("last_name") @default("")
+  specialty String
+  phone     String
+  avatar    String?
+  schedule  Json?
+  daysOff   Json?   @map("days_off")
 
   bookings      Booking[]
   visits        Visit[]
   notifications Notification[]
   user          User?          @relation(fields: [userId], references: [id])
   userId        String?        @unique @map("user_id")
+
+  assignedPatients Patient[] @relation("AssignedDoctor")
 
   @@map("doctors")
 }
@@ -132,6 +139,7 @@ model Payment {
   amount      Int
   method      String
   status      String
+  type        String   @default("INCOME") // INCOME (Kirim) or EXPENSE (Chiqim)
   date        DateTime @db.Date
   description String
   discount    Int?
@@ -145,7 +153,21 @@ model Payment {
   @@index([patientId])
   @@index([status])
   @@index([date])
+  @@index([type])
   @@map("payments")
+}
+
+model PatientComment {
+  id        String   @id @default(cuid())
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  patientId String   @map("patient_id")
+  authorId  String   @map("author_id")
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@map("patient_comments")
 }
 
 model Notification {

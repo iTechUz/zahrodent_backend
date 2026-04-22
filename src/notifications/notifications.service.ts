@@ -240,7 +240,7 @@ export class NotificationsService {
           select: { id: true, firstName: true, lastName: true, phone: true },
         },
         doctor: {
-          select: { id: true, name: true, phone: true },
+          select: { id: true, firstName: true, lastName: true, phone: true },
         }
       },
       orderBy: { date: 'asc' },
@@ -253,13 +253,13 @@ export class NotificationsService {
         if (!doctorMap.has(b.doctorId)) {
           doctorMap.set(b.doctorId, {
             id: b.doctorId,
-            firstName: b.doctor?.name || '',
-            lastName: '',
+            firstName: b.doctor?.firstName || '',
+            lastName: b.doctor?.lastName || '',
             phone: b.doctor?.phone || '',
             bookingId: b.id,
             bookingDate: toDateOnlyString(b.date),
             bookingTime: b.time,
-            patientName: b.patient ? `${b.patient.firstName} ${b.patient.lastName}` : '',
+            patientName: (b as any).patient ? `${(b as any).patient.firstName} ${(b as any).patient.lastName}` : '',
           });
         }
       });
@@ -270,7 +270,7 @@ export class NotificationsService {
     bookings.forEach((b) => {
       if (!patientMap.has(b.patientId)) {
         patientMap.set(b.patientId, {
-          ...b.patient,
+          ...(b as any).patient,
           bookingId: b.id,
           bookingDate: toDateOnlyString(b.date),
           bookingTime: b.time,

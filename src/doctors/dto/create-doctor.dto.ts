@@ -14,7 +14,11 @@ export class CreateDoctorDto {
 
   @IsString()
   @MinLength(1)
-  name: string;
+  firstName: string;
+
+  @IsString()
+  @MinLength(1)
+  lastName: string;
 
   @IsString()
   @MinLength(1)
@@ -26,9 +30,6 @@ export class CreateDoctorDto {
   })
   phone: string;
 
-  @IsString()
-  @MinLength(1)
-  workingHours: string;
 
   @IsOptional()
   @IsString()

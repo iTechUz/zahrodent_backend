@@ -11,6 +11,7 @@ import { Type } from 'class-transformer';
 
 const METHODS = ['cash', 'card', 'transfer', 'insurance'] as const;
 const STATUSES = ['paid', 'partial', 'unpaid'] as const;
+const TYPES = ['INCOME', 'EXPENSE'] as const;
 
 export class CreatePaymentDto {
   @IsString()
@@ -27,6 +28,10 @@ export class CreatePaymentDto {
 
   @IsIn(STATUSES)
   status: (typeof STATUSES)[number];
+
+  @IsOptional()
+  @IsIn(TYPES)
+  type?: (typeof TYPES)[number];
 
   @IsString()
   @MinLength(3)

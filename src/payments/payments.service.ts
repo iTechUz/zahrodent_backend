@@ -23,10 +23,11 @@ export class PaymentsService {
       status?: string;
       patientId?: string;
       method?: string;
+      type?: string;
       dateRange?: 'today' | 'week' | 'month' | 'all';
     },
   ): Promise<PaginatedResponse<any>> {
-    const { search, status, patientId, method, dateRange = 'all' } = query;
+    const { search, status, patientId, method, type, dateRange = 'all' } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
@@ -36,6 +37,7 @@ export class PaymentsService {
     if (patientId) where.patientId = patientId;
     if (status && status !== 'all') where.status = status;
     if (method && method !== 'all') where.method = method;
+    if (type && type !== 'all') where.type = type;
 
     if (search?.trim()) {
       const s = search.trim();
@@ -98,6 +100,7 @@ export class PaymentsService {
       status: dto.status,
       date: parseDateOnlyToUTC(dateStr),
       description: dto.description,
+      type: dto.type || 'INCOME',
       discount: dto.discount,
       service: dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
       visit: dto.visitId ? { connect: { id: dto.visitId } } : undefined,
@@ -112,6 +115,7 @@ export class PaymentsService {
       method: dto.method,
       status: dto.status,
       description: dto.description,
+      type: dto.type,
       discount: dto.discount,
       date: dto.date === undefined ? undefined : parseDateOnlyToUTC(dto.date),
       patient:
@@ -182,6 +186,7 @@ export class PaymentsService {
       status: p.status,
       date: toDateOnlyString(p.date),
       description: p.description,
+      type: p.type,
       discount: p.discount ?? undefined,
       serviceId: p.serviceId ?? undefined,
       visitId: p.visitId ?? undefined,

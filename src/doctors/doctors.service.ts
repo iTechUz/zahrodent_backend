@@ -31,7 +31,10 @@ export class DoctorsService {
     }
 
     if (search?.trim()) {
-      where.name = { contains: search, mode: 'insensitive' };
+      where.OR = [
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } },
+      ];
     }
 
     const { data, total } = await this.doctorsRepository.findAll(where, {
@@ -52,7 +55,7 @@ export class DoctorsService {
 
     if (dto.password) {
       const user = await this.usersService.create({
-        name: dto.name,
+        name: `${dto.firstName} ${dto.lastName}`,
         phone: dto.phone,
         password: dto.password,
         role: 'doctor',
@@ -63,10 +66,10 @@ export class DoctorsService {
     }
 
     const d = await this.doctorsRepository.create({
-      name: dto.name,
+      firstName: dto.firstName,
+      lastName: dto.lastName,
       specialty: dto.specialty,
       phone: dto.phone,
-      workingHours: dto.workingHours,
       avatar: dto.avatar,
       user: userId ? { connect: { id: userId } } : undefined,
       schedule:
@@ -87,7 +90,10 @@ export class DoctorsService {
       if (userId) {
         // Update existing user
         await this.usersService.update(userId, {
-          name: dto.name,
+          name:
+            dto.firstName && dto.lastName
+              ? `${dto.firstName} ${dto.lastName}`
+              : existingDoctor.firstName + ' ' + existingDoctor.lastName,
           phone: dto.phone || existingDoctor.phone,
           password: dto.password,
           specialty: dto.specialty,
@@ -96,7 +102,9 @@ export class DoctorsService {
       } else {
         // Create new user if not exists but credentials provided
         const user = await this.usersService.create({
-          name: dto.name || existingDoctor.name,
+          name: `${dto.firstName || existingDoctor.firstName} ${
+            dto.lastName || existingDoctor.lastName
+          }`,
           phone: dto.phone || existingDoctor.phone,
           password: dto.password,
           role: 'doctor',
@@ -108,10 +116,10 @@ export class DoctorsService {
     }
 
     const d = await this.doctorsRepository.update(id, {
-      name: dto.name,
+      firstName: dto.firstName,
+      lastName: dto.lastName,
       specialty: dto.specialty,
       phone: dto.phone,
-      workingHours: dto.workingHours,
       avatar: dto.avatar,
       user: userId ? { connect: { id: userId } } : undefined,
       schedule:
@@ -181,11 +189,11 @@ export class DoctorsService {
   private toResponse(d: Doctor & { user?: { phone: string } | null }) {
     return {
       id: d.id,
-      name: d.name,
+      firstName: d.firstName,
+      lastName: d.lastName,
       specialty: d.specialty,
       phone: d.phone,
       loginPhone: d.user?.phone,
-      workingHours: d.workingHours,
       avatar: d.avatar ?? undefined,
       schedule: d.schedule ?? undefined,
       daysOff: (d.daysOff as string[] | null) ?? undefined,

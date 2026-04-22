@@ -80,11 +80,13 @@ export class ServicesService {
     const totalCount = await this.servicesRepository.count();
     const categoriesCount = await this.servicesRepository.countCategories();
     const avgPrice = await this.servicesRepository.getAvgPrice();
+    const detailed = await this.servicesRepository.getDetailedStats();
 
     return {
       totalCount,
       categoriesCount,
       avgPrice,
+      detailed,
     };
   }
 

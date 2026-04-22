@@ -13,7 +13,7 @@ export class DoctorsRepository {
     const [data, total] = await Promise.all([
       this.prisma.doctor.findMany({
         where,
-        orderBy: { name: 'asc' },
+        orderBy: { firstName: 'asc' },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
@@ -81,7 +81,13 @@ export class DoctorsRepository {
   async getDetailedEfficiencyStats() {
     // Get all doctors first
     const doctors = await this.prisma.doctor.findMany({
-      select: { id: true, name: true, specialty: true },
+      select: { 
+        id: true, 
+        firstName: true, 
+        lastName: true, 
+        specialty: true,
+        phone: true 
+      },
     });
 
     // Get booking stats per doctor
@@ -105,16 +111,31 @@ export class DoctorsRepository {
     // and we can cross reference with payments if wanted.
     // For simplicity and business logic: Revenue = Sum(Visit.price where status=completed)
 
+    // Get unique patient counts per doctor
+    const uniquePatientStats = await this.prisma.visit.groupBy({
+      by: ['doctorId', 'patientId'],
+      where: { status: 'completed' },
+    });
+
+    const doctorUniquePatients = new Map<string, Set<string>>();
+    uniquePatientStats.forEach(s => {
+      if (!doctorUniquePatients.has(s.doctorId)) doctorUniquePatients.set(s.doctorId, new Set());
+      doctorUniquePatients.get(s.doctorId)!.add(s.patientId);
+    });
+
     return doctors.map((d) => {
       const bStat = bookingStats.find((s) => s.doctorId === d.id);
       const vStat = visitStats.find((s) => s.doctorId === d.id);
 
       return {
         id: d.id,
-        name: d.name,
+        firstName: d.firstName,
+        lastName: d.lastName,
         specialty: d.specialty,
+        phone: d.phone,
         totalBookings: bStat?._count.id || 0,
         totalVisits: vStat?._count.id || 0,
+        uniquePatients: doctorUniquePatients.get(d.id)?.size || 0,
         totalRevenue: vStat?._sum.price || 0,
       };
     });

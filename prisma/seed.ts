@@ -20,9 +20,9 @@ async function main() {
     { id: 'u2', name: 'Dr. Kamila Usmanova', phone: '+998901112233', password: 'doctor123', role: 'doctor', specialty: 'Umumiy stomatologiya' },
     { id: 'u3', name: 'Dr. Farrukh Ismoilov', phone: '+998912223344', password: 'doctor123', role: 'doctor', specialty: 'Ortodontiya' },
     { id: 'u4', name: 'Gulnora Qabulxona', phone: '+998901234568', password: 'reception123', role: 'receptionist' },
-    { id: 'u5', name: 'Madina Qabulxona', phone: '+998901234569', password: 'reception123', role: 'receptionist' },
+    { id: 'u5', name: 'Madina Qabulxona', phone: '+998901234569', password: 'reception123', role: 'receptionist' }, 
   ];
-
+ 
   for (const u of users) {
     await prisma.user.create({
       data: {
@@ -46,8 +46,6 @@ async function main() {
       source: 'telegram',
       notes: 'Muntazam tekshiruv bemori',
       createdAt: new Date('2024-01-15'),
-      allergies: 'Lidokain',
-      bloodType: 'A+',
       toothChart: {
         '16': { toothNumber: 16, condition: 'filled', notes: 'Kompozit plomba', date: '2024-01-15' },
         '26': { toothNumber: 26, condition: 'cavity', notes: 'Kichik kariyes', date: '2024-03-31' },
@@ -65,17 +63,16 @@ async function main() {
       source: 'walk-in',
       notes: 'Pastki chap tishda sezuvchanlik',
       createdAt: new Date('2024-02-20'),
-      bloodType: 'B+',
     },
   });
 
   await prisma.doctor.create({
     data: {
       id: 'd1',
-      name: 'Dr. Kamila Usmanova',
+      firstName: 'Kamila',
+      lastName: 'Usmanova',
       specialty: 'Umumiy stomatologiya',
       phone: '+998 90 111 2233',
-      workingHours: 'Du-Ju 9:00-17:00',
       schedule: [
         { day: 0, startTime: '09:00', endTime: '17:00', isWorking: true },
         { day: 1, startTime: '09:00', endTime: '17:00', isWorking: true },
@@ -91,10 +88,10 @@ async function main() {
   await prisma.doctor.create({
     data: {
       id: 'd2',
-      name: 'Dr. Farrukh Ismoilov',
+      firstName: 'Farrukh',
+      lastName: 'Ismoilov',
       specialty: 'Ortodontiya',
       phone: '+998 91 222 3344',
-      workingHours: 'Du-Sha 10:00-18:00',
     },
   });
 

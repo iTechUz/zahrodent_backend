@@ -16,6 +16,7 @@ export class PatientsRepository {
         include: {
           payments: { where: { status: 'paid' }, select: { amount: true } },
           visits: { where: { status: 'completed' }, select: { price: true } },
+          assignedDoctor: { select: { firstName: true, lastName: true } },
         },
         orderBy: { createdAt: 'desc' },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
@@ -45,6 +46,7 @@ export class PatientsRepository {
       include: {
         payments: { where: { status: 'paid' }, select: { amount: true } },
         visits: { where: { status: 'completed' }, select: { price: true } },
+        assignedDoctor: { select: { firstName: true, lastName: true } },
       },
     }) as any;
   }
@@ -81,5 +83,21 @@ export class PatientsRepository {
 
   delete(id: string): Promise<Patient> {
     return this.prisma.patient.delete({ where: { id } });
+  }
+
+  // Comments
+  async createComment(data: { content: string; patientId: string; authorId: string }) {
+    return this.prisma.patientComment.create({
+      data,
+      include: { author: { select: { name: true, avatar: true } } },
+    });
+  }
+
+  async findCommentsByPatientId(patientId: string) {
+    return this.prisma.patientComment.findMany({
+      where: { patientId },
+      include: { author: { select: { name: true, avatar: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 }

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PatientsRepository } from './patients.repository';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
+import { CreatePatientCommentDto } from './dto/create-patient-comment.dto';
 import { toDateOnlyString } from '../common/utils/date.util';
 import {
   PaginatedResponse,
@@ -93,8 +94,11 @@ export class PatientsService {
       phone: dto.phone,
       source: dto.source,
       notes: dto.notes ?? '',
-      allergies: dto.allergies,
-      bloodType: dto.bloodType,
+      address: dto.address,
+      workplace: dto.workplace,
+      assignedDoctor: dto.assignedDoctorId
+        ? { connect: { id: dto.assignedDoctorId } }
+        : undefined,
       avatar: dto.avatar,
       toothChart:
         dto.toothChart === undefined ? undefined : (dto.toothChart as object),
@@ -111,8 +115,11 @@ export class PatientsService {
       phone: dto.phone,
       source: dto.source,
       notes: dto.notes,
-      allergies: dto.allergies,
-      bloodType: dto.bloodType,
+      address: dto.address,
+      workplace: dto.workplace,
+      assignedDoctor: dto.assignedDoctorId
+        ? { connect: { id: dto.assignedDoctorId } }
+        : undefined,
       avatar: dto.avatar,
       toothChart:
         dto.toothChart === undefined ? undefined : (dto.toothChart as object),
@@ -160,6 +167,19 @@ export class PatientsService {
     };
   }
 
+  // Comments
+  async addComment(dto: CreatePatientCommentDto, authorId: string) {
+    return this.patientsRepository.createComment({
+      content: dto.content,
+      patientId: dto.patientId,
+      authorId,
+    });
+  }
+
+  async findComments(patientId: string) {
+    return this.patientsRepository.findCommentsByPatientId(patientId);
+  }
+
   private toResponse(p: any) {
     const paid = (p.payments || []).reduce(
       (acc: number, curr: any) => acc + (curr.amount || 0),
@@ -179,11 +199,17 @@ export class PatientsService {
       phone: p.phone,
       source: p.source,
       notes: p.notes,
+      address: p.address,
+      workplace: p.workplace,
       avatar: p.avatar ?? undefined,
       balance,
       createdAt: toDateOnlyString(p.createdAt),
-      allergies: p.allergies ?? undefined,
-      bloodType: p.bloodType ?? undefined,
+      assignedDoctor: p.assignedDoctor
+        ? {
+            firstName: p.assignedDoctor.firstName,
+            lastName: p.assignedDoctor.lastName,
+          }
+        : undefined,
       toothChart: (p.toothChart as Record<number, unknown> | null) ?? undefined,
     };
   }
