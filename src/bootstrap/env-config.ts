@@ -108,3 +108,12 @@ export function enforceProductionJwtSecret(): void {
     );
   }
 }
+export function enforceProductionAdminPassword(): void {
+  if (!isProduction()) return;
+  const pass = process.env.INITIAL_ADMIN_PASSWORD?.trim();
+  if (!pass || pass === 'admin123' || pass.length < 8) {
+    throw new Error(
+      "Production: INITIAL_ADMIN_PASSWORD majburiy va xavfsiz bo'lishi kerak (kamida 8 belgi, 'admin123' taqiqlangan)",
+    );
+  }
+}

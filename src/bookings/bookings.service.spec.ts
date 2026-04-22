@@ -14,7 +14,7 @@ describe('BookingsService', () => {
   const user: AuthUserView = {
     id: 'u1',
     name: 'Test',
-    email: 'test@example.com',
+    phone: '+998901234567',
     role: 'receptionist',
   };
 

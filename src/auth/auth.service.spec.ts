@@ -4,14 +4,14 @@ import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { UsersRepository } from './users.repository';
 
-type User = NonNullable<Awaited<ReturnType<UsersRepository['findByEmail']>>>;
+type User = NonNullable<Awaited<ReturnType<UsersRepository['findByPhone']>>>;
 
 function mockUser(partial: Partial<User>): User {
   const now = new Date();
   return {
     id: 'u1',
     name: 'U',
-    email: 'e@e.c',
+    phone: '+998901234567',
     passwordHash: 'h',
     role: 'admin',
     specialty: null,
@@ -24,11 +24,11 @@ function mockUser(partial: Partial<User>): User {
 
 describe('AuthService', () => {
   let service: AuthService;
-  let usersRepository: jest.Mocked<Pick<UsersRepository, 'findByEmail'>>;
+  let usersRepository: jest.Mocked<Pick<UsersRepository, 'findByPhone'>>;
   let jwtService: jest.Mocked<Pick<JwtService, 'signAsync'>>;
 
   beforeEach(() => {
-    usersRepository = { findByEmail: jest.fn() };
+    usersRepository = { findByPhone: jest.fn() };
     jwtService = { signAsync: jest.fn().mockResolvedValue('signed-jwt') };
     service = new AuthService(
       usersRepository as unknown as UsersRepository,
@@ -37,42 +37,42 @@ describe('AuthService', () => {
   });
 
   it('login — foydalanuvchi yo‘q → 401', async () => {
-    usersRepository.findByEmail.mockResolvedValue(null);
+    usersRepository.findByPhone.mockResolvedValue(null);
     await expect(
-      service.login({ email: 'a@b.c', password: 'x' }),
+      service.login({ phone: '+998900000000', password: 'x' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('login — parol noto‘g‘ri → 401', async () => {
-    usersRepository.findByEmail.mockResolvedValue(
+    usersRepository.findByPhone.mockResolvedValue(
       mockUser({
-        email: 'a@b.c',
+        phone: '+998901234567',
         passwordHash: await bcrypt.hash('right', 4),
       }),
     );
     await expect(
-      service.login({ email: 'a@b.c', password: 'wrong' }),
+      service.login({ phone: '+998901234567', password: 'wrong' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it('login — muvaffaqiyat', async () => {
     const hash = await bcrypt.hash('secret', 4);
-    usersRepository.findByEmail.mockResolvedValue(
+    usersRepository.findByPhone.mockResolvedValue(
       mockUser({
         name: 'Admin',
-        email: 'admin@test',
+        phone: '+998901234567',
         passwordHash: hash,
       }),
     );
 
     const out = await service.login({
-      email: 'admin@test',
+      phone: '+998901234567',
       password: 'secret',
     });
     expect(out.access_token).toBe('signed-jwt');
     expect(out.user).toMatchObject({
       id: 'u1',
-      email: 'admin@test',
+      phone: '+998901234567',
       role: 'admin',
     });
     expect(jwtService.signAsync).toHaveBeenCalledWith(

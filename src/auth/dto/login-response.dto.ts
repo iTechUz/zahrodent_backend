@@ -7,8 +7,8 @@ export class AuthUserResponseDto {
   @ApiProperty({ example: 'Dr. Zahro Admin' })
   name: string;
 
-  @ApiProperty({ example: 'admin@zahro.dental' })
-  email: string;
+  @ApiProperty({ example: '+998901234567' })
+  phone: string;
 
   @ApiProperty({ enum: ['admin', 'doctor', 'receptionist'] })
   role: string;

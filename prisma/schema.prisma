@@ -49,6 +49,7 @@ model Patient {
 
   @@index([createdAt])
   @@index([phone])
+  @@index([lastName, firstName])
   @@map("patients")
 }
 
@@ -110,6 +111,7 @@ model Booking {
   @@index([doctorId])
   @@index([date])
   @@index([status])
+  @@index([date, status])
   @@map("bookings")
 }
 

@@ -17,6 +17,7 @@ import {
   parsePort,
   enforceProductionJwtSecret,
   warnWeakJwtSecret,
+  enforceProductionAdminPassword,
 } from './bootstrap/env-config';
 
 const SWAGGER_PATH = 'swagger';
@@ -29,6 +30,7 @@ async function bootstrap() {
 
   warnWeakJwtSecret(prod);
   enforceProductionJwtSecret();
+  enforceProductionAdminPassword();
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
@@ -54,6 +56,9 @@ async function bootstrap() {
   app.enableCors(buildCorsOptions(prod));
   app.useGlobalGuards(app.get(ThrottlerGuard));
   app.use(helmet({ contentSecurityPolicy: false }));
+
+  // Graceful shutdown hooks
+  app.enableShutdownHooks();
 
   const swaggerOn = isSwaggerEnabled(prod);
   if (swaggerOn) {

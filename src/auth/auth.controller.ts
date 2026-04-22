@@ -15,7 +15,7 @@ export class AuthController {
   @Post('login')
   @ApiOperation({
     summary: 'Kirish',
-    description: 'Email va parol bilan JWT olish',
+    description: 'Telefon raqami va parol bilan JWT olish',
   })
   @ApiBody({ type: LoginDto })
   @ApiResponse({
@@ -23,7 +23,7 @@ export class AuthController {
     description: 'Muvaffaqiyatli',
     type: LoginResponseDto,
   })
-  @ApiResponse({ status: 401, description: "Noto'g'ri email yoki parol" })
+  @ApiResponse({ status: 401, description: "Noto'g'ri telefon raqami yoki parol" })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
