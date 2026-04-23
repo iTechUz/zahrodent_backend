@@ -1,0 +1,14 @@
+node_modules
+dist
+npm-debug.log
+.git
+.env
+.github
+Dockerfile
+docker-compose.yml
+README.md
+test
+coverage
+scratch
+reconcile_drift.sql
+docs
