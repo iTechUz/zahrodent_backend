@@ -39,16 +39,13 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             echo "Deploying commit: ${{ github.sha }}"
-            cd /home/ubuntu/zahro-dental/backend || exit 1
-            
-            # Docker Hub-dan yangi imageni tortib olish
+
             docker pull 10449/zahrodent_backend:${{ github.sha }}
-            
-            # Environment variable-ni yangilash (agar kerak bo'lsa)
-            export IMAGE_TAG=${{ github.sha }}
-            
-            # Konteynerlarni yangilash
-            docker-compose up -d
-            
-            # Eskirgan imagelarni tozalash
-            docker image prune -f
+            docker rm -f zahrodent_backend || true
+
+            docker run -d \
+              --name zahrodent_backend \
+              --network zaxro_network \
+              -p 7878:7878 \
+              --env-file /home/ubuntu/projects/zaxro_dent/backend/zahrodent_backend/.env \
+              10449/zahrodent_backend:${{ github.sha }}
