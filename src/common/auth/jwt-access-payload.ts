@@ -7,4 +7,5 @@ export type JwtAccessPayload = {
   name: string;
   specialty?: string;
   avatar?: string;
+  doctorId?: string; // Doctor record id (differs from user id)
 };

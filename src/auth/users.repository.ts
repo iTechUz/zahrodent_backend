@@ -13,4 +13,11 @@ export class UsersRepository {
   findById(id: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { id } });
   }
+
+  findDoctorByUserId(userId: string): Promise<{ id: string } | null> {
+    return this.prisma.doctor.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+  }
 }
