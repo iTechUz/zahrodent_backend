@@ -186,3 +186,19 @@ model Notification {
 
   @@map("notifications")
 }
+
+model Lead {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String
+  service   String?
+  message   String?
+  status    String   @default("new") // new, contacted, converted, cancelled
+  source    String   @default("telegram_bot")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("leads")
+}
