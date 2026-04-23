@@ -47,12 +47,16 @@ export class NotificationsService {
       const patient = await this.patientsRepository.findById(dto.patientId);
       targetPhone = patient?.phone ?? null;
     } else if (dto.doctorId) {
-      const doctor = await this.prisma.doctor.findUnique({ where: { id: dto.doctorId } });
+      const doctor = await this.prisma.doctor.findUnique({
+        where: { id: dto.doctorId },
+      });
       targetPhone = doctor?.phone ?? null;
     }
 
     if (dto.type === 'sms' && this.eskiz.isConfigured()) {
-      targetPhone = targetPhone ? this.eskiz.normalizeMobile(targetPhone) : null;
+      targetPhone = targetPhone
+        ? this.eskiz.normalizeMobile(targetPhone)
+        : null;
       if (!targetPhone) {
         status = 'failed';
       } else {
@@ -241,7 +245,7 @@ export class NotificationsService {
         },
         doctor: {
           select: { id: true, firstName: true, lastName: true, phone: true },
-        }
+        },
       },
       orderBy: { date: 'asc' },
     });
@@ -259,7 +263,9 @@ export class NotificationsService {
             bookingId: b.id,
             bookingDate: toDateOnlyString(b.date),
             bookingTime: b.time,
-            patientName: (b as any).patient ? `${(b as any).patient.firstName} ${(b as any).patient.lastName}` : '',
+            patientName: (b as any).patient
+              ? `${(b as any).patient.firstName} ${(b as any).patient.lastName}`
+              : '',
           });
         }
       });
@@ -287,40 +293,41 @@ export class NotificationsService {
     const results = { sent: 0, failed: 0 };
     const markAt = new Date();
 
-    const targets = targetType === 'doctor' 
-      ? await this.prisma.doctor.findMany({
-          where: { id: { in: targetIds } },
-          select: { 
-            id: true, 
-            phone: true,
-            bookings: {
-              where: {
-                date: { gte: startOfUTCDay(new Date()) },
-                status: { in: ['confirmed', 'pending'] },
+    const targets =
+      targetType === 'doctor'
+        ? await this.prisma.doctor.findMany({
+            where: { id: { in: targetIds } },
+            select: {
+              id: true,
+              phone: true,
+              bookings: {
+                where: {
+                  date: { gte: startOfUTCDay(new Date()) },
+                  status: { in: ['confirmed', 'pending'] },
+                },
+                include: { patient: true },
+                orderBy: { date: 'asc' },
+                take: 1,
               },
-              include: { patient: true },
-              orderBy: { date: 'asc' },
-              take: 1,
-            }
-          }
-        })
-      : await this.prisma.patient.findMany({
-          where: { id: { in: targetIds } },
-          select: {
-            id: true,
-            phone: true,
-            bookings: {
-              where: {
-                date: { gte: startOfUTCDay(new Date()) },
-                status: { in: ['confirmed', 'pending'] },
-                reminderSentAt: null,
-              },
-              include: { patient: true },
-              orderBy: { date: 'asc' },
-              take: 1,
             },
-          },
-        });
+          })
+        : await this.prisma.patient.findMany({
+            where: { id: { in: targetIds } },
+            select: {
+              id: true,
+              phone: true,
+              bookings: {
+                where: {
+                  date: { gte: startOfUTCDay(new Date()) },
+                  status: { in: ['confirmed', 'pending'] },
+                  reminderSentAt: null,
+                },
+                include: { patient: true },
+                orderBy: { date: 'asc' },
+                take: 1,
+              },
+            },
+          });
 
     const notificationRows: any[] = [];
     const bookingIdsToMark: string[] = [];
@@ -340,7 +347,10 @@ export class NotificationsService {
             .replace(/\[sana\]/g, toDateOnlyString(booking.date))
             .replace(/\[vaqt\]/g, booking.time);
           if (booking.patient) {
-            personalizedMessage = personalizedMessage.replace(/\[bemor\]/g, `${booking.patient.firstName} ${booking.patient.lastName}`);
+            personalizedMessage = personalizedMessage.replace(
+              /\[bemor\]/g,
+              `${booking.patient.firstName} ${booking.patient.lastName}`,
+            );
           }
         }
 

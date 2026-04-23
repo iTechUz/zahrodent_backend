@@ -18,7 +18,9 @@ export class AdminInitService implements OnModuleInit {
     });
 
     if (adminCount === 0) {
-      this.logger.log('Hech qanday admin topilmadi. Super admin yaratilmoqda...');
+      this.logger.log(
+        'Hech qanday admin topilmadi. Super admin yaratilmoqda...',
+      );
 
       const phone = process.env.INITIAL_ADMIN_PHONE || '+998901234567';
       const password = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';

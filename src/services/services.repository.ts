@@ -53,11 +53,6 @@ export class ServicesRepository {
   }
 
   async getDetailedStats() {
-    // Total patients per service (count unique patientId in visits/bookings linked to service)
-    const patientStats = await this.prisma.visit.groupBy({
-      by: ['serviceId' as any], // Wait, visit doesn't have serviceId directly usually? 
-      // Let's check schema again.
-    });
     // Actually, Payment has serviceId.
     const paymentStats = await this.prisma.payment.groupBy({
       by: ['serviceId'],
@@ -70,19 +65,20 @@ export class ServicesRepository {
       by: ['serviceId', 'patientId'],
       where: { serviceId: { not: null } },
     });
-    
+
     // Manual aggregation due to prisma groupBy limitations on unique count
     const servicePatientCount = new Map<string, Set<string>>();
-    patientStatsRaw.forEach(r => {
+    patientStatsRaw.forEach((r) => {
       if (!r.serviceId) return;
-      if (!servicePatientCount.has(r.serviceId)) servicePatientCount.set(r.serviceId, new Set());
+      if (!servicePatientCount.has(r.serviceId))
+        servicePatientCount.set(r.serviceId, new Set());
       servicePatientCount.get(r.serviceId)!.add(r.patientId);
     });
 
-    return paymentStats.map(s => ({
+    return paymentStats.map((s) => ({
       serviceId: s.serviceId!,
       revenue: s._sum.amount || 0,
-      patientCount: servicePatientCount.get(s.serviceId!)?.size || 0
+      patientCount: servicePatientCount.get(s.serviceId!)?.size || 0,
     }));
   }
 

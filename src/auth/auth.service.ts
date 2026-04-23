@@ -13,6 +13,7 @@ export type AuthUserView = {
   role: AppRole;
   specialty?: string;
   avatar?: string;
+  doctorId?: string; // Doctor record id (for doctor role only)
 };
 
 @Injectable()
@@ -31,7 +32,13 @@ export class AuthService {
     if (!ok) {
       throw new UnauthorizedException("Telefon raqami yoki parol noto'g'ri");
     }
-    const view = this.toUserView(user);
+    // If doctor role, fetch the associated Doctor record id
+    let doctorId: string | undefined;
+    if (user.role === 'doctor') {
+      const doctor = await this.usersRepository.findDoctorByUserId(user.id);
+      doctorId = doctor?.id;
+    }
+    const view = this.toUserView(user, doctorId);
     const payload: JwtAccessPayload = {
       sub: user.id,
       role: view.role,
@@ -39,22 +46,26 @@ export class AuthService {
       name: view.name,
       specialty: view.specialty,
       avatar: view.avatar,
+      doctorId: view.doctorId,
     };
     const access_token = await this.jwtService.signAsync(payload);
     return {
       access_token,
-      user: this.toUserView(user),
+      user: view,
     };
   }
 
-  toUserView(user: {
-    id: string;
-    name: string;
-    phone: string;
-    role: string;
-    specialty: string | null;
-    avatar: string | null;
-  }): AuthUserView {
+  toUserView(
+    user: {
+      id: string;
+      name: string;
+      phone: string;
+      role: string;
+      specialty: string | null;
+      avatar: string | null;
+    },
+    doctorId?: string,
+  ): AuthUserView {
     return {
       id: user.id,
       name: user.name,
@@ -62,6 +73,7 @@ export class AuthService {
       role: user.role as AppRole,
       specialty: user.specialty ?? undefined,
       avatar: user.avatar ?? undefined,
+      doctorId,
     };
   }
 }

@@ -3,7 +3,6 @@ import { Prisma } from '@prisma/client';
 import { PatientsRepository } from './patients.repository';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
-import { CreatePatientCommentDto } from './dto/create-patient-comment.dto';
 import { toDateOnlyString } from '../common/utils/date.util';
 import {
   PaginatedResponse,
@@ -39,12 +38,12 @@ export class PatientsService {
     }
 
     if (user.role === 'doctor') {
-      where.OR = undefined; // Clear the previous OR to avoid conflicts if needed, but better to combine
+      where.OR = undefined;
       where.AND = [
         {
           OR: [
-            { bookings: { some: { doctorId: user.id } } },
-            { visits: { some: { doctorId: user.id } } },
+            { bookings: { some: { doctorId: user.doctorId } } },
+            { visits: { some: { doctorId: user.doctorId } } },
           ],
         },
       ];
@@ -71,12 +70,11 @@ export class PatientsService {
     if (!p) throw new NotFoundException('Patient not found');
 
     if (user.role === 'doctor') {
-      // Check if patient has any association with this doctor
       const hasAccess = await this.patientsRepository.count({
         id,
         OR: [
-          { bookings: { some: { doctorId: user.id } } },
-          { visits: { some: { doctorId: user.id } } },
+          { bookings: { some: { doctorId: user.doctorId } } },
+          { visits: { some: { doctorId: user.doctorId } } },
         ],
       });
       if (!hasAccess) {
@@ -141,8 +139,8 @@ export class PatientsService {
     const where: Prisma.PatientWhereInput = {};
     if (user.role === 'doctor') {
       where.OR = [
-        { bookings: { some: { doctorId: user.id } } },
-        { visits: { some: { doctorId: user.id } } },
+        { bookings: { some: { doctorId: user.doctorId } } },
+        { visits: { some: { doctorId: user.doctorId } } },
       ];
     }
 
@@ -168,10 +166,13 @@ export class PatientsService {
   }
 
   // Comments
-  async addComment(dto: CreatePatientCommentDto, authorId: string) {
+  async addComment(
+    data: { content: string; patientId: string },
+    authorId: string,
+  ) {
     return this.patientsRepository.createComment({
-      content: dto.content,
-      patientId: dto.patientId,
+      content: data.content,
+      patientId: data.patientId,
       authorId,
     });
   }

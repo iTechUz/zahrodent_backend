@@ -40,7 +40,7 @@ export class BookingsService {
     const where: Prisma.BookingWhereInput = {};
 
     if (user.role === 'doctor') {
-      where.doctorId = user.id;
+      where.doctorId = user.doctorId;
     }
 
     if (patientId) where.patientId = patientId;
@@ -91,7 +91,7 @@ export class BookingsService {
   async findOne(id: string, user: AuthUserView) {
     const b = await this.bookingsRepository.findById(id);
     if (!b) throw new NotFoundException('Booking not found');
-    if (user.role === 'doctor' && b.doctorId !== user.id) {
+    if (user.role === 'doctor' && b.doctorId !== user.doctorId) {
       throw new NotFoundException('Booking not found (access restricted)');
     }
     return this.toResponse(b);
@@ -160,7 +160,7 @@ export class BookingsService {
   private async ensureExists(id: string, user: AuthUserView) {
     const b = await this.bookingsRepository.findById(id);
     if (!b) throw new NotFoundException('Booking not found');
-    if (user.role === 'doctor' && b.doctorId !== user.id) {
+    if (user.role === 'doctor' && b.doctorId !== user.doctorId) {
       throw new NotFoundException('Booking not found (access restricted)');
     }
   }
@@ -173,7 +173,7 @@ export class BookingsService {
 
     const baseWhere: Prisma.BookingWhereInput = {};
     if (user.role === 'doctor') {
-      baseWhere.doctorId = user.id;
+      baseWhere.doctorId = user.doctorId;
     }
 
     const [todayCount, pendingCount, completedToday] = await Promise.all([

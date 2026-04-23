@@ -31,7 +31,7 @@ export class VisitsService {
     if (patientId) where.patientId = patientId;
 
     if (user.role === 'doctor') {
-      where.doctorId = user.id;
+      where.doctorId = user.doctorId;
     } else if (doctorId) {
       where.doctorId = doctorId;
     }
@@ -54,7 +54,7 @@ export class VisitsService {
   async findOne(id: string, user: AuthUserView) {
     const v = await this.visitsRepository.findById(id);
     if (!v) throw new NotFoundException('Visit not found');
-    if (user.role === 'doctor' && v.doctorId !== user.id) {
+    if (user.role === 'doctor' && v.doctorId !== user.doctorId) {
       throw new NotFoundException('Visit not found (access restricted)');
     }
     return this.toResponse(v);
@@ -106,7 +106,7 @@ export class VisitsService {
   private async ensureExists(id: string, user: AuthUserView) {
     const v = await this.visitsRepository.findById(id);
     if (!v) throw new NotFoundException('Visit not found');
-    if (user.role === 'doctor' && v.doctorId !== user.id) {
+    if (user.role === 'doctor' && v.doctorId !== user.doctorId) {
       throw new NotFoundException('Visit not found (access restricted)');
     }
   }

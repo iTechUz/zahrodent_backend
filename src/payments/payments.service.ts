@@ -27,7 +27,14 @@ export class PaymentsService {
       dateRange?: 'today' | 'week' | 'month' | 'all';
     },
   ): Promise<PaginatedResponse<any>> {
-    const { search, status, patientId, method, type, dateRange = 'all' } = query;
+    const {
+      search,
+      status,
+      patientId,
+      method,
+      type,
+      dateRange = 'all',
+    } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;

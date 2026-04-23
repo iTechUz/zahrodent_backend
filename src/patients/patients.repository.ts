@@ -86,7 +86,11 @@ export class PatientsRepository {
   }
 
   // Comments
-  async createComment(data: { content: string; patientId: string; authorId: string }) {
+  async createComment(data: {
+    content: string;
+    patientId: string;
+    authorId: string;
+  }) {
     return this.prisma.patientComment.create({
       data,
       include: { author: { select: { name: true, avatar: true } } },

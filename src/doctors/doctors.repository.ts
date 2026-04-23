@@ -81,12 +81,12 @@ export class DoctorsRepository {
   async getDetailedEfficiencyStats() {
     // Get all doctors first
     const doctors = await this.prisma.doctor.findMany({
-      select: { 
-        id: true, 
-        firstName: true, 
-        lastName: true, 
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
         specialty: true,
-        phone: true 
+        phone: true,
       },
     });
 
@@ -118,8 +118,9 @@ export class DoctorsRepository {
     });
 
     const doctorUniquePatients = new Map<string, Set<string>>();
-    uniquePatientStats.forEach(s => {
-      if (!doctorUniquePatients.has(s.doctorId)) doctorUniquePatients.set(s.doctorId, new Set());
+    uniquePatientStats.forEach((s) => {
+      if (!doctorUniquePatients.has(s.doctorId))
+        doctorUniquePatients.set(s.doctorId, new Set());
       doctorUniquePatients.get(s.doctorId)!.add(s.patientId);
     });
 
