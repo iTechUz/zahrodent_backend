@@ -1,0 +1,47 @@
+services:
+  api:
+    image: 10449/zahrodent_backend:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nest_api
+    ports:
+      - "7878:7878"
+    environment:
+      - PORT=7878
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - minio
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: admin123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - backend
+
+networks:
+  backend:
+
+volumes:
+  minio_data:
