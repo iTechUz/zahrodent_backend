@@ -6,6 +6,7 @@ import {
   Param,
   Body,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 import { LeadsService } from './leads.service';
 import { UpdateLeadDto } from './dto/update-lead.dto';
@@ -20,8 +21,8 @@ export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
   @Get()
-  findAll() {
-    return this.leadsService.findAll();
+  findAll(@Query() query: any) {
+    return this.leadsService.findAll(query);
   }
 
   @Get(':id')

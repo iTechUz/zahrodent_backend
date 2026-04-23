@@ -6,11 +6,24 @@ import { PrismaService } from '../database/prisma.service';
 export class LeadsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(where?: Prisma.LeadWhereInput): Promise<Lead[]> {
-    return this.prisma.lead.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
+  async findAll(params: {
+    skip?: number;
+    take?: number;
+    where?: Prisma.LeadWhereInput;
+  }): Promise<{ data: Lead[]; total: number }> {
+    const { skip, take, where } = params;
+    
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.lead.findMany({
+        skip,
+        take,
+        where,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.lead.count({ where }),
+    ]);
+
+    return { data, total };
   }
 
   async findById(id: string): Promise<Lead | null> {
