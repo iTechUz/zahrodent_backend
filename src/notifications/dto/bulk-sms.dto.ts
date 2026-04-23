@@ -1,5 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsISO8601, IsString, MinLength, IsOptional } from 'class-validator';
+import {
+  IsArray,
+  IsISO8601,
+  IsString,
+  MinLength,
+  IsOptional,
+} from 'class-validator';
 
 export class RecipientQueryDto {
   @ApiProperty({ example: '2024-04-16T00:00:00Z' })

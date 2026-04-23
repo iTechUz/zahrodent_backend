@@ -30,7 +30,6 @@ export class CreateDoctorDto {
   })
   phone: string;
 
-
   @IsOptional()
   @IsString()
   avatar?: string;

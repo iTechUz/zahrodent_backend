@@ -23,7 +23,10 @@ export class AuthController {
     description: 'Muvaffaqiyatli',
     type: LoginResponseDto,
   })
-  @ApiResponse({ status: 401, description: "Noto'g'ri telefon raqami yoki parol" })
+  @ApiResponse({
+    status: 401,
+    description: "Noto'g'ri telefon raqami yoki parol",
+  })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }

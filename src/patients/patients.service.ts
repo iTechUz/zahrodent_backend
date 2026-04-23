@@ -3,7 +3,6 @@ import { Prisma } from '@prisma/client';
 import { PatientsRepository } from './patients.repository';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
-import { CreatePatientCommentDto } from './dto/create-patient-comment.dto';
 import { toDateOnlyString } from '../common/utils/date.util';
 import {
   PaginatedResponse,
@@ -168,10 +167,13 @@ export class PatientsService {
   }
 
   // Comments
-  async addComment(dto: CreatePatientCommentDto, authorId: string) {
+  async addComment(
+    data: { content: string; patientId: string },
+    authorId: string,
+  ) {
     return this.patientsRepository.createComment({
-      content: dto.content,
-      patientId: dto.patientId,
+      content: data.content,
+      patientId: data.patientId,
       authorId,
     });
   }
