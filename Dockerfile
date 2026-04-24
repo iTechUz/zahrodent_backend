@@ -58,5 +58,5 @@ USER nodeuser
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:7878/health || exit 1
 
-# Start the application
-CMD ["npm", "run", "start:prod"]
+# Migratsiyalarni yuborish va keyin serverni ishga tushirish
+CMD ["sh", "-c", "npx prisma migrate deploy && npm run start:prod"]
