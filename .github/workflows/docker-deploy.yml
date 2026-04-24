@@ -13,11 +13,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 🧠 SHORT SHA olish
-      - name: Set image tag
-        id: vars
-        run: echo "SHA_TAG=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-
       # 🐳 Docker login
       - name: Login to Docker Hub
         run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u 10449 --password-stdin
@@ -28,24 +23,30 @@ jobs:
           docker build -t 10449/zahrodent_backend:${{ github.sha }} .
           docker push 10449/zahrodent_backend:${{ github.sha }}
 
-      # 🔐 Deploy
+      # 🔐 Deploy via Docker Compose
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          SHA_TAG: ${{ github.sha }}
         with:
           host: 116.203.244.91
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            echo "Deploying commit: ${{ github.sha }}"
+            PROJECT_DIR="/home/ubuntu/projects/zaxro_dent/backend/zahrodent_backend"
+            mkdir -p $PROJECT_DIR
+            cd $PROJECT_DIR
 
-            docker pull 10449/zahrodent_backend:${{ github.sha }}
-            docker rm -f zahrodent_backend || true
+            # Yangi rasm tegi (tag) ni .env faylga yozish yoki yangilash
+            if grep -q "IMAGE_TAG=" .env; then
+              sed -i "s|IMAGE_TAG=.*|IMAGE_TAG=${{ github.sha }}|g" .env
+            else
+              echo "IMAGE_TAG=${{ github.sha }}" >> .env
+            fi
 
-            docker run -d \
-              --name zahrodent_backend \
-              --network zaxro_network \
-              -p 7878:7878 \
-              --env-file /home/ubuntu/projects/zaxro_dent/backend/zahrodent_backend/.env \
-              10449/zahrodent_backend:${{ github.sha }}
+            # Serverda docker-compose.yml borligini tekshirish (agar bo'lmasa, ogohlantirish)
+            # Izoh: Odatda bu faylni bir marta qo'lda yoki scp orqali tashlab qo'yish tavsiya etiladi.
+            
+            docker-compose pull api
+            docker-compose up -d
+            
+            # Keraksiz rasmlarni tozalash
+            docker image prune -f
