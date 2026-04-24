@@ -10,7 +10,8 @@ import { Server, Socket } from 'socket.io';
 
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: [/admin\.zahro\.iqroagency\.uz$/, 'http://localhost:8080'],
+    credentials: true,
   },
 })
 export class NotificationsGateway
