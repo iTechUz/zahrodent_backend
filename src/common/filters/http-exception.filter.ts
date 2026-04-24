@@ -22,23 +22,34 @@ export class AllExceptionsFilter implements ExceptionFilter {
       ? exception.getStatus()
       : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const httpResponse = isHttp ? exception.getResponse() : null;
-    const message =
-      typeof httpResponse === 'string'
-        ? httpResponse
-        : (httpResponse as { message?: string | string[] })?.message;
+    const responseBody = isHttp ? exception.getResponse() : null;
+    
+    // Extracting message more robustly (especially for Validation errors)
+    let message = 'Internal server error';
+    if (typeof responseBody === 'string') {
+      message = responseBody;
+    } else if (responseBody && typeof responseBody === 'object') {
+      const msgRaw = (responseBody as any).message;
+      message = Array.isArray(msgRaw) ? msgRaw.join('; ') : msgRaw || message;
+    } else if (exception instanceof Error) {
+      message = exception.message;
+    }
 
     const body = {
+      success: false,
       statusCode: status,
+      message,
       path: req.url,
       timestamp: new Date().toISOString(),
-      message: Array.isArray(message)
-        ? message.join('; ')
-        : message || 'Internal server error',
     };
 
-    if (!isHttp) {
-      this.logger.error(exception);
+    if (status >= 500) {
+      this.logger.error(
+        `${req.method} ${req.url} - Error: ${message}`,
+        exception instanceof Error ? exception.stack : undefined,
+      );
+    } else {
+      this.logger.warn(`${req.method} ${req.url} - ${status}: ${message}`);
     }
 
     res.status(status).json(body);
