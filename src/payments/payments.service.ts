@@ -25,6 +25,8 @@ export class PaymentsService {
       method?: string;
       type?: string;
       dateRange?: 'today' | 'week' | 'month' | 'all';
+      startDate?: string;
+      endDate?: string;
     },
   ): Promise<PaginatedResponse<any>> {
     const {
@@ -34,6 +36,8 @@ export class PaymentsService {
       method,
       type,
       dateRange = 'all',
+      startDate,
+      endDate,
     } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
@@ -61,7 +65,11 @@ export class PaymentsService {
       ];
     }
 
-    if (dateRange !== 'all') {
+    if (startDate || endDate) {
+      where.date = {};
+      if (startDate) where.date.gte = parseDateOnlyToUTC(startDate);
+      if (endDate) where.date.lte = parseDateOnlyToUTC(endDate);
+    } else if (dateRange !== 'all') {
       const now = new Date();
       const start = startOfUTCDay(now);
       let end = endOfUTCDayInclusive(now);

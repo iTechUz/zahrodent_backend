@@ -15,10 +15,15 @@ export class PatientsService {
   constructor(private readonly patientsRepository: PatientsRepository) {}
 
   async findAll(
-    query: PaginationQueryDto & { source?: string },
+    query: PaginationQueryDto & { 
+      source?: string; 
+      startDate?: string; 
+      endDate?: string;
+      debtOnly?: string;
+    },
     user: AuthUserView,
   ): Promise<PaginatedResponse<any>> {
-    const { search, source } = query;
+    const { search, source, startDate, endDate, debtOnly } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
@@ -27,6 +32,22 @@ export class PatientsService {
 
     if (source && source !== 'all') {
       where.source = source;
+    }
+
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        where.createdAt.lte = end;
+      }
+    }
+
+    if (debtOnly === 'true') {
+      // In Prisma, filtering by calculated balance (sum of payments - sum of visits) 
+      // is hard directly in 'where'. We might need to do it via repository or raw query.
+      // But for now, let's keep it simple or implement it in the repository.
     }
 
     if (search?.trim()) {

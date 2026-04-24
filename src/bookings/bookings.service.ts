@@ -29,10 +29,12 @@ export class BookingsService {
       source?: string;
       patientId?: string;
       dateRange?: 'today' | 'week' | 'month' | 'all';
+      startDate?: string;
+      endDate?: string;
     },
     user: AuthUserView,
   ): Promise<PaginatedResponse<any>> {
-    const { search, status, source, patientId, dateRange = 'all' } = query;
+    const { search, status, source, patientId, dateRange = 'all', startDate, endDate } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
@@ -56,7 +58,11 @@ export class BookingsService {
       };
     }
 
-    if (dateRange !== 'all') {
+    if (startDate || endDate) {
+      where.date = {};
+      if (startDate) where.date.gte = parseDateOnlyToUTC(startDate);
+      if (endDate) where.date.lte = parseDateOnlyToUTC(endDate);
+    } else if (dateRange !== 'all') {
       const now = new Date();
       const start = startOfUTCDay(now);
       let end = endOfUTCDayInclusive(now);
