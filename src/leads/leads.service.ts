@@ -1,10 +1,21 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { LeadsRepository } from './leads.repository';
 import { UpdateLeadDto } from './dto/update-lead.dto';
+import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class LeadsService {
-  constructor(private readonly leadsRepository: LeadsRepository) {}
+  constructor(
+    private readonly leadsRepository: LeadsRepository,
+    private readonly notificationsGateway: NotificationsGateway,
+  ) {}
+
+  async create(data: Prisma.LeadCreateInput) {
+    const lead = await this.leadsRepository.create(data);
+    this.notificationsGateway.sendNewLead(lead);
+    return lead;
+  }
 
   async findAll(query: any) {
     const { page = 0, limit = 10, search, startDate, endDate, status } = query;

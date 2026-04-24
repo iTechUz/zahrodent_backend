@@ -69,7 +69,7 @@ export class TelegramService implements OnModuleInit {
         const userData = JSON.parse(state);
         // Create lead in database
         try {
-          await this.leadsService['leadsRepository'].create({
+          await this.leadsService.create({
             name: userData.name || ctx.from.first_name,
             phone: userData.phone,
             service: serviceName,
@@ -96,7 +96,7 @@ export class TelegramService implements OnModuleInit {
       if (state) {
         const userData = JSON.parse(state);
         try {
-          await this.leadsService['leadsRepository'].create({
+          await this.leadsService.create({
             name: userData.name || ctx.from.first_name,
             phone: userData.phone,
             message: text,
