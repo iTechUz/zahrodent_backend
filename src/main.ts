@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ThrottlerGuard } from '@nestjs/throttler';
@@ -50,6 +50,12 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
       transform: true,
       transformOptions: { enableImplicitConversion: true },
+      exceptionFactory: (errors) => {
+        const messages = errors.map((err) => {
+          return `${err.property}: ${Object.values(err.constraints || {}).join(', ')}`;
+        });
+        return new BadRequestException(messages);
+      },
     }),
   );
   app.useGlobalFilters(new AllExceptionsFilter());

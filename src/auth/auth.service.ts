@@ -26,11 +26,11 @@ export class AuthService {
   async login(dto: LoginDto) {
     const user = await this.usersRepository.findByPhone(dto.phone);
     if (!user) {
-      throw new UnauthorizedException("Telefon raqami yoki parol noto'g'ri");
+      throw new UnauthorizedException("Bunday telefon raqamli foydalanuvchi topilmadi");
     }
     const ok = await bcrypt.compare(dto.password, user.passwordHash);
     if (!ok) {
-      throw new UnauthorizedException("Telefon raqami yoki parol noto'g'ri");
+      throw new UnauthorizedException("Kiritilgan parol noto'g'ri");
     }
     // If doctor role, fetch the associated Doctor record id
     let doctorId: string | undefined;
