@@ -59,4 +59,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:7878/health || exit 1
 
 # Bazani schema.prisma bilan avtomatik sinxronlash va serverni ishga tushirish
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss && npm run start:prod"]
+CMD ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss && npm run start:prod"]
