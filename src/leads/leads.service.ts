@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { LeadsRepository } from './leads.repository';
+import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { Prisma } from '@prisma/client';
@@ -11,8 +12,8 @@ export class LeadsService {
     private readonly notificationsGateway: NotificationsGateway,
   ) {}
 
-  async create(data: Prisma.LeadCreateInput) {
-    const lead = await this.leadsRepository.create(data);
+  async create(dto: CreateLeadDto) {
+    const lead = await this.leadsRepository.create(dto as Prisma.LeadCreateInput);
     this.notificationsGateway.sendNewLead(lead);
     return lead;
   }

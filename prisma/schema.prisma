@@ -193,8 +193,9 @@ model Lead {
   phone     String
   service   String?
   message   String?
-  status    String   @default("new") // new, contacted, converted, cancelled
+  status    String   @default("new") // new, contacted, consultation, proposal, converted, cancelled
   source    String   @default("telegram_bot")
+  notes     String?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
