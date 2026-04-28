@@ -4,7 +4,25 @@ import {
   IsString,
   MinLength,
   Matches,
+  IsBoolean,
+  IsNumber,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class ScheduleSlotDto {
+  @IsNumber()
+  day: number;
+
+  @IsString()
+  startTime: string;
+
+  @IsString()
+  endTime: string;
+
+  @IsBoolean()
+  isWorking: boolean;
+}
 
 export class CreateDoctorDto {
   @IsOptional()
@@ -36,7 +54,9 @@ export class CreateDoctorDto {
 
   @IsOptional()
   @IsArray()
-  schedule?: Record<string, unknown>[];
+  @ValidateNested({ each: true })
+  @Type(() => ScheduleSlotDto)
+  schedule?: ScheduleSlotDto[];
 
   @IsOptional()
   @IsArray()
