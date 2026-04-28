@@ -1,3 +1,4 @@
+// Leads Controller for Sales Funnel
 import {
   Controller,
   Get,
@@ -5,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Post,
   UseGuards,
   Query,
 } from '@nestjs/common';
@@ -15,6 +17,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { LeadsService } from './leads.service';
+import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -39,6 +42,22 @@ export class LeadsController {
   @ApiParam({ name: 'id' })
   findOne(@Param('id') id: string) {
     return this.leadsService.findOne(id);
+  }
+  
+  @Post()
+  @ApiOperation({ summary: 'Qo\'lda murojaat qo\'shish' })
+  create(@Body() dto: CreateLeadDto) {
+    return this.leadsService.create(dto);
+  }
+  
+  @Patch(':id')
+  @ApiOperation({ summary: 'Murojaatni yangilash' })
+  @ApiParam({ name: 'id' })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateLeadDto,
+  ) {
+    return this.leadsService.update(id, dto);
   }
 
   @Patch(':id/status')

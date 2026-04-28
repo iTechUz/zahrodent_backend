@@ -18,6 +18,10 @@ export class UpdateLeadDto {
   message?: string;
 
   @IsOptional()
-  @IsEnum(['new', 'contacted', 'converted', 'cancelled'])
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsEnum(['new', 'contacted', 'consultation', 'proposal', 'converted', 'cancelled'])
   status?: string;
 }

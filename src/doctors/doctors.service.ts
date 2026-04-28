@@ -72,9 +72,8 @@ export class DoctorsService {
       phone: dto.phone,
       avatar: dto.avatar,
       user: userId ? { connect: { id: userId } } : undefined,
-      schedule:
-        dto.schedule === undefined ? undefined : (dto.schedule as object),
-      daysOff: dto.daysOff === undefined ? undefined : dto.daysOff,
+      schedule: dto.schedule as any,
+      daysOff: dto.daysOff as any,
     });
     return this.toResponse(d);
   }
@@ -122,9 +121,8 @@ export class DoctorsService {
       phone: dto.phone,
       avatar: dto.avatar,
       user: userId ? { connect: { id: userId } } : undefined,
-      schedule:
-        dto.schedule === undefined ? undefined : (dto.schedule as object),
-      daysOff: dto.daysOff === undefined ? undefined : dto.daysOff,
+      schedule: dto.schedule as any,
+      daysOff: dto.daysOff as any,
     });
     return this.toResponse(d);
   }
