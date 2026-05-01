@@ -74,7 +74,8 @@ export class PaymentsService {
       if (endDate) where.date.lte = new Date(endDate);
     }
 
-    const { data, total } = await this.paymentsRepository.findAll(where, {
+    const { data, total } = await this.paymentsRepository.findAll({
+      where,
       skip,
       take: limitNum,
     });
