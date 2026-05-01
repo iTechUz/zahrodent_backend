@@ -8,8 +8,8 @@ import { Observable } from 'rxjs';
 import { ClsService } from 'nestjs-cls';
 
 /**
- * Interceptor to extract tenant information (branchId) from the authenticated user
- * and store it in the ClsService (AsyncLocalStorage) for global access.
+ * Enhanced TenantInterceptor for SaaS SuperAdmin.
+ * Allows SuperAdmin to override context using 'x-branch-id' header.
  */
 @Injectable()
 export class TenantInterceptor implements NestInterceptor {
@@ -20,8 +20,17 @@ export class TenantInterceptor implements NestInterceptor {
     const user = request.user;
 
     if (user) {
-      // Store branchId and user context in the current request's async storage
-      this.cls.set('branchId', user.branchId);
+      let branchId = user.branchId;
+
+      // If SuperAdmin provides a branch ID in the header, override the context
+      if (user.role === 'SUPER_ADMIN') {
+        const headerBranchId = request.headers['x-branch-id'];
+        if (headerBranchId) {
+          branchId = headerBranchId;
+        }
+      }
+
+      this.cls.set('branchId', branchId);
       this.cls.set('userId', user.id);
       this.cls.set('userRole', user.role);
     }
