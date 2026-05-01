@@ -25,6 +25,7 @@ import { ROLES_STAFF } from '../common/constants/role-groups';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { AuthUserView } from '../auth/auth.service';
+import { BookingStatus } from '@prisma/client';
 
 @ApiTags('bookings')
 @ApiBearerAuth('JWT')
@@ -52,7 +53,12 @@ export class BookingsController {
     },
     @GetUser() user: AuthUserView,
   ) {
-    return this.bookingsService.findAll(query, user);
+    // Cast status to BookingStatus if it's provided and not 'all'
+    const filters: any = { ...query };
+    if (query.status === 'all') delete filters.status;
+    else if (query.status) filters.status = query.status as BookingStatus;
+
+    return this.bookingsService.findAll(filters, user);
   }
 
   @Get(':id')

@@ -65,7 +65,6 @@ export class PatientsService {
     const p = await this.patientsRepository.findById(id);
     if (!p || p.deletedAt) throw new NotFoundException('Patient not found');
 
-    // Access control for doctors
     if (user.role === 'DOCTOR') {
       const hasAccess = await this.patientsRepository.count({
         id,
@@ -82,8 +81,19 @@ export class PatientsService {
     return this.toResponse(p);
   }
 
+  async getStats(user: AuthUserView) {
+    const where: Prisma.PatientWhereInput = {};
+    if (user.role === 'DOCTOR') {
+      where.OR = [
+        { bookings: { some: { doctorId: user.doctorId } } },
+        { visits: { some: { doctorId: user.doctorId } } },
+        { assignedDoctorId: user.doctorId }
+      ];
+    }
+    return this.patientsRepository.getStats(where);
+  }
+
   async create(dto: CreatePatientDto) {
-    // Check for duplicate phone
     const existing = await this.patientsRepository.count({ phone: dto.phone });
     if (existing > 0) throw new ConflictException('Bu telefon raqami bilan bemor allaqachon mavjud');
 
@@ -92,7 +102,6 @@ export class PatientsService {
       user: dto.userId ? { connect: { id: dto.userId } } : undefined,
       firstName: dto.firstName,
       lastName: dto.lastName,
-      age: dto.age,
       phone: dto.phone,
       source: dto.source || 'DIRECT',
       notes: dto.notes ?? '',
@@ -119,7 +128,6 @@ export class PatientsService {
     const p = await this.patientsRepository.update(id, {
       firstName: dto.firstName,
       lastName: dto.lastName,
-      age: dto.age,
       phone: dto.phone,
       source: dto.source,
       notes: dto.notes,
@@ -128,7 +136,7 @@ export class PatientsService {
       birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
       assignedDoctor: dto.assignedDoctorId
         ? { connect: { id: dto.assignedDoctorId } }
-        : { disconnect: dto.assignedDoctorId === null },
+        : dto.assignedDoctorId === null ? { disconnect: true } : undefined,
       toothChart: dto.toothChart as object,
       medicalHistory: dto.medicalHistory as object,
     });
@@ -166,8 +174,8 @@ export class PatientsService {
     return {
       ...p,
       balance: p.balance?.toNumber() || 0,
-      createdAt: p.createdAt.toISOString(),
-      updatedAt: p.updatedAt.toISOString(),
+      createdAt: p.createdAt?.toISOString(),
+      updatedAt: p.updatedAt?.toISOString(),
       birthDate: p.birthDate?.toISOString(),
     };
   }

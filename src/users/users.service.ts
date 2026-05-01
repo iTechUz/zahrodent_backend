@@ -23,6 +23,7 @@ export class UsersService {
         avatar: true,
         branchId: true,
         isActive: true,
+        deletedAt: true,
         createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -40,6 +41,7 @@ export class UsersService {
         avatar: true,
         branchId: true,
         isActive: true,
+        deletedAt: true,
         createdAt: true,
       },
     });

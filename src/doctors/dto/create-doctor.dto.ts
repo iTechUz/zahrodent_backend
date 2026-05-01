@@ -3,9 +3,9 @@ import {
   IsOptional,
   IsString,
   MinLength,
-  Matches,
   IsNumber,
   ValidateNested,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -36,15 +36,33 @@ export class CreateDoctorDto {
   @IsNumber()
   experienceYears: number;
 
+  @IsOptional()
   @IsString()
-  @Matches(/^\+998\d{9}$/, {
-    message: "Telefon raqami noto'g'ri formatda (+998XXXXXXXXX)",
-  })
-  phone: string;
+  bio?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AvailabilityDto)
+  availabilities?: AvailabilityDto[];
+}
+
+export class UpdateDoctorDto {
+  @IsOptional()
+  @IsString()
+  specialty?: string;
+
+  @IsOptional()
+  @IsNumber()
+  experienceYears?: number;
 
   @IsOptional()
   @IsString()
   bio?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 
   @IsOptional()
   @IsArray()

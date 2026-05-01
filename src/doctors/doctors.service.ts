@@ -1,153 +1,131 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { DoctorsRepository } from './doctors.repository';
-import {
-  PaginationQueryDto,
-  PaginatedResponse,
-} from '../common/dto/pagination.dto';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
+import { PrismaService } from '../database/prisma.service';
 
 @Injectable()
 export class DoctorsService {
   constructor(
     private readonly doctorsRepository: DoctorsRepository,
+    private readonly prisma: PrismaService,
   ) {}
 
-  async findAll(
-    query: PaginationQueryDto & { specialty?: string },
-  ): Promise<PaginatedResponse<any>> {
-    const { search, specialty } = query;
-    const pageNum = Number(query.page || 0);
-    const limitNum = Number(query.limit || 10);
-    const skip = pageNum * limitNum;
+  async findAll(query: { specialty?: string; branchId?: string }) {
+    const where: any = { deletedAt: null };
+    if (query.specialty) where.specialty = query.specialty;
+    if (query.branchId) where.userId = { branchId: query.branchId };
 
-    const where: Prisma.DoctorWhereInput = {};
-
-    if (specialty && specialty !== 'all') {
-      where.specialty = specialty;
-    }
-
-    if (search?.trim()) {
-      where.user = {
-        name: { contains: search, mode: 'insensitive' }
-      };
-    }
-
-    const { data, total } = await this.doctorsRepository.findAll(where, {
-      skip,
-      take: limitNum,
-    });
-    return { data: data.map((d) => this.toResponse(d)), total };
+    const doctors = await this.doctorsRepository.findAll(where);
+    return doctors.map((d) => this.toResponse(d));
   }
 
   async findOne(id: string) {
-    const d = await this.doctorsRepository.findById(id);
-    if (!d || d.deletedAt) throw new NotFoundException('Doctor not found');
-    return this.toResponse(d);
+    const doctor = await this.doctorsRepository.findById(id);
+    if (!doctor || doctor.deletedAt) throw new NotFoundException('Doctor not found');
+    return this.toResponse(doctor);
+  }
+
+  async getStats() {
+    const [total, active] = await Promise.all([
+      this.prisma.doctor.count({ where: { deletedAt: null } }),
+      this.prisma.doctor.count({ where: { deletedAt: null, isActive: true } }),
+    ]);
+    return { total, active };
+  }
+
+  async getEfficiency() {
+    // Basic implementation: average bookings per doctor this month
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0,0,0,0);
+
+    const stats = await this.prisma.doctor.findMany({
+      where: { deletedAt: null, isActive: true },
+      select: {
+        id: true,
+        user: { select: { name: true } },
+        _count: {
+          select: {
+            bookings: {
+              where: { startTime: { gte: startOfMonth } }
+            }
+          }
+        }
+      }
+    });
+
+    return stats.map(s => ({
+      doctorId: s.id,
+      name: s.user.name,
+      bookingsCount: s._count.bookings
+    }));
   }
 
   async create(dto: CreateDoctorDto) {
-    const d = await this.doctorsRepository.create({
+    // Check if user exists and is not already a doctor
+    const user = await this.doctorsRepository.findUserById(dto.userId);
+    if (!user) throw new NotFoundException('User not found');
+    
+    const existing = await this.doctorsRepository.findById(dto.userId);
+    if (existing) throw new ConflictException('User is already a doctor');
+
+    const doctor = await this.doctorsRepository.create({
       user: { connect: { id: dto.userId } },
       specialty: dto.specialty,
       experienceYears: dto.experienceYears,
-      phone: dto.phone,
       bio: dto.bio,
-      availabilities: dto.availabilities ? {
-        createMany: {
-          data: dto.availabilities.map(a => ({
-            dayOfWeek: a.dayOfWeek,
-            startTime: a.startTime,
-            endTime: a.endTime,
-            slotDuration: a.slotDuration || 30,
-          }))
-        }
-      } : undefined,
+      availabilities: {
+        create: dto.availabilities?.map(a => ({
+          dayOfWeek: a.dayOfWeek,
+          startTime: a.startTime,
+          endTime: a.endTime,
+          slotDuration: a.slotDuration,
+        }))
+      }
     });
-    return this.toResponse(d);
+    return this.toResponse(doctor);
   }
 
   async update(id: string, dto: UpdateDoctorDto) {
-    const existing = await this.ensureExists(id);
+    const doctor = await this.doctorsRepository.findById(id);
+    if (!doctor || doctor.deletedAt) throw new NotFoundException('Doctor not found');
 
-    const d = await this.doctorsRepository.update(id, {
+    const updateData: any = {
       specialty: dto.specialty,
       experienceYears: dto.experienceYears,
-      phone: dto.phone,
       bio: dto.bio,
-      availabilities: dto.availabilities ? {
+      isActive: dto.isActive,
+    };
+
+    if (dto.availabilities) {
+      updateData.availabilities = {
         deleteMany: {},
-        createMany: {
-          data: dto.availabilities.map(a => ({
-            dayOfWeek: a.dayOfWeek,
-            startTime: a.startTime,
-            endTime: a.endTime,
-            slotDuration: a.slotDuration || 30,
-          }))
-        }
-      } : undefined,
-    });
-    return this.toResponse(d);
+        create: dto.availabilities.map(a => ({
+          dayOfWeek: a.dayOfWeek,
+          startTime: a.startTime,
+          endTime: a.endTime,
+          slotDuration: a.slotDuration,
+        }))
+      };
+    }
+
+    const updated = await this.doctorsRepository.update(id, updateData);
+    return this.toResponse(updated);
   }
 
   async remove(id: string) {
-    await this.ensureExists(id);
     await this.doctorsRepository.softDelete(id);
     return { id };
   }
 
-  private async ensureExists(id: string) {
-    const d = await this.doctorsRepository.findById(id);
-    if (!d || d.deletedAt) throw new NotFoundException('Doctor not found');
-    return d;
-  }
-
-  async getStats() {
-    const total = await this.doctorsRepository.count();
-    const { count: activeToday } = await this.doctorsRepository.getActiveCountToday();
-    const { count: totalVisits } = await this.doctorsRepository.getTotalVisitsCount();
-
-    return {
-      total,
-      activeToday,
-      totalVisits,
-    };
-  }
-
-  async getEfficiency() {
-    const rawStats = await this.doctorsRepository.getDetailedEfficiencyStats();
-
-    return rawStats
-      .map((s) => {
-        const conversionRate =
-          s.totalBookings > 0
-            ? Math.round((s.totalVisits / s.totalBookings) * 100)
-            : 0;
-
-        const avgCheck =
-          s.totalVisits > 0 ? Math.round(s.totalRevenue / s.totalVisits) : 0;
-
-        return {
-          ...s,
-          conversionRate,
-          avgCheck,
-        };
-      })
-      .sort((a, b) => b.totalRevenue - a.totalRevenue);
-  }
-
   private toResponse(d: any) {
     return {
-      id: d.id,
-      userId: d.userId,
+      ...d,
       name: d.user?.name,
-      specialty: d.specialty,
-      experienceYears: d.experienceYears,
-      phone: d.phone,
-      bio: d.bio,
+      phone: d.user?.phone,
+      email: d.user?.email,
       avatar: d.user?.avatar,
-      availabilities: d.availabilities,
     };
   }
 }

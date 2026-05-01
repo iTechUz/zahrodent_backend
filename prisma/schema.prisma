@@ -64,6 +64,7 @@ model User {
   email        String?   @unique
   passwordHash String    @map("password_hash")
   role         UserRole  @default(PATIENT)
+  avatar       String?
   isActive     Boolean   @default(true)
   
   createdAt    DateTime  @default(now()) @map("created_at")
@@ -98,6 +99,8 @@ model Patient {
   
   balance          Decimal   @default(0) @db.Decimal(15, 2)
   
+  assignedDoctorId String?   @map("assigned_doctor_id")
+  
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
   deletedAt        DateTime? @map("deleted_at")
@@ -110,6 +113,7 @@ model Patient {
   comments         PatientComment[]
   notifications    Notification[]
   lead             Lead?
+  assignedDoctor   Doctor?   @relation("AssignedDoctor", fields: [assignedDoctorId], references: [id])
 
   @@index([phone])
   @@index([lastName, firstName])
@@ -133,6 +137,7 @@ model Doctor {
   bookings         Booking[]
   notifications    Notification[]
   visits           Visit[]
+  assignedPatients Patient[] @relation("AssignedDoctor")
 
   @@map("doctors")
 }
@@ -164,6 +169,7 @@ model Booking {
   
   source         String
   notes          String?       @default("")
+  reminderSentAt DateTime?     @map("reminder_sent_at")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
   deletedAt      DateTime?     @map("deleted_at")
@@ -186,6 +192,7 @@ model Payment {
   serviceId   String?       @map("service_id")
   
   amount      Decimal       @db.Decimal(15, 2)
+  discount    Decimal       @default(0) @db.Decimal(15, 2)
   type        PaymentType   @default(INCOME)
   method      PaymentMethod @default(CASH)
   status      String        @default("COMPLETED")

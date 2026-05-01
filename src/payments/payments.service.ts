@@ -1,14 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Payment, Prisma } from '@prisma/client';
+import { Payment, Prisma, PaymentMethod, PaymentType } from '@prisma/client';
 import { PaymentsRepository } from './payments.repository';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
-import {
-  endOfUTCDayInclusive,
-  parseDateOnlyToUTC,
-  startOfUTCDay,
-  toDateOnlyString,
-} from '../common/utils/date.util';
 import {
   PaginationQueryDto,
   PaginatedResponse,
@@ -24,7 +18,6 @@ export class PaymentsService {
       patientId?: string;
       method?: string;
       type?: string;
-      dateRange?: 'today' | 'week' | 'month' | 'all';
       startDate?: string;
       endDate?: string;
     },
@@ -35,7 +28,6 @@ export class PaymentsService {
       patientId,
       method,
       type,
-      dateRange = 'all',
       startDate,
       endDate,
     } = query;
@@ -47,8 +39,8 @@ export class PaymentsService {
 
     if (patientId) where.patientId = patientId;
     if (status && status !== 'all') where.status = status;
-    if (method && method !== 'all') where.method = method;
-    if (type && type !== 'all') where.type = type;
+    if (method && method !== 'all') where.method = method as PaymentMethod;
+    if (type && type !== 'all') where.type = type as PaymentType;
 
     if (search?.trim()) {
       const s = search.trim();
@@ -67,30 +59,8 @@ export class PaymentsService {
 
     if (startDate || endDate) {
       where.date = {};
-      if (startDate) where.date.gte = parseDateOnlyToUTC(startDate);
-      if (endDate) where.date.lte = parseDateOnlyToUTC(endDate);
-    } else if (dateRange !== 'all') {
-      const now = new Date();
-      const start = startOfUTCDay(now);
-      let end = endOfUTCDayInclusive(now);
-
-      if (dateRange === 'week') {
-        // Start of week (Monday) in UTC
-        const day = start.getUTCDay() || 7; // 1=Mon ... 0=Sun => 7
-        if (day !== 1) start.setUTCDate(start.getUTCDate() - (day - 1));
-        end = new Date(start);
-        end.setUTCDate(start.getUTCDate() + 6);
-        end = endOfUTCDayInclusive(end);
-      } else if (dateRange === 'month') {
-        const year = now.getUTCFullYear();
-        const month = now.getUTCMonth();
-        const monthStart = new Date(Date.UTC(year, month, 1));
-        const monthEndDate = new Date(Date.UTC(year, month + 1, 0));
-        start.setTime(monthStart.getTime());
-        end = endOfUTCDayInclusive(monthEndDate);
-      }
-
-      where.date = { gte: start, lte: end };
+      if (startDate) where.date.gte = new Date(startDate);
+      if (endDate) where.date.lte = new Date(endDate);
     }
 
     const { data, total } = await this.paymentsRepository.findAll(where, {
@@ -107,16 +77,15 @@ export class PaymentsService {
   }
 
   async create(dto: CreatePaymentDto) {
-    const dateStr = dto.date ?? toDateOnlyString(new Date());
     const p = await this.paymentsRepository.create({
       patient: { connect: { id: dto.patientId } },
       amount: dto.amount,
+      discount: dto.discount || 0,
       method: dto.method,
       status: dto.status,
-      date: parseDateOnlyToUTC(dateStr),
+      date: dto.date ? new Date(dto.date) : new Date(),
       description: dto.description,
       type: dto.type || 'INCOME',
-      discount: dto.discount,
       service: dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
       visit: dto.visitId ? { connect: { id: dto.visitId } } : undefined,
     });
@@ -127,28 +96,19 @@ export class PaymentsService {
     await this.ensureExists(id);
     const p = await this.paymentsRepository.update(id, {
       amount: dto.amount,
+      discount: dto.discount,
       method: dto.method,
       status: dto.status,
       description: dto.description,
       type: dto.type,
-      discount: dto.discount,
-      date: dto.date === undefined ? undefined : parseDateOnlyToUTC(dto.date),
-      patient:
-        dto.patientId === undefined
-          ? undefined
-          : { connect: { id: dto.patientId } },
-      service:
-        dto.serviceId === undefined
-          ? undefined
-          : dto.serviceId
-            ? { connect: { id: dto.serviceId } }
-            : { disconnect: true },
-      visit:
-        dto.visitId === undefined
-          ? undefined
-          : dto.visitId
-            ? { connect: { id: dto.visitId } }
-            : { disconnect: true },
+      date: dto.date ? new Date(dto.date) : undefined,
+      patient: dto.patientId ? { connect: { id: dto.patientId } } : undefined,
+      service: dto.serviceId === null 
+        ? { disconnect: true } 
+        : dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
+      visit: dto.visitId === null
+        ? { disconnect: true }
+        : dto.visitId ? { connect: { id: dto.visitId } } : undefined,
     });
     return this.toResponse(p);
   }
@@ -160,18 +120,18 @@ export class PaymentsService {
   }
 
   async getStats() {
-    const now = new Date();
-    const today = startOfUTCDay(now);
+    const today = new Date();
+    today.setHours(0,0,0,0);
     const tomorrow = new Date(today);
-    tomorrow.setUTCDate(today.getUTCDate() + 1);
+    tomorrow.setDate(today.getDate() + 1);
 
     const [totalRevenue, pendingAmount, todayRevenue] = await Promise.all([
-      this.paymentsRepository.sumAmount({ status: 'paid' }),
+      this.paymentsRepository.sumAmount({ status: 'COMPLETED' }),
       this.paymentsRepository.sumAmount({
-        status: { in: ['partial', 'unpaid'] },
+        status: { not: 'COMPLETED' },
       }),
       this.paymentsRepository.sumAmount({
-        status: 'paid',
+        status: 'COMPLETED',
         date: { gte: today, lt: tomorrow },
       }),
     ]);
@@ -192,19 +152,13 @@ export class PaymentsService {
     if (!p) throw new NotFoundException('Payment not found');
   }
 
-  private toResponse(p: Payment) {
+  private toResponse(p: any) {
     return {
-      id: p.id,
-      patientId: p.patientId,
-      amount: p.amount,
-      method: p.method,
-      status: p.status,
-      date: toDateOnlyString(p.date),
-      description: p.description,
-      type: p.type,
-      discount: p.discount ?? undefined,
-      serviceId: p.serviceId ?? undefined,
-      visitId: p.visitId ?? undefined,
+      ...p,
+      amount: p.amount?.toNumber() || 0,
+      discount: p.discount?.toNumber() || 0,
+      date: p.date.toISOString(),
+      createdAt: p.createdAt.toISOString(),
     };
   }
 }

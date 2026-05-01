@@ -1,14 +1,12 @@
 import {
-  IsInt,
-  IsIn,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
   MinLength,
-  Matches,
+  IsDateString,
 } from 'class-validator';
-
-const STATUSES = ['not-started', 'in-progress', 'completed'] as const;
+import { Type } from 'class-transformer';
 
 export class CreateVisitDto {
   @IsString()
@@ -24,13 +22,16 @@ export class CreateVisitDto {
   bookingId?: string;
 
   @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'date YYYY-MM-DD formatida bo‘lishi kerak',
-  })
+  @IsString()
+  serviceId?: string;
+
+  @IsOptional()
+  @IsDateString()
   date?: string;
 
-  @IsIn(STATUSES)
-  status: (typeof STATUSES)[number];
+  @IsString()
+  @MinLength(1)
+  status: string; // e.g. "completed"
 
   @IsOptional()
   @IsString()
@@ -45,7 +46,8 @@ export class CreateVisitDto {
   notes?: string;
 
   @IsOptional()
-  @IsInt()
+  @Type(() => Number)
+  @IsNumber()
   @Min(0)
   price?: number;
 }

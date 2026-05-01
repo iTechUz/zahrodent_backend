@@ -1,19 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { Notification } from '@prisma/client';
+import { Notification, Prisma } from '@prisma/client';
 import { NotificationsRepository } from './notifications.repository';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { BookingsRepository } from '../bookings/bookings.repository';
 import { PatientsRepository } from '../patients/patients.repository';
 import { EskizService } from './eskiz.service';
 import { PrismaService } from '../database/prisma.service';
-import { startOfUTCDay, toDateOnlyString } from '../common/utils/date.util';
 import {
   PaginationQueryDto,
   PaginatedResponse,
 } from '../common/dto/pagination.dto';
 import { RecipientQueryDto, BulkSendDto } from './dto/bulk-sms.dto';
 
-type ReminderType = 'sms' | 'telegram';
 type ReminderStatus = 'sent' | 'failed';
 
 @Injectable()
@@ -49,8 +47,9 @@ export class NotificationsService {
     } else if (dto.doctorId) {
       const doctor = await this.prisma.doctor.findUnique({
         where: { id: dto.doctorId },
+        include: { user: true },
       });
-      targetPhone = doctor?.phone ?? null;
+      targetPhone = doctor?.user?.phone ?? null;
     }
 
     if (dto.type === 'sms' && this.eskiz.isConfigured()) {
@@ -77,195 +76,75 @@ export class NotificationsService {
   }
 
   async sendReminders() {
-    const { data: bookings } = await this.bookingsRepository.findAll({
-      status: { in: ['confirmed', 'pending'] } as any,
-      reminderSentAt: null,
-    });
-    if (!bookings.length) {
-      return { created: 0 };
-    }
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(0,0,0,0);
+    const afterTomorrow = new Date(tomorrow);
+    afterTomorrow.setDate(tomorrow.getDate() + 1);
 
-    const patientIds = bookings.map((b) => b.patientId);
-    const patientRows =
-      await this.patientsRepository.findSourcesByPatientIds(patientIds);
-    const phoneRows =
-      await this.patientsRepository.findPhonesByPatientIds(patientIds);
-    const sourceByPatientId = new Map(patientRows.map((p) => [p.id, p.source]));
-    const phoneByPatientId = new Map(phoneRows.map((p) => [p.id, p.phone]));
-
-    const rows: {
-      patientId: string;
-      type: ReminderType;
-      message: string;
-      status: ReminderStatus;
-      sentAt: Date;
-    }[] = [];
-    const bookingIdsToMark: string[] = [];
-    let smsSent = 0;
-    let smsFailed = 0;
-    const eskizOn = this.eskiz.isConfigured();
-
-    const concurrency = 5;
-    const results = await mapWithConcurrency(
-      bookings,
-      concurrency,
-      async (b) => {
-        const source = sourceByPatientId.get(b.patientId);
-        if (source === undefined) return null;
-
-        const message = `Eslatma: Sizning qabulingiz ${this.formatBookingDate(b.date)} kuni soat ${b.time} da`;
-        const sentAt = new Date();
-
-        // Telegram => immediate "sent" and mark booking.
-        if (source === 'telegram') {
-          return {
-            row: {
-              patientId: b.patientId,
-              type: 'telegram' as const,
-              message,
-              status: 'sent' as const,
-              sentAt,
-            },
-            bookingIdToMark: b.id,
-            smsSentInc: 0,
-            smsFailedInc: 0,
-          };
-        }
-
-        // SMS path
-        const type: ReminderType = 'sms';
-
-        if (!eskizOn) {
-          return {
-            row: {
-              patientId: b.patientId,
-              type,
-              message,
-              status: 'sent' as const,
-              sentAt,
-            },
-            bookingIdToMark: b.id,
-            smsSentInc: 0,
-            smsFailedInc: 0,
-          };
-        }
-
-        const rawPhone = phoneByPatientId.get(b.patientId);
-        const mobile = rawPhone ? this.eskiz.normalizeMobile(rawPhone) : null;
-        if (!mobile) {
-          return {
-            row: {
-              patientId: b.patientId,
-              type,
-              message,
-              status: 'failed' as const,
-              sentAt,
-            },
-            bookingIdToMark: null,
-            smsSentInc: 0,
-            smsFailedInc: 1,
-          };
-        }
-
-        const r = await this.eskiz.sendSms(mobile, message);
-        if (r.ok) {
-          return {
-            row: {
-              patientId: b.patientId,
-              type,
-              message,
-              status: 'sent' as const,
-              sentAt,
-            },
-            bookingIdToMark: b.id,
-            smsSentInc: 1,
-            smsFailedInc: 0,
-          };
-        }
-
-        return {
-          row: {
-            patientId: b.patientId,
-            type,
-            message,
-            status: 'failed' as const,
-            sentAt,
-          },
-          bookingIdToMark: null,
-          smsSentInc: 0,
-          smsFailedInc: 1,
-        };
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        startTime: { gte: tomorrow, lt: afterTomorrow },
+        status: 'CONFIRMED',
+        reminderSentAt: null,
       },
-    );
+      include: { patient: true },
+    });
 
-    for (const r of results) {
-      if (!r) continue;
-      rows.push(r.row);
-      if (r.bookingIdToMark) bookingIdsToMark.push(r.bookingIdToMark);
-      smsSent += r.smsSentInc;
-      smsFailed += r.smsFailedInc;
+    for (const b of bookings) {
+      if (b.patient?.phone) {
+        const message = `Eslatma: Sizning qabulingiz ertaga soat ${b.startTime.toISOString().split('T')[1].substring(0, 5)} da.`;
+        await this.create({
+          patientId: b.patientId,
+          type: 'sms',
+          message,
+          status: 'sent',
+        });
+        await this.prisma.booking.update({
+          where: { id: b.id },
+          data: { reminderSentAt: new Date() },
+        });
+      }
     }
-
-    if (rows.length) {
-      const markAt = new Date();
-      await this.prisma.$transaction(async (tx) => {
-        await tx.notification.createMany({ data: rows });
-        if (bookingIdsToMark.length) {
-          await tx.booking.updateMany({
-            where: { id: { in: bookingIdsToMark }, reminderSentAt: null },
-            data: { reminderSentAt: markAt },
-          });
-        }
-      });
-    }
-
-    return eskizOn
-      ? { created: rows.length, smsSent, smsFailed }
-      : { created: rows.length };
+    return { count: bookings.length };
   }
 
   async findRecipients(query: RecipientQueryDto) {
     const { startDate, endDate, targetType } = query;
+    const isDoctor = targetType.toLowerCase() === 'doctor';
 
     const dateStart = new Date(startDate || new Date().toISOString());
-    dateStart.setUTCHours(0, 0, 0, 0);
+    dateStart.setHours(0, 0, 0, 0);
     const dateEnd = new Date(endDate || new Date().toISOString());
-    dateEnd.setUTCHours(23, 59, 59, 999);
+    dateEnd.setHours(23, 59, 59, 999);
 
     const bookings = await this.prisma.booking.findMany({
       where: {
-        date: { gte: dateStart, lte: dateEnd },
-        status: { in: ['confirmed', 'pending'] },
-        // Only filter by reminderSentAt for patients
+        startTime: { gte: dateStart, lte: dateEnd },
+        status: { in: ['CONFIRMED', 'PENDING'] },
         ...(targetType === 'patient' ? { reminderSentAt: null } : {}),
       },
       include: {
-        patient: {
-          select: { id: true, firstName: true, lastName: true, phone: true },
-        },
+        patient: true,
         doctor: {
-          select: { id: true, firstName: true, lastName: true, phone: true },
+          include: { user: true },
         },
       },
-      orderBy: { date: 'asc' },
+      orderBy: { startTime: 'asc' },
     });
 
-    if (targetType === 'DOCTOR') {
+    if (isDoctor) {
       const doctorMap = new Map();
       bookings.forEach((b) => {
-        if (!b.doctorId) return;
         if (!doctorMap.has(b.doctorId)) {
           doctorMap.set(b.doctorId, {
             id: b.doctorId,
-            firstName: b.doctor?.firstName || '',
-            lastName: b.doctor?.lastName || '',
-            phone: b.doctor?.phone || '',
+            name: b.doctor?.user?.name || '',
+            phone: b.doctor?.user?.phone || '',
             bookingId: b.id,
-            bookingDate: toDateOnlyString(b.date),
-            bookingTime: b.time,
-            patientName: (b as any).patient
-              ? `${(b as any).patient.firstName} ${(b as any).patient.lastName}`
-              : '',
+            bookingDate: b.startTime.toISOString().split('T')[0],
+            bookingTime: b.startTime.toISOString().split('T')[1].substring(0, 5),
+            patientName: b.patient ? `${b.patient.firstName} ${b.patient.lastName}` : '',
           });
         }
       });
@@ -276,10 +155,10 @@ export class NotificationsService {
     bookings.forEach((b) => {
       if (!patientMap.has(b.patientId)) {
         patientMap.set(b.patientId, {
-          ...(b as any).patient,
+          ...b.patient,
           bookingId: b.id,
-          bookingDate: toDateOnlyString(b.date),
-          bookingTime: b.time,
+          bookingDate: b.startTime.toISOString().split('T')[0],
+          bookingTime: b.startTime.toISOString().split('T')[1].substring(0, 5),
         });
       }
     });
@@ -289,24 +168,23 @@ export class NotificationsService {
 
   async bulkSend(dto: BulkSendDto) {
     const { targetIds, targetType, message } = dto;
+    const isDoctor = targetType.toLowerCase() === 'doctor';
     const eskizOn = this.eskiz.isConfigured();
     const results = { sent: 0, failed: 0 };
     const markAt = new Date();
 
-    const targets =
-      targetType === 'DOCTOR'
+    const targets = isDoctor
         ? await this.prisma.doctor.findMany({
             where: { id: { in: targetIds } },
             select: {
               id: true,
-              phone: true,
+              user: { select: { phone: true, name: true } },
               bookings: {
                 where: {
-                  date: { gte: startOfUTCDay(new Date()) },
-                  status: { in: ['confirmed', 'pending'] },
+                  startTime: { gte: new Date() },
+                  status: { in: ['CONFIRMED', 'PENDING'] },
                 },
-                include: { patient: true },
-                orderBy: { date: 'asc' },
+                orderBy: { startTime: 'asc' },
                 take: 1,
               },
             },
@@ -316,14 +194,15 @@ export class NotificationsService {
             select: {
               id: true,
               phone: true,
+              firstName: true,
+              lastName: true,
               bookings: {
                 where: {
-                  date: { gte: startOfUTCDay(new Date()) },
-                  status: { in: ['confirmed', 'pending'] },
+                  startTime: { gte: new Date() },
+                  status: { in: ['CONFIRMED', 'PENDING'] },
                   reminderSentAt: null,
                 },
-                include: { patient: true },
-                orderBy: { date: 'asc' },
+                orderBy: { startTime: 'asc' },
                 take: 1,
               },
             },
@@ -337,19 +216,21 @@ export class NotificationsService {
       targets as any[],
       concurrency,
       async (target) => {
-        const mobile = this.eskiz.normalizeMobile(target.phone);
+        const phone = isDoctor ? target.user?.phone : target.phone;
+        const mobile = this.eskiz.normalizeMobile(phone);
         let status: ReminderStatus = 'sent';
         const booking = target.bookings?.[0];
 
         let personalizedMessage = message;
         if (booking) {
           personalizedMessage = personalizedMessage
-            .replace(/\[sana\]/g, toDateOnlyString(booking.date))
-            .replace(/\[vaqt\]/g, booking.time);
-          if (booking.patient) {
-            personalizedMessage = personalizedMessage.replace(
+            .replace(/\[sana\]/g, booking.startTime.toISOString().split('T')[0])
+            .replace(/\[vaqt\]/g, booking.startTime.toISOString().split('T')[1].substring(0, 5));
+          
+          if (!isDoctor) {
+             personalizedMessage = personalizedMessage.replace(
               /\[bemor\]/g,
-              `${booking.patient.firstName} ${booking.patient.lastName}`,
+              `${target.firstName} ${target.lastName}`,
             );
           }
         }
@@ -378,8 +259,8 @@ export class NotificationsService {
         }
 
         const row = {
-          patientId: targetType === 'patient' ? target.id : undefined,
-          doctorId: targetType === 'DOCTOR' ? target.id : undefined,
+          patientId: !isDoctor ? target.id : undefined,
+          doctorId: isDoctor ? target.id : undefined,
           type: 'sms' as const,
           message: personalizedMessage,
           status,
@@ -415,10 +296,6 @@ export class NotificationsService {
     }
 
     return { ...results, total: targetIds.length };
-  }
-
-  private formatBookingDate(d: Date) {
-    return toDateOnlyString(d);
   }
 
   private toResponse(n: Notification) {

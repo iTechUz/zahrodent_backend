@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Patient, Prisma } from '@prisma/client';
+import { Patient, Prisma, PatientComment } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 
 @Injectable()
@@ -13,12 +13,11 @@ export class PatientsRepository {
     const [data, total] = await Promise.all([
       this.prisma.patient.findMany({
         where: { ...where, deletedAt: null },
-        include: {
-          payments: true,
-          visits: true,
-          assignedDoctor: { include: { user: true } },
-        },
         orderBy: { createdAt: 'desc' },
+        include: {
+          user: true,
+          branch: true,
+        },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
@@ -31,22 +30,12 @@ export class PatientsRepository {
     return this.prisma.patient.count({ where: { ...where, deletedAt: null } });
   }
 
-  groupBySource() {
-    return this.prisma.patient.groupBy({
-      by: ['source'],
-      where: { deletedAt: null },
-      _count: { source: true },
-      orderBy: { _count: { source: 'desc' } },
-      take: 1,
-    });
-  }
-
-  findById(id: string): Promise<Patient | null> {
+  findById(id: string) {
     return this.prisma.patient.findUnique({
       where: { id },
       include: {
-        payments: true,
-        visits: true,
+        user: true,
+        branch: true,
         assignedDoctor: { include: { user: true } },
       },
     });
@@ -67,23 +56,51 @@ export class PatientsRepository {
     });
   }
 
-  // Comments
-  async createComment(data: {
-    content: string;
-    patientId: string;
-    authorId: string;
-  }) {
-    return this.prisma.patientComment.create({
-      data,
-      include: { author: { select: { name: true, avatar: true } } },
+  async getStats(where?: Prisma.PatientWhereInput) {
+    const total = await this.prisma.patient.count({
+      where: { ...where, deletedAt: null },
     });
+
+    const activeThisMonth = await this.prisma.patient.count({
+      where: {
+        ...where,
+        deletedAt: null,
+        bookings: {
+          some: {
+            startTime: {
+              gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+            },
+          },
+        },
+      },
+    });
+
+    return { total, activeThisMonth };
   }
 
-  async findCommentsByPatientId(patientId: string) {
+  createComment(data: Prisma.PatientCommentUncheckedCreateInput): Promise<PatientComment> {
+    return this.prisma.patientComment.create({ data });
+  }
+
+  findCommentsByPatientId(patientId: string): Promise<any[]> {
     return this.prisma.patientComment.findMany({
       where: { patientId },
       include: { author: { select: { name: true, avatar: true } } },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findSourcesByPatientIds(ids: string[]) {
+    return this.prisma.patient.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, source: true },
+    });
+  }
+
+  async findPhonesByPatientIds(ids: string[]) {
+    return this.prisma.patient.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, phone: true },
     });
   }
 }

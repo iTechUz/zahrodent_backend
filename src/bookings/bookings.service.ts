@@ -17,6 +17,38 @@ import { AuthUserView } from '../auth/auth.service';
 export class BookingsService {
   constructor(private readonly bookingsRepository: BookingsRepository) {}
 
+  async getStats(user: AuthUserView) {
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+
+    const baseWhere: Prisma.BookingWhereInput = { deletedAt: null };
+    if (user.role === 'DOCTOR') baseWhere.doctorId = user.doctorId;
+
+    const [todayCount, pendingCount, completedTodayCount] = await Promise.all([
+      this.bookingsRepository.count({
+        ...baseWhere,
+        startTime: { gte: today, lt: tomorrow },
+      }),
+      this.bookingsRepository.count({
+        ...baseWhere,
+        status: 'PENDING',
+      }),
+      this.bookingsRepository.count({
+        ...baseWhere,
+        status: 'COMPLETED',
+        startTime: { gte: today, lt: tomorrow },
+      }),
+    ]);
+
+    return {
+      today: todayCount,
+      pending: pendingCount,
+      completedToday: completedTodayCount,
+    };
+  }
+
   async findAll(
     query: PaginationQueryDto & {
       status?: BookingStatus;

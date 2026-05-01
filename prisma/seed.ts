@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as dotenv from 'dotenv';
 
@@ -18,6 +18,7 @@ async function main() {
   console.log(`Seeding: Admin phone set to ${adminPhone}`);
 
   // Deletion order to satisfy foreign key constraints
+  await prisma.auditLog.deleteMany();
   await prisma.patientComment.deleteMany();
   await prisma.notification.deleteMany();
   await prisma.payment.deleteMany();
@@ -27,16 +28,27 @@ async function main() {
   await prisma.service.deleteMany();
   await prisma.doctor.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.branch.deleteMany();
+
+  const branch = await prisma.branch.create({
+    data: {
+      id: 'main',
+      name: 'Asosiy filial',
+      address: 'Toshkent',
+      phone: '+998901234567'
+    }
+  });
 
   const passwordHash = await hash(adminPassword);
 
   await prisma.user.create({
     data: {
       id: 'u1',
+      branchId: branch.id,
       name: adminName,
       phone: adminPhone,
       passwordHash,
-      role: 'admin',
+      role: UserRole.SUPER_ADMIN,
     },
   });
 

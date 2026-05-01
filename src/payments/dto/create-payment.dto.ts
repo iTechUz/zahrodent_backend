@@ -20,6 +20,12 @@ export class CreatePaymentDto {
   @Min(0)
   amount: number;
 
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  discount?: number;
+
   @IsEnum(PaymentMethod)
   method: PaymentMethod;
 

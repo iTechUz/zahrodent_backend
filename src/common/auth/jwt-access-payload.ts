@@ -5,7 +5,7 @@ export type JwtAccessPayload = {
   role: AppRole;
   phone: string;
   name: string;
-  specialty?: string;
   avatar?: string;
   doctorId?: string; // Doctor record id (differs from user id)
+  branchId?: string;
 };
