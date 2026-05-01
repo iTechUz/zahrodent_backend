@@ -15,25 +15,27 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
 
 @ApiTags('users')
 @ApiBearerAuth('JWT')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('ADMIN', 'SUPER_ADMIN')
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Barcha xodimlarni olish (Faqat Admin)' })
-  findAll() {
-    return this.usersService.findAll();
+  @ApiOperation({ summary: 'Barcha xodimlarni olish (Faqat Admin/SuperAdmin)' })
+  findAll(@GetUser() user: AuthUserView) {
+    return this.usersService.findAll(user);
   }
 
   @Get(':id')
   @ApiOperation({ summary: "Xodim ma'lumotlarini olish" })
-  findOne(@Param('id') id: string) {
-    return this.usersService.findOne(id);
+  findOne(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.usersService.findOne(id, user);
   }
 
   @Post()
@@ -44,13 +46,17 @@ export class UsersController {
 
   @Patch(':id')
   @ApiOperation({ summary: "Xodim ma'lumotlarini yangilash" })
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.usersService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserDto,
+    @GetUser() user: AuthUserView,
+  ) {
+    return this.usersService.update(id, dto, user);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: "Xodimni o'chirish" })
-  remove(@Param('id') id: string) {
-    return this.usersService.remove(id);
+  remove(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.usersService.remove(id, user);
   }
 }

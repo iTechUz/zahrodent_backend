@@ -23,6 +23,8 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_FINANCE } from '../common/constants/role-groups';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
 
 @ApiTags('payments')
 @ApiBearerAuth('JWT')
@@ -34,14 +36,14 @@ export class PaymentsController {
 
   @Get('stats')
   @ApiOperation({ summary: 'Stats for payments page' })
-  getStats() {
-    return this.paymentsService.getStats();
+  getStats(@GetUser() user: AuthUserView) {
+    return this.paymentsService.getStats(user);
   }
 
   @Get('doctor-stats')
   @ApiOperation({ summary: 'Revenue breakdown per doctor' })
-  getDoctorStats() {
-    return this.paymentsService.getDoctorStats();
+  getDoctorStats(@GetUser() user: AuthUserView) {
+    return this.paymentsService.getDoctorStats(user);
   }
 
   @Get()
@@ -54,15 +56,16 @@ export class PaymentsController {
       method?: string;
       dateRange?: 'today' | 'week' | 'month' | 'all';
     },
+    @GetUser() user: AuthUserView,
   ) {
-    return this.paymentsService.findAll(query);
+    return this.paymentsService.findAll(query, user);
   }
 
   @Get(':id')
   @ApiOperation({ summary: "Bitta to'lov" })
   @ApiParam({ name: 'id' })
-  findOne(@Param('id') id: string) {
-    return this.paymentsService.findOne(id);
+  findOne(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.paymentsService.findOne(id, user);
   }
 
   @Post()
@@ -74,14 +77,18 @@ export class PaymentsController {
   @Patch(':id')
   @ApiOperation({ summary: "To'lovni yangilash" })
   @ApiParam({ name: 'id' })
-  update(@Param('id') id: string, @Body() dto: UpdatePaymentDto) {
-    return this.paymentsService.update(id, dto);
+  update(
+    @Param('id') id: string, 
+    @Body() dto: UpdatePaymentDto,
+    @GetUser() user: AuthUserView,
+  ) {
+    return this.paymentsService.update(id, dto, user);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: "To'lovni o'chirish" })
   @ApiParam({ name: 'id' })
-  remove(@Param('id') id: string) {
-    return this.paymentsService.remove(id);
+  remove(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.paymentsService.remove(id, user);
   }
 }

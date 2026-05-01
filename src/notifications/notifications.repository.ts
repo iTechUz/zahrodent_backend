@@ -21,6 +21,22 @@ export class NotificationsRepository {
     return { data, total };
   }
 
+  async findAllWithFilter(
+    where: Prisma.NotificationWhereInput,
+    opts?: { skip?: number; take?: number },
+  ): Promise<{ data: Notification[]; total: number }> {
+    const [data, total] = await Promise.all([
+      this.prisma.notification.findMany({
+        where,
+        orderBy: { sentAt: 'desc' },
+        ...(opts?.skip != null ? { skip: opts.skip } : {}),
+        ...(opts?.take != null ? { take: opts.take } : {}),
+      }),
+      this.prisma.notification.count({ where }),
+    ]);
+    return { data, total };
+  }
+
   create(data: Prisma.NotificationCreateInput): Promise<Notification> {
     return this.prisma.notification.create({ data });
   }

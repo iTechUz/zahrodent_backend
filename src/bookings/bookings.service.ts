@@ -3,7 +3,7 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
-import { Booking, Prisma, BookingStatus } from '@prisma/client';
+import { Booking, Prisma, BookingStatus, UserRole } from '@prisma/client';
 import { BookingsRepository } from './bookings.repository';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
@@ -24,7 +24,15 @@ export class BookingsService {
     tomorrow.setDate(today.getDate() + 1);
 
     const baseWhere: Prisma.BookingWhereInput = { deletedAt: null };
-    if (user.role === 'DOCTOR') baseWhere.doctorId = user.doctorId;
+    
+    // Multi-branch isolation
+    if (user.role !== UserRole.SUPER_ADMIN) {
+      baseWhere.branchId = user.branchId;
+    }
+    
+    if (user.role === UserRole.DOCTOR) {
+      baseWhere.doctorId = user.doctorId;
+    }
 
     const [todayCount, pendingCount, completedTodayCount] = await Promise.all([
       this.bookingsRepository.count({
@@ -68,13 +76,19 @@ export class BookingsService {
 
     const where: Prisma.BookingWhereInput = {};
 
-    if (user.role === 'DOCTOR') {
+    // Multi-branch isolation
+    if (user.role !== UserRole.SUPER_ADMIN) {
+      where.branchId = user.branchId;
+    } else if (branchId) {
+      where.branchId = branchId;
+    }
+
+    if (user.role === UserRole.DOCTOR) {
       where.doctorId = user.doctorId;
     } else if (doctorId) {
       where.doctorId = doctorId;
     }
 
-    if (branchId) where.branchId = branchId;
     if (patientId) where.patientId = patientId;
     if (status) where.status = status;
     if (source) where.source = source;
@@ -106,7 +120,12 @@ export class BookingsService {
     const b = await this.bookingsRepository.findById(id);
     if (!b || b.deletedAt) throw new NotFoundException('Booking not found');
     
-    if (user.role === 'DOCTOR' && b.doctorId !== user.doctorId) {
+    // Multi-branch isolation
+    if (user.role !== UserRole.SUPER_ADMIN && b.branchId !== user.branchId) {
+      throw new NotFoundException('Booking not found (access restricted)');
+    }
+
+    if (user.role === UserRole.DOCTOR && b.doctorId !== user.doctorId) {
       throw new NotFoundException('Booking not found (access restricted)');
     }
     return this.toResponse(b);
@@ -168,7 +187,13 @@ export class BookingsService {
   private async ensureExists(id: string, user: AuthUserView) {
     const b = await this.bookingsRepository.findById(id);
     if (!b || b.deletedAt) throw new NotFoundException('Booking not found');
-    if (user.role === 'DOCTOR' && b.doctorId !== user.doctorId) {
+    
+    // Multi-branch isolation
+    if (user.role !== UserRole.SUPER_ADMIN && b.branchId !== user.branchId) {
+      throw new NotFoundException('Booking not found (access restricted)');
+    }
+
+    if (user.role === UserRole.DOCTOR && b.doctorId !== user.doctorId) {
       throw new NotFoundException('Booking not found (access restricted)');
     }
     return b;

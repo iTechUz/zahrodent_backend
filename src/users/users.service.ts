@@ -7,14 +7,23 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../database/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { AuthUserView } from '../auth/auth.service';
+import { UserRole } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  async findAll(user: AuthUserView) {
+    const where: any = { deletedAt: null };
+    
+    // Multi-branch isolation
+    if (user.role !== UserRole.SUPER_ADMIN) {
+      where.branchId = user.branchId;
+    }
+
     return this.prisma.user.findMany({
-      where: { deletedAt: null },
+      where,
       select: {
         id: true,
         name: true,
@@ -30,7 +39,7 @@ export class UsersService {
     });
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, requester: AuthUserView) {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -46,6 +55,12 @@ export class UsersService {
       },
     });
     if (!user || user.deletedAt) throw new NotFoundException('Foydalanuvchi topilmadi');
+
+    // Multi-branch isolation
+    if (requester.role !== UserRole.SUPER_ADMIN && user.branchId !== requester.branchId) {
+      throw new NotFoundException('Foydalanuvchi topilmadi (ruxsat cheklangan)');
+    }
+
     return user;
   }
 
@@ -76,9 +91,14 @@ export class UsersService {
     });
   }
 
-  async update(id: string, dto: UpdateUserDto) {
+  async update(id: string, dto: UpdateUserDto, requester: AuthUserView) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user || user.deletedAt) throw new NotFoundException('Foydalanuvchi topilmadi');
+
+    // Multi-branch isolation
+    if (requester.role !== UserRole.SUPER_ADMIN && user.branchId !== requester.branchId) {
+       throw new NotFoundException('Foydalanuvchi topilmadi (ruxsat cheklangan)');
+    }
 
     const data: any = { ...dto };
     if (dto.password) {
@@ -98,9 +118,14 @@ export class UsersService {
     });
   }
 
-  async remove(id: string) {
+  async remove(id: string, requester: AuthUserView) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user || user.deletedAt) throw new NotFoundException('Foydalanuvchi topilmadi');
+
+    // Multi-branch isolation
+    if (requester.role !== UserRole.SUPER_ADMIN && user.branchId !== requester.branchId) {
+      throw new NotFoundException('Foydalanuvchi topilmadi (ruxsat cheklangan)');
+    }
 
     await this.prisma.user.update({
       where: { id },

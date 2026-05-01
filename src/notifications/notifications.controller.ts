@@ -12,19 +12,21 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { RecipientQueryDto, BulkSendDto } from './dto/bulk-sms.dto';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
 
 @ApiTags('notifications')
 @ApiBearerAuth('JWT')
 @Controller('notifications')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'RECEPTIONIST')
+@Roles('ADMIN', 'RECEPTIONIST', 'SUPER_ADMIN')
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Get()
   @ApiOperation({ summary: 'Bildirishnomalar tarixi' })
-  findAll(@Query() query: PaginationQueryDto) {
-    return this.notificationsService.findAll(query);
+  findAll(@Query() query: PaginationQueryDto, @GetUser() user: AuthUserView) {
+    return this.notificationsService.findAll(query, user);
   }
 
   @Post()
@@ -37,7 +39,7 @@ export class NotificationsController {
   @ApiOperation({
     summary: 'Eslatmalar yuborish',
     description:
-      'pending va confirmed qabullar uchun avtomatik xabar yaratish (frontend dagi tugma bilan bir xil)',
+      'pending va confirmed qabullar uchun avtomatik xabar yaratish',
   })
   @ApiOkResponse({
     description: 'Yaratilgan yozuvlar soni',
@@ -46,14 +48,14 @@ export class NotificationsController {
       properties: { created: { type: 'number', example: 5 } },
     },
   })
-  sendReminders() {
-    return this.notificationsService.sendReminders();
+  sendReminders(@GetUser() user: AuthUserView) {
+    return this.notificationsService.sendReminders(user);
   }
 
   @Get('recipients')
   @ApiOperation({ summary: "SMS yuborish mumkin bo'lgan mijozlar ro'yxati" })
-  findRecipients(@Query() query: RecipientQueryDto) {
-    return this.notificationsService.findRecipients(query);
+  findRecipients(@Query() query: RecipientQueryDto, @GetUser() user: AuthUserView) {
+    return this.notificationsService.findRecipients(query, user);
   }
 
   @Post('bulk-send')
