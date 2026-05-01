@@ -22,12 +22,14 @@ import { UpdateLeadDto } from './dto/update-lead.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
 
 @ApiTags('leads')
 @ApiBearerAuth('JWT')
 @Controller('leads')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'RECEPTIONIST')
+@Roles('ADMIN', 'RECEPTIONIST', 'SUPER_ADMIN')
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
@@ -48,6 +50,13 @@ export class LeadsController {
   @ApiOperation({ summary: 'Qo\'lda murojaat qo\'shish' })
   create(@Body() dto: CreateLeadDto) {
     return this.leadsService.create(dto);
+  }
+
+  @Post(':id/convert')
+  @ApiOperation({ summary: 'Murojaatni bemorga aylantirish' })
+  @ApiParam({ name: 'id' })
+  convertToPatient(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.leadsService.convertToPatient(id, user.branchId!);
   }
   
   @Patch(':id')

@@ -1,15 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { LeadsRepository } from './leads.repository';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { Prisma } from '@prisma/client';
+import { PrismaService } from '../database/prisma.service';
 
 @Injectable()
 export class LeadsService {
   constructor(
     private readonly leadsRepository: LeadsRepository,
     private readonly notificationsGateway: NotificationsGateway,
+    private readonly prisma: PrismaService,
   ) {}
 
   async create(dto: CreateLeadDto) {
@@ -59,6 +61,41 @@ export class LeadsService {
     const lead = await this.leadsRepository.findById(id);
     if (!lead) throw new NotFoundException('Lead not found');
     return this.leadsRepository.update(id, dto);
+  }
+
+  async convertToPatient(id: string, branchId: string) {
+    const lead = await this.leadsRepository.findById(id);
+    if (!lead) throw new NotFoundException('Lead not found');
+    if (lead.patientId) throw new ConflictException('Bu lead allaqachon bemorga aylantirilgan');
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Create patient
+      const names = lead.name.split(' ');
+      const firstName = names[0];
+      const lastName = names.slice(1).join(' ') || '—';
+
+      const patient = await tx.patient.create({
+        data: {
+          firstName,
+          lastName,
+          phone: lead.phone,
+          branchId,
+          source: lead.source || 'TELEGRAM',
+          notes: lead.notes || lead.message,
+        },
+      });
+
+      // 2. Update lead status and link to patient
+      await tx.lead.update({
+        where: { id },
+        data: {
+          status: 'converted',
+          patientId: patient.id,
+        },
+      });
+
+      return patient;
+    });
   }
 
   async remove(id: string) {
