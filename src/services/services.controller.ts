@@ -33,7 +33,7 @@ export class ServicesController {
   constructor(private readonly servicesService: ServicesService) {}
 
   @Get('stats')
-  @Roles('admin')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Stats for services page' })
   getStats() {
     return this.servicesService.getStats();
@@ -53,14 +53,14 @@ export class ServicesController {
   }
 
   @Post()
-  @Roles('admin')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Yangi xizmat' })
   create(@Body() dto: CreateServiceDto) {
     return this.servicesService.create(dto);
   }
 
   @Patch(':id')
-  @Roles('admin')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Xizmatni yangilash' })
   @ApiParam({ name: 'id' })
   update(@Param('id') id: string, @Body() dto: UpdateServiceDto) {
@@ -68,7 +68,7 @@ export class ServicesController {
   }
 
   @Delete(':id')
-  @Roles('admin')
+  @Roles('ADMIN')
   @ApiOperation({ summary: "Xizmatni o'chirish" })
   @ApiParam({ name: 'id' })
   remove(@Param('id') id: string) {

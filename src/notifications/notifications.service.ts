@@ -250,7 +250,7 @@ export class NotificationsService {
       orderBy: { date: 'asc' },
     });
 
-    if (targetType === 'doctor') {
+    if (targetType === 'DOCTOR') {
       const doctorMap = new Map();
       bookings.forEach((b) => {
         if (!b.doctorId) return;
@@ -294,7 +294,7 @@ export class NotificationsService {
     const markAt = new Date();
 
     const targets =
-      targetType === 'doctor'
+      targetType === 'DOCTOR'
         ? await this.prisma.doctor.findMany({
             where: { id: { in: targetIds } },
             select: {
@@ -379,7 +379,7 @@ export class NotificationsService {
 
         const row = {
           patientId: targetType === 'patient' ? target.id : undefined,
-          doctorId: targetType === 'doctor' ? target.id : undefined,
+          doctorId: targetType === 'DOCTOR' ? target.id : undefined,
           type: 'sms' as const,
           message: personalizedMessage,
           status,

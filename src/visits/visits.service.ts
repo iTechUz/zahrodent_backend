@@ -7,10 +7,6 @@ import {
 } from '../common/dto/pagination.dto';
 import { CreateVisitDto } from './dto/create-visit.dto';
 import { UpdateVisitDto } from './dto/update-visit.dto';
-import {
-  parseDateOnlyToUTC,
-  toDateOnlyString,
-} from '../common/utils/date.util';
 import { AuthUserView } from '../auth/auth.service';
 
 @Injectable()
@@ -30,7 +26,7 @@ export class VisitsService {
 
     if (patientId) where.patientId = patientId;
 
-    if (user.role === 'doctor') {
+    if (user.role === 'DOCTOR') {
       where.doctorId = user.doctorId;
     } else if (doctorId) {
       where.doctorId = doctorId;
@@ -54,20 +50,19 @@ export class VisitsService {
   async findOne(id: string, user: AuthUserView) {
     const v = await this.visitsRepository.findById(id);
     if (!v) throw new NotFoundException('Visit not found');
-    if (user.role === 'doctor' && v.doctorId !== user.doctorId) {
+    if (user.role === 'DOCTOR' && v.doctorId !== user.doctorId) {
       throw new NotFoundException('Visit not found (access restricted)');
     }
     return this.toResponse(v);
   }
 
   async create(dto: CreateVisitDto) {
-    const dateStr = dto.date ?? toDateOnlyString(new Date());
     const v = await this.visitsRepository.create({
       patient: { connect: { id: dto.patientId } },
       doctor: { connect: { id: dto.doctorId } },
       booking: dto.bookingId ? { connect: { id: dto.bookingId } } : undefined,
-      date: parseDateOnlyToUTC(dateStr),
-      status: dto.status,
+      service: dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
+      date: dto.date ? new Date(dto.date) : new Date(),
       diagnosis: dto.diagnosis ?? '',
       treatment: dto.treatment ?? '',
       notes: dto.notes ?? '',
@@ -79,26 +74,19 @@ export class VisitsService {
   async update(id: string, dto: UpdateVisitDto, user: AuthUserView) {
     await this.ensureExists(id, user);
     const v = await this.visitsRepository.update(id, {
-      date: dto.date === undefined ? undefined : parseDateOnlyToUTC(dto.date),
-      status: dto.status,
+      date: dto.date ? new Date(dto.date) : undefined,
       diagnosis: dto.diagnosis,
       treatment: dto.treatment,
       notes: dto.notes,
       price: dto.price,
-      patient:
-        dto.patientId === undefined
-          ? undefined
-          : { connect: { id: dto.patientId } },
-      doctor:
-        dto.doctorId === undefined
-          ? undefined
-          : { connect: { id: dto.doctorId } },
-      booking:
-        dto.bookingId === undefined
-          ? undefined
-          : dto.bookingId
-            ? { connect: { id: dto.bookingId } }
-            : { disconnect: true },
+      patient: dto.patientId ? { connect: { id: dto.patientId } } : undefined,
+      doctor: dto.doctorId ? { connect: { id: dto.doctorId } } : undefined,
+      booking: dto.bookingId === null 
+        ? { disconnect: true } 
+        : dto.bookingId ? { connect: { id: dto.bookingId } } : undefined,
+      service: dto.serviceId === null
+        ? { disconnect: true }
+        : dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
     });
     return this.toResponse(v);
   }
@@ -106,23 +94,17 @@ export class VisitsService {
   private async ensureExists(id: string, user: AuthUserView) {
     const v = await this.visitsRepository.findById(id);
     if (!v) throw new NotFoundException('Visit not found');
-    if (user.role === 'doctor' && v.doctorId !== user.doctorId) {
+    if (user.role === 'DOCTOR' && v.doctorId !== user.doctorId) {
       throw new NotFoundException('Visit not found (access restricted)');
     }
   }
 
-  private toResponse(v: Visit) {
+  private toResponse(v: any) {
     return {
-      id: v.id,
-      patientId: v.patientId,
-      doctorId: v.doctorId,
-      bookingId: v.bookingId ?? undefined,
-      date: toDateOnlyString(v.date),
-      status: v.status,
-      diagnosis: v.diagnosis,
-      treatment: v.treatment,
-      notes: v.notes,
-      price: v.price || 0,
+      ...v,
+      price: v.price?.toNumber() || 0,
+      date: v.date.toISOString(),
+      createdAt: v.createdAt.toISOString(),
     };
   }
 }

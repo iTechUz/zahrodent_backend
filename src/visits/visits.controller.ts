@@ -51,14 +51,14 @@ export class VisitsController {
   }
 
   @Post()
-  @Roles('admin', 'doctor')
+  @Roles('ADMIN', 'DOCTOR')
   @ApiOperation({ summary: 'Yangi tashrif' })
   create(@Body() dto: CreateVisitDto) {
     return this.visitsService.create(dto);
   }
 
   @Patch(':id')
-  @Roles('admin', 'doctor')
+  @Roles('ADMIN', 'DOCTOR')
   @ApiOperation({ summary: 'Tashrifni yangilash' })
   @ApiParam({ name: 'id' })
   update(

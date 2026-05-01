@@ -5,15 +5,16 @@ import { UsersRepository } from './users.repository';
 import { LoginDto } from './dto/login.dto';
 import { AppRole } from '../common/decorators/roles.decorator';
 import type { JwtAccessPayload } from '../common/auth/jwt-access-payload';
+import { UserRole } from '@prisma/client';
 
 export type AuthUserView = {
   id: string;
   name: string;
   phone: string;
   role: AppRole;
-  specialty?: string;
   avatar?: string;
-  doctorId?: string; // Doctor record id (for doctor role only)
+  doctorId?: string; 
+  branchId?: string;
 };
 
 @Injectable()
@@ -25,29 +26,31 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const user = await this.usersRepository.findByPhone(dto.phone);
-    if (!user) {
-      throw new UnauthorizedException("Bunday telefon raqamli foydalanuvchi topilmadi");
+    if (!user || !user.isActive || user.deletedAt) {
+      throw new UnauthorizedException("Bunday telefon raqamli foydalanuvchi topilmadi yoki hisob faol emas");
     }
     const ok = await bcrypt.compare(dto.password, user.passwordHash);
     if (!ok) {
       throw new UnauthorizedException("Kiritilgan parol noto'g'ri");
     }
-    // If doctor role, fetch the associated Doctor record id
+
     let doctorId: string | undefined;
-    if (user.role === 'doctor') {
+    if (user.role === UserRole.DOCTOR) {
       const doctor = await this.usersRepository.findDoctorByUserId(user.id);
       doctorId = doctor?.id;
     }
+
     const view = this.toUserView(user, doctorId);
     const payload: JwtAccessPayload = {
       sub: user.id,
       role: view.role,
       phone: view.phone,
       name: view.name,
-      specialty: view.specialty,
       avatar: view.avatar,
       doctorId: view.doctorId,
+      branchId: view.branchId,
     };
+
     const access_token = await this.jwtService.signAsync(payload);
     return {
       access_token,
@@ -56,14 +59,7 @@ export class AuthService {
   }
 
   toUserView(
-    user: {
-      id: string;
-      name: string;
-      phone: string;
-      role: string;
-      specialty: string | null;
-      avatar: string | null;
-    },
+    user: any,
     doctorId?: string,
   ): AuthUserView {
     return {
@@ -71,8 +67,8 @@ export class AuthService {
       name: user.name,
       phone: user.phone,
       role: user.role as AppRole,
-      specialty: user.specialty ?? undefined,
       avatar: user.avatar ?? undefined,
+      branchId: user.branchId ?? undefined,
       doctorId,
     };
   }

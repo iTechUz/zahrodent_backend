@@ -1,9 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PatientsRepository } from './patients.repository';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
-import { toDateOnlyString } from '../common/utils/date.util';
 import {
   PaginatedResponse,
   PaginationQueryDto,
@@ -19,64 +18,40 @@ export class PatientsService {
       source?: string; 
       startDate?: string; 
       endDate?: string;
-      debtOnly?: string;
+      branchId?: string;
     },
     user: AuthUserView,
   ): Promise<PaginatedResponse<any>> {
-    const { search, source, startDate, endDate, debtOnly } = query;
+    const { search, source, startDate, endDate, branchId } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
 
     const where: Prisma.PatientWhereInput = {};
 
-    if (source && source !== 'all') {
-      where.source = source;
-    }
+    if (branchId) where.branchId = branchId;
+    if (source) where.source = source;
 
     if (startDate || endDate) {
       where.createdAt = {};
       if (startDate) where.createdAt.gte = new Date(startDate);
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        where.createdAt.lte = end;
-      }
-    }
-
-    if (debtOnly === 'true') {
-      // In Prisma, filtering by calculated balance (sum of payments - sum of visits) 
-      // is hard directly in 'where'. We might need to do it via repository or raw query.
-      // But for now, let's keep it simple or implement it in the repository.
+      if (endDate) where.createdAt.lte = new Date(endDate);
     }
 
     if (search?.trim()) {
       where.OR = [
         { firstName: { contains: search, mode: 'insensitive' } },
         { lastName: { contains: search, mode: 'insensitive' } },
-        { phone: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search } },
       ];
     }
 
-    if (user.role === 'doctor') {
-      where.OR = undefined;
-      where.AND = [
-        {
-          OR: [
-            { bookings: { some: { doctorId: user.doctorId } } },
-            { visits: { some: { doctorId: user.doctorId } } },
-          ],
-        },
+    if (user.role === 'DOCTOR') {
+      where.OR = [
+        { bookings: { some: { doctorId: user.doctorId } } },
+        { visits: { some: { doctorId: user.doctorId } } },
+        { assignedDoctorId: user.doctorId }
       ];
-      if (search?.trim()) {
-        (where.AND as any[]).push({
-          OR: [
-            { firstName: { contains: search, mode: 'insensitive' } },
-            { lastName: { contains: search, mode: 'insensitive' } },
-            { phone: { contains: search, mode: 'insensitive' } },
-          ],
-        });
-      }
     }
 
     const { data, total } = await this.patientsRepository.findAll(where, {
@@ -88,14 +63,16 @@ export class PatientsService {
 
   async findOne(id: string, user: AuthUserView) {
     const p = await this.patientsRepository.findById(id);
-    if (!p) throw new NotFoundException('Patient not found');
+    if (!p || p.deletedAt) throw new NotFoundException('Patient not found');
 
-    if (user.role === 'doctor') {
+    // Access control for doctors
+    if (user.role === 'DOCTOR') {
       const hasAccess = await this.patientsRepository.count({
         id,
         OR: [
           { bookings: { some: { doctorId: user.doctorId } } },
           { visits: { some: { doctorId: user.doctorId } } },
+          { assignedDoctorId: user.doctorId }
         ],
       });
       if (!hasAccess) {
@@ -106,27 +83,39 @@ export class PatientsService {
   }
 
   async create(dto: CreatePatientDto) {
+    // Check for duplicate phone
+    const existing = await this.patientsRepository.count({ phone: dto.phone });
+    if (existing > 0) throw new ConflictException('Bu telefon raqami bilan bemor allaqachon mavjud');
+
     const p = await this.patientsRepository.create({
+      branch: { connect: { id: dto.branchId } },
+      user: dto.userId ? { connect: { id: dto.userId } } : undefined,
       firstName: dto.firstName,
       lastName: dto.lastName,
       age: dto.age,
       phone: dto.phone,
-      source: dto.source,
+      source: dto.source || 'DIRECT',
       notes: dto.notes ?? '',
       address: dto.address,
-      workplace: dto.workplace,
+      gender: dto.gender,
+      birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
       assignedDoctor: dto.assignedDoctorId
         ? { connect: { id: dto.assignedDoctorId } }
         : undefined,
-      avatar: dto.avatar,
-      toothChart:
-        dto.toothChart === undefined ? undefined : (dto.toothChart as object),
+      toothChart: dto.toothChart as object,
+      medicalHistory: dto.medicalHistory as object,
     });
     return this.toResponse(p);
   }
 
   async update(id: string, dto: UpdatePatientDto, user: AuthUserView) {
-    await this.ensureExists(id, user);
+    const current = await this.ensureExists(id, user);
+
+    if (dto.phone && dto.phone !== current.phone) {
+      const existing = await this.patientsRepository.count({ phone: dto.phone, id: { not: id } });
+      if (existing > 0) throw new ConflictException('Bu telefon raqami bilan boshqa bemor allaqachon mavjud');
+    }
+
     const p = await this.patientsRepository.update(id, {
       firstName: dto.firstName,
       lastName: dto.lastName,
@@ -135,58 +124,29 @@ export class PatientsService {
       source: dto.source,
       notes: dto.notes,
       address: dto.address,
-      workplace: dto.workplace,
+      gender: dto.gender,
+      birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
       assignedDoctor: dto.assignedDoctorId
         ? { connect: { id: dto.assignedDoctorId } }
-        : undefined,
-      avatar: dto.avatar,
-      toothChart:
-        dto.toothChart === undefined ? undefined : (dto.toothChart as object),
+        : { disconnect: dto.assignedDoctorId === null },
+      toothChart: dto.toothChart as object,
+      medicalHistory: dto.medicalHistory as object,
     });
     return this.toResponse(p);
   }
 
   async remove(id: string, user: AuthUserView) {
     await this.ensureExists(id, user);
-    await this.patientsRepository.delete(id);
+    await this.patientsRepository.softDelete(id);
     return { id };
   }
 
   private async ensureExists(id: string, user: AuthUserView) {
-    await this.findOne(id, user);
+    const p = await this.patientsRepository.findById(id);
+    if (!p || p.deletedAt) throw new NotFoundException('Patient not found');
+    return p;
   }
 
-  async getStats(user: AuthUserView) {
-    const where: Prisma.PatientWhereInput = {};
-    if (user.role === 'doctor') {
-      where.OR = [
-        { bookings: { some: { doctorId: user.doctorId } } },
-        { visits: { some: { doctorId: user.doctorId } } },
-      ];
-    }
-
-    const total = await this.patientsRepository.count(where);
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-
-    const newThisMonth = await this.patientsRepository.count({
-      ...where,
-      createdAt: { gte: startOfMonth },
-    });
-
-    // Top source
-    const sources = await this.patientsRepository.groupBySource();
-    const topSource = sources[0]?.source || 'N/A';
-
-    return {
-      total,
-      newThisMonth,
-      topSource,
-    };
-  }
-
-  // Comments
   async addComment(
     data: { content: string; patientId: string },
     authorId: string,
@@ -203,36 +163,12 @@ export class PatientsService {
   }
 
   private toResponse(p: any) {
-    const paid = (p.payments || []).reduce(
-      (acc: number, curr: any) => acc + (curr.amount || 0),
-      0,
-    );
-    const owed = (p.visits || []).reduce(
-      (acc: number, curr: any) => acc + (curr.price || 0),
-      0,
-    );
-    const balance = paid - owed;
-
     return {
-      id: p.id,
-      firstName: p.firstName,
-      lastName: p.lastName,
-      age: p.age,
-      phone: p.phone,
-      source: p.source,
-      notes: p.notes,
-      address: p.address,
-      workplace: p.workplace,
-      avatar: p.avatar ?? undefined,
-      balance,
-      createdAt: toDateOnlyString(p.createdAt),
-      assignedDoctor: p.assignedDoctor
-        ? {
-            firstName: p.assignedDoctor.firstName,
-            lastName: p.assignedDoctor.lastName,
-          }
-        : undefined,
-      toothChart: (p.toothChart as Record<number, unknown> | null) ?? undefined,
+      ...p,
+      balance: p.balance?.toNumber() || 0,
+      createdAt: p.createdAt.toISOString(),
+      updatedAt: p.updatedAt.toISOString(),
+      birthDate: p.birthDate?.toISOString(),
     };
   }
 }

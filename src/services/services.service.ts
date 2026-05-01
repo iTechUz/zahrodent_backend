@@ -51,7 +51,7 @@ export class ServicesService {
     const s = await this.servicesRepository.create({
       name: dto.name,
       category: dto.category,
-      price: dto.price,
+      basePrice: dto.price,
       duration: dto.duration,
       description: dto.description,
     });
@@ -63,7 +63,7 @@ export class ServicesService {
     const s = await this.servicesRepository.update(id, {
       name: dto.name,
       category: dto.category,
-      price: dto.price,
+      basePrice: dto.price,
       duration: dto.duration,
       description: dto.description,
     });
@@ -100,7 +100,7 @@ export class ServicesService {
       id: s.id,
       name: s.name,
       category: s.category,
-      price: s.price,
+      price: s.basePrice?.toNumber() || 0,
       duration: s.duration,
       description: s.description ?? undefined,
     };

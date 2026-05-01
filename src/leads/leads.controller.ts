@@ -27,7 +27,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 @ApiBearerAuth('JWT')
 @Controller('leads')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('admin', 'receptionist')
+@Roles('ADMIN', 'RECEPTIONIST')
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 

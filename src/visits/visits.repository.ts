@@ -14,6 +14,11 @@ export class VisitsRepository {
       this.prisma.visit.findMany({
         where,
         orderBy: { date: 'desc' },
+        include: {
+          patient: true,
+          doctor: { include: { user: true } },
+          service: true,
+        },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
@@ -23,7 +28,14 @@ export class VisitsRepository {
   }
 
   findById(id: string): Promise<Visit | null> {
-    return this.prisma.visit.findUnique({ where: { id } });
+    return this.prisma.visit.findUnique({ 
+      where: { id },
+      include: {
+        patient: true,
+        doctor: { include: { user: true } },
+        service: true,
+      },
+    });
   }
 
   create(data: Prisma.VisitCreateInput): Promise<Visit> {

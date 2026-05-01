@@ -14,7 +14,7 @@ export class AdminInitService implements OnModuleInit {
 
   private async ensureAdminExists() {
     const adminCount = await this.prisma.user.count({
-      where: { role: 'admin' },
+      where: { role: 'ADMIN' },
     });
 
     if (adminCount === 0) {
@@ -34,7 +34,7 @@ export class AdminInitService implements OnModuleInit {
             name,
             phone,
             passwordHash,
-            role: 'admin',
+            role: 'ADMIN',
           },
         });
         this.logger.log(`Super admin muvaffaqiyatli yaratildi: ${phone}`);

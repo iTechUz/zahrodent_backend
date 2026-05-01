@@ -12,32 +12,34 @@ export class BookingsRepository {
   ): Promise<{ data: Booking[]; total: number }> {
     const [data, total] = await Promise.all([
       this.prisma.booking.findMany({
-        where,
-        orderBy: [{ date: 'desc' }, { time: 'desc' }],
+        where: { ...where, deletedAt: null },
+        orderBy: [{ startTime: 'desc' }],
+        include: {
+          patient: true,
+          doctor: { include: { user: true } },
+          service: true,
+        },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
-      this.prisma.booking.count({ where }),
+      this.prisma.booking.count({ where: { ...where, deletedAt: null } }),
     ]);
     return { data, total };
   }
 
   count(where?: Prisma.BookingWhereInput): Promise<number> {
-    return this.prisma.booking.count({ where });
-  }
-
-  markReminderSent(bookingIds: string[], at: Date): Promise<void> {
-    if (!bookingIds.length) return Promise.resolve();
-    return this.prisma.booking
-      .updateMany({
-        where: { id: { in: bookingIds } },
-        data: { reminderSentAt: at },
-      })
-      .then(() => undefined);
+    return this.prisma.booking.count({ where: { ...where, deletedAt: null } });
   }
 
   findById(id: string): Promise<Booking | null> {
-    return this.prisma.booking.findUnique({ where: { id } });
+    return this.prisma.booking.findUnique({
+      where: { id },
+      include: {
+        patient: true,
+        doctor: { include: { user: true } },
+        service: true,
+      },
+    });
   }
 
   findServiceById(id: string) {
@@ -46,7 +48,7 @@ export class BookingsRepository {
 
   findManyWithService(where: Prisma.BookingWhereInput) {
     return this.prisma.booking.findMany({
-      where,
+      where: { ...where, deletedAt: null },
       include: { service: true },
     });
   }
@@ -59,7 +61,10 @@ export class BookingsRepository {
     return this.prisma.booking.update({ where: { id }, data });
   }
 
-  delete(id: string): Promise<Booking> {
-    return this.prisma.booking.delete({ where: { id } });
+  softDelete(id: string): Promise<Booking> {
+    return this.prisma.booking.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
   }
 }

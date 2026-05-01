@@ -1,5 +1,4 @@
 import {
-  IsIn,
   IsInt,
   IsObject,
   IsOptional,
@@ -7,12 +6,19 @@ import {
   Matches,
   Min,
   MinLength,
+  IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-const SOURCES = ['walk-in', 'telegram', 'website', 'phone'] as const;
-
 export class CreatePatientDto {
+  @IsString()
+  @MinLength(1)
+  branchId: string;
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
+
   @IsString()
   @MinLength(1)
   firstName: string;
@@ -23,37 +29,42 @@ export class CreatePatientDto {
 
   @Type(() => Number)
   @IsInt()
-  @Min(1)
+  @Min(0)
   age: number;
 
   @IsString()
   @Matches(/^\+?[\d\s-]{10,20}$/, { message: 'Invalid phone' })
   phone: string;
 
-  @IsIn(SOURCES)
-  source: (typeof SOURCES)[number];
+  @IsOptional()
+  @IsString()
+  source?: string;
 
   @IsOptional()
   @IsString()
   notes?: string;
 
+  @IsOptional()
   @IsString()
-  @MinLength(3)
-  address: string;
+  address?: string;
 
+  @IsOptional()
+  @IsDateString()
+  birthDate?: string;
+
+  @IsOptional()
   @IsString()
-  @MinLength(1)
-  workplace: string;
+  gender?: string;
 
   @IsOptional()
   @IsString()
   assignedDoctorId?: string;
 
   @IsOptional()
-  @IsString()
-  avatar?: string;
+  @IsObject()
+  toothChart?: Record<string, unknown>;
 
   @IsOptional()
   @IsObject()
-  toothChart?: Record<string, unknown>;
+  medicalHistory?: Record<string, unknown>;
 }

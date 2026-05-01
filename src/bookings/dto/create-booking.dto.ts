@@ -1,22 +1,17 @@
 import {
-  IsIn,
+  IsEnum,
   IsOptional,
   IsString,
   MinLength,
-  Matches,
+  IsDateString,
 } from 'class-validator';
-
-const SOURCES = ['walk-in', 'telegram', 'website', 'phone'] as const;
-const STATUSES = [
-  'pending',
-  'confirmed',
-  'arrived',
-  'no-show',
-  'completed',
-  'cancelled',
-] as const;
+import { BookingStatus } from '@prisma/client';
 
 export class CreateBookingDto {
+  @IsString()
+  @MinLength(1)
+  branchId: string;
+
   @IsString()
   @MinLength(1)
   patientId: string;
@@ -25,21 +20,18 @@ export class CreateBookingDto {
   @MinLength(1)
   doctorId: string;
 
-  @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'date YYYY-MM-DD formatida bo‘lishi kerak',
-  })
-  date: string;
+  @IsDateString()
+  startTime: string;
+
+  @IsDateString()
+  endTime: string;
+
+  @IsEnum(BookingStatus)
+  status: BookingStatus;
 
   @IsString()
   @MinLength(1)
-  time: string;
-
-  @IsIn(SOURCES)
-  source: (typeof SOURCES)[number];
-
-  @IsIn(STATUSES)
-  status: (typeof STATUSES)[number];
+  source: string;
 
   @IsOptional()
   @IsString()

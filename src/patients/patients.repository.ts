@@ -12,28 +12,29 @@ export class PatientsRepository {
   ): Promise<{ data: Patient[]; total: number }> {
     const [data, total] = await Promise.all([
       this.prisma.patient.findMany({
-        where,
+        where: { ...where, deletedAt: null },
         include: {
-          payments: { where: { status: 'paid' }, select: { amount: true } },
-          visits: { where: { status: 'completed' }, select: { price: true } },
-          assignedDoctor: { select: { firstName: true, lastName: true } },
+          payments: true,
+          visits: true,
+          assignedDoctor: { include: { user: true } },
         },
         orderBy: { createdAt: 'desc' },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
-      this.prisma.patient.count({ where }),
+      this.prisma.patient.count({ where: { ...where, deletedAt: null } }),
     ]);
-    return { data: data as any[], total };
+    return { data, total };
   }
 
   count(where?: Prisma.PatientWhereInput): Promise<number> {
-    return this.prisma.patient.count({ where });
+    return this.prisma.patient.count({ where: { ...where, deletedAt: null } });
   }
 
   groupBySource() {
     return this.prisma.patient.groupBy({
       by: ['source'],
+      where: { deletedAt: null },
       _count: { source: true },
       orderBy: { _count: { source: 'desc' } },
       take: 1,
@@ -44,32 +45,10 @@ export class PatientsRepository {
     return this.prisma.patient.findUnique({
       where: { id },
       include: {
-        payments: { where: { status: 'paid' }, select: { amount: true } },
-        visits: { where: { status: 'completed' }, select: { price: true } },
-        assignedDoctor: { select: { firstName: true, lastName: true } },
+        payments: true,
+        visits: true,
+        assignedDoctor: { include: { user: true } },
       },
-    }) as any;
-  }
-
-  findSourcesByPatientIds(ids: string[]) {
-    const unique = [...new Set(ids)].filter(Boolean);
-    if (!unique.length) {
-      return Promise.resolve([] as { id: string; source: string }[]);
-    }
-    return this.prisma.patient.findMany({
-      where: { id: { in: unique } },
-      select: { id: true, source: true },
-    });
-  }
-
-  findPhonesByPatientIds(ids: string[]) {
-    const unique = [...new Set(ids)].filter(Boolean);
-    if (!unique.length) {
-      return Promise.resolve([] as { id: string; phone: string }[]);
-    }
-    return this.prisma.patient.findMany({
-      where: { id: { in: unique } },
-      select: { id: true, phone: true },
     });
   }
 
@@ -81,8 +60,11 @@ export class PatientsRepository {
     return this.prisma.patient.update({ where: { id }, data });
   }
 
-  delete(id: string): Promise<Patient> {
-    return this.prisma.patient.delete({ where: { id } });
+  softDelete(id: string): Promise<Patient> {
+    return this.prisma.patient.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    });
   }
 
   // Comments

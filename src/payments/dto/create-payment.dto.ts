@@ -1,17 +1,14 @@
 import {
-  IsIn,
-  IsInt,
+  IsEnum,
+  IsNumber,
   IsOptional,
   IsString,
-  Matches,
+  IsDateString,
   Min,
   MinLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-
-const METHODS = ['cash', 'card', 'transfer', 'insurance'] as const;
-const STATUSES = ['paid', 'partial', 'unpaid'] as const;
-const TYPES = ['INCOME', 'EXPENSE'] as const;
+import { PaymentType, PaymentMethod } from '@prisma/client';
 
 export class CreatePaymentDto {
   @IsString()
@@ -19,41 +16,43 @@ export class CreatePaymentDto {
   patientId: string;
 
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsNumber()
+  @Min(0)
   amount: number;
 
-  @IsIn(METHODS)
-  method: (typeof METHODS)[number];
-
-  @IsIn(STATUSES)
-  status: (typeof STATUSES)[number];
-
-  @IsOptional()
-  @IsIn(TYPES)
-  type?: (typeof TYPES)[number];
+  @IsEnum(PaymentMethod)
+  method: PaymentMethod;
 
   @IsString()
-  @MinLength(3)
-  description: string;
+  @MinLength(1)
+  status: string; // e.g., "COMPLETED", "PENDING"
 
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  discount?: number;
+  @IsEnum(PaymentType)
+  type?: PaymentType;
+
+  @IsOptional()
+  @IsString()
+  currency?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  description?: string;
 
   @IsOptional()
   @IsString()
   serviceId?: string;
 
   @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'date YYYY-MM-DD formatida bo‘lishi kerak',
-  })
+  @IsDateString()
   date?: string;
 
   @IsOptional()
   @IsString()
   visitId?: string;
+
+  @IsOptional()
+  @IsString()
+  referenceId?: string;
 }

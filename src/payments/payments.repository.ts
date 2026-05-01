@@ -14,6 +14,11 @@ export class PaymentsRepository {
       this.prisma.payment.findMany({
         where,
         orderBy: { date: 'desc' },
+        include: {
+          patient: true,
+          service: true,
+          visit: true,
+        },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
@@ -27,17 +32,16 @@ export class PaymentsRepository {
       where,
       _sum: { amount: true },
     });
-    return result._sum.amount || 0;
+    return result._sum.amount?.toNumber() || 0;
   }
 
   async getDoctorStats(): Promise<{ doctorId: string; total: number }[]> {
     const result = await this.prisma.payment.groupBy({
       by: ['visitId'],
-      where: { status: 'paid', visitId: { not: null } },
+      where: { status: 'COMPLETED', visitId: { not: null } },
       _sum: { amount: true },
     });
 
-    // Map visitId → doctorId via visits table
     const visitIds = result.map((r) => r.visitId).filter(Boolean) as string[];
     const visits = await this.prisma.visit.findMany({
       where: { id: { in: visitIds } },
@@ -46,7 +50,6 @@ export class PaymentsRepository {
 
     const visitDoctorMap = new Map(visits.map((v) => [v.id, v.doctorId]));
 
-    // Aggregate by doctorId
     const doctorTotals = new Map<string, number>();
     for (const row of result) {
       if (!row.visitId) continue;
@@ -54,7 +57,7 @@ export class PaymentsRepository {
       if (!doctorId) continue;
       doctorTotals.set(
         doctorId,
-        (doctorTotals.get(doctorId) ?? 0) + (row._sum.amount ?? 0),
+        (doctorTotals.get(doctorId) ?? 0) + (row._sum.amount?.toNumber() ?? 0),
       );
     }
 
@@ -65,7 +68,14 @@ export class PaymentsRepository {
   }
 
   findById(id: string): Promise<Payment | null> {
-    return this.prisma.payment.findUnique({ where: { id } });
+    return this.prisma.payment.findUnique({
+      where: { id },
+      include: {
+        patient: true,
+        service: true,
+        visit: true,
+      },
+    });
   }
 
   create(data: Prisma.PaymentCreateInput): Promise<Payment> {

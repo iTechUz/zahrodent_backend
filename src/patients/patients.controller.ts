@@ -58,7 +58,7 @@ export class PatientsController {
   }
 
   @Post()
-  @Roles('admin', 'receptionist')
+  @Roles('ADMIN', 'RECEPTIONIST')
   @ApiOperation({ summary: 'Yangi bemor' })
   create(@Body() dto: CreatePatientDto) {
     return this.patientsService.create(dto);
@@ -76,7 +76,7 @@ export class PatientsController {
   }
 
   @Delete(':id')
-  @Roles('admin', 'receptionist')
+  @Roles('ADMIN', 'RECEPTIONIST')
   @ApiOperation({ summary: "Bemorni o'chirish" })
   @ApiParam({ name: 'id' })
   remove(@Param('id') id: string, @GetUser() user: AuthUserView) {

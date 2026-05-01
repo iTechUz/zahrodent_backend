@@ -35,9 +35,9 @@ export class ServicesRepository {
 
   async getAvgPrice(): Promise<number> {
     const result = await this.prisma.service.aggregate({
-      _avg: { price: true },
+      _avg: { basePrice: true },
     });
-    return Math.round(result._avg.price || 0);
+    return Math.round(result._avg.basePrice?.toNumber() || 0);
   }
 
   findById(id: string): Promise<Service | null> {
@@ -53,12 +53,11 @@ export class ServicesRepository {
   }
 
   async getDetailedStats() {
-    // Actually, Payment has serviceId.
     const paymentStats = await this.prisma.payment.groupBy({
       by: ['serviceId'],
-      where: { status: 'paid', serviceId: { not: null } },
+      where: { status: 'COMPLETED', serviceId: { not: null } },
       _sum: { amount: true },
-      _count: { patientId: true }, // Total payments
+      _count: { patientId: true }, 
     });
 
     const patientStatsRaw = await this.prisma.payment.groupBy({
@@ -66,7 +65,6 @@ export class ServicesRepository {
       where: { serviceId: { not: null } },
     });
 
-    // Manual aggregation due to prisma groupBy limitations on unique count
     const servicePatientCount = new Map<string, Set<string>>();
     patientStatsRaw.forEach((r) => {
       if (!r.serviceId) return;
@@ -77,7 +75,7 @@ export class ServicesRepository {
 
     return paymentStats.map((s) => ({
       serviceId: s.serviceId!,
-      revenue: s._sum.amount || 0,
+      revenue: s._sum.amount?.toNumber() || 0,
       patientCount: servicePatientCount.get(s.serviceId!)?.size || 0,
     }));
   }

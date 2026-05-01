@@ -1,7 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Doctor, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { DoctorsRepository } from './doctors.repository';
-import { UsersService } from '../users/users.service';
 import {
   PaginationQueryDto,
   PaginatedResponse,
@@ -13,7 +12,6 @@ import { UpdateDoctorDto } from './dto/update-doctor.dto';
 export class DoctorsService {
   constructor(
     private readonly doctorsRepository: DoctorsRepository,
-    private readonly usersService: UsersService,
   ) {}
 
   async findAll(
@@ -31,129 +29,84 @@ export class DoctorsService {
     }
 
     if (search?.trim()) {
-      where.OR = [
-        { firstName: { contains: search, mode: 'insensitive' } },
-        { lastName: { contains: search, mode: 'insensitive' } },
-      ];
+      where.user = {
+        name: { contains: search, mode: 'insensitive' }
+      };
     }
 
     const { data, total } = await this.doctorsRepository.findAll(where, {
       skip,
       take: limitNum,
     });
-    return { data: data.map((d) => this.toResponse(d as any)), total };
+    return { data: data.map((d) => this.toResponse(d)), total };
   }
 
   async findOne(id: string) {
     const d = await this.doctorsRepository.findById(id);
-    if (!d) throw new NotFoundException('Doctor not found');
+    if (!d || d.deletedAt) throw new NotFoundException('Doctor not found');
     return this.toResponse(d);
   }
 
   async create(dto: CreateDoctorDto) {
-    let userId: string | undefined;
-
-    if (dto.password) {
-      const user = await this.usersService.create({
-        name: `${dto.firstName} ${dto.lastName}`,
-        phone: dto.phone,
-        password: dto.password,
-        role: 'doctor',
-        specialty: dto.specialty,
-        avatar: dto.avatar,
-      });
-      userId = user.id;
-    }
-
     const d = await this.doctorsRepository.create({
-      firstName: dto.firstName,
-      lastName: dto.lastName,
+      user: { connect: { id: dto.userId } },
       specialty: dto.specialty,
+      experienceYears: dto.experienceYears,
       phone: dto.phone,
-      avatar: dto.avatar,
-      user: userId ? { connect: { id: userId } } : undefined,
-      schedule: dto.schedule as any,
-      daysOff: dto.daysOff as any,
+      bio: dto.bio,
+      availabilities: dto.availabilities ? {
+        createMany: {
+          data: dto.availabilities.map(a => ({
+            dayOfWeek: a.dayOfWeek,
+            startTime: a.startTime,
+            endTime: a.endTime,
+            slotDuration: a.slotDuration || 30,
+          }))
+        }
+      } : undefined,
     });
     return this.toResponse(d);
   }
 
   async update(id: string, dto: UpdateDoctorDto) {
-    const existingDoctor = await this.doctorsRepository.findById(id);
-    if (!existingDoctor) throw new NotFoundException('Doctor not found');
-
-    let userId = existingDoctor.userId;
-
-    // Handle user account updates or creation
-    if (dto.password) {
-      if (userId) {
-        // Update existing user
-        await this.usersService.update(userId, {
-          name:
-            dto.firstName && dto.lastName
-              ? `${dto.firstName} ${dto.lastName}`
-              : existingDoctor.firstName + ' ' + existingDoctor.lastName,
-          phone: dto.phone || existingDoctor.phone,
-          password: dto.password,
-          specialty: dto.specialty,
-          avatar: dto.avatar,
-        });
-      } else {
-        // Create new user if not exists but credentials provided
-        const user = await this.usersService.create({
-          name: `${dto.firstName || existingDoctor.firstName} ${
-            dto.lastName || existingDoctor.lastName
-          }`,
-          phone: dto.phone || existingDoctor.phone,
-          password: dto.password,
-          role: 'doctor',
-          specialty: dto.specialty || existingDoctor.specialty,
-          avatar: dto.avatar || existingDoctor.avatar || undefined,
-        });
-        userId = user.id;
-      }
-    }
+    const existing = await this.ensureExists(id);
 
     const d = await this.doctorsRepository.update(id, {
-      firstName: dto.firstName,
-      lastName: dto.lastName,
       specialty: dto.specialty,
+      experienceYears: dto.experienceYears,
       phone: dto.phone,
-      avatar: dto.avatar,
-      user: userId ? { connect: { id: userId } } : undefined,
-      schedule: dto.schedule as any,
-      daysOff: dto.daysOff as any,
+      bio: dto.bio,
+      availabilities: dto.availabilities ? {
+        deleteMany: {},
+        createMany: {
+          data: dto.availabilities.map(a => ({
+            dayOfWeek: a.dayOfWeek,
+            startTime: a.startTime,
+            endTime: a.endTime,
+            slotDuration: a.slotDuration || 30,
+          }))
+        }
+      } : undefined,
     });
     return this.toResponse(d);
   }
 
   async remove(id: string) {
-    const d = await this.doctorsRepository.findById(id);
-    if (!d) throw new NotFoundException('Doctor not found');
-
-    if (d.userId) {
-      await this.usersService.remove(d.userId);
-    }
-
-    await this.doctorsRepository.delete(id);
+    await this.ensureExists(id);
+    await this.doctorsRepository.softDelete(id);
     return { id };
   }
 
   private async ensureExists(id: string) {
     const d = await this.doctorsRepository.findById(id);
-    if (!d) throw new NotFoundException('Doctor not found');
+    if (!d || d.deletedAt) throw new NotFoundException('Doctor not found');
+    return d;
   }
 
   async getStats() {
     const total = await this.doctorsRepository.count();
-
-    // Active today: doctors with at least one booking today
-    const { count: activeToday } =
-      await this.doctorsRepository.getActiveCountToday();
-
-    // Total visits count (historical)
-    const { count: totalVisits } =
-      await this.doctorsRepository.getTotalVisitsCount();
+    const { count: activeToday } = await this.doctorsRepository.getActiveCountToday();
+    const { count: totalVisits } = await this.doctorsRepository.getTotalVisitsCount();
 
     return {
       total,
@@ -181,20 +134,20 @@ export class DoctorsService {
           avgCheck,
         };
       })
-      .sort((a, b) => b.totalRevenue - a.totalRevenue); // Sort by revenue by default
+      .sort((a, b) => b.totalRevenue - a.totalRevenue);
   }
 
-  private toResponse(d: Doctor & { user?: { phone: string } | null }) {
+  private toResponse(d: any) {
     return {
       id: d.id,
-      firstName: d.firstName,
-      lastName: d.lastName,
+      userId: d.userId,
+      name: d.user?.name,
       specialty: d.specialty,
+      experienceYears: d.experienceYears,
       phone: d.phone,
-      loginPhone: d.user?.phone,
-      avatar: d.avatar ?? undefined,
-      schedule: d.schedule ?? undefined,
-      daysOff: (d.daysOff as string[] | null) ?? undefined,
+      bio: d.bio,
+      avatar: d.user?.avatar,
+      availabilities: d.availabilities,
     };
   }
 }

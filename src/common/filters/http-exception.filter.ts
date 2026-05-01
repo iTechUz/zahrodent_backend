@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -17,20 +18,40 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const res = ctx.getResponse<Response>();
     const req = ctx.getRequest<Request>();
 
-    const isHttp = exception instanceof HttpException;
-    const status = isHttp
-      ? exception.getStatus()
-      : HttpStatus.INTERNAL_SERVER_ERROR;
+    let status = HttpStatus.INTERNAL_SERVER_ERROR;
+    let message = 'Ichki server xatoligi yuz berdi';
 
-    const responseBody = isHttp ? exception.getResponse() : null;
-    
-    // Extracting message more robustly (especially for Validation errors)
-    let message = 'Internal server error';
-    if (typeof responseBody === 'string') {
-      message = responseBody;
-    } else if (responseBody && typeof responseBody === 'object') {
-      const msgRaw = (responseBody as any).message;
-      message = Array.isArray(msgRaw) ? msgRaw.join('; ') : msgRaw || message;
+    if (exception instanceof HttpException) {
+      status = exception.getStatus();
+      const responseBody = exception.getResponse();
+      if (typeof responseBody === 'string') {
+        message = responseBody;
+      } else if (responseBody && typeof responseBody === 'object') {
+        const msgRaw = (responseBody as any).message;
+        message = Array.isArray(msgRaw) ? msgRaw.join('; ') : msgRaw || message;
+      }
+    } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      // Handle Prisma known errors
+      switch (exception.code) {
+        case 'P2002': {
+          status = HttpStatus.CONFLICT;
+          const target = (exception.meta?.target as string[]) || [];
+          message = `Ushbu ma'lumot allaqachon mavjud: ${target.join(', ')}`;
+          break;
+        }
+        case 'P2003': {
+          status = HttpStatus.BAD_REQUEST;
+          message = "Bog'langan ma'lumot topilmadi (Foreign key constraint)";
+          break;
+        }
+        case 'P2025': {
+          status = HttpStatus.NOT_FOUND;
+          message = "So'ralgan ma'lumot topilmadi";
+          break;
+        }
+        default:
+          message = `Baza xatoligi: ${exception.code}`;
+      }
     } else if (exception instanceof Error) {
       message = exception.message;
     }

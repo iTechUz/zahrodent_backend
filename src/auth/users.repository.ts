@@ -7,7 +7,12 @@ export class UsersRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   findByPhone(phone: string): Promise<User | null> {
-    return this.prisma.user.findUnique({ where: { phone } });
+    return this.prisma.user.findFirst({ 
+      where: { 
+        phone,
+        deletedAt: null,
+      } 
+    });
   }
 
   findById(id: string): Promise<User | null> {

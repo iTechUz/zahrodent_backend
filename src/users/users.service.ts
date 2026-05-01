@@ -14,13 +14,15 @@ export class UsersService {
 
   async findAll() {
     return this.prisma.user.findMany({
+      where: { deletedAt: null },
       select: {
         id: true,
         name: true,
         phone: true,
         role: true,
-        specialty: true,
         avatar: true,
+        branchId: true,
+        isActive: true,
         createdAt: true,
       },
       orderBy: { createdAt: 'desc' },
@@ -35,12 +37,13 @@ export class UsersService {
         name: true,
         phone: true,
         role: true,
-        specialty: true,
         avatar: true,
+        branchId: true,
+        isActive: true,
         createdAt: true,
       },
     });
-    if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+    if (!user || user.deletedAt) throw new NotFoundException('Foydalanuvchi topilmadi');
     return user;
   }
 
@@ -54,8 +57,7 @@ export class UsersService {
       );
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
-    const data: any = { ...dto };
-    delete data.password;
+    const { password, ...data } = dto;
 
     return this.prisma.user.create({
       data: {
@@ -67,13 +69,14 @@ export class UsersService {
         name: true,
         phone: true,
         role: true,
+        branchId: true,
       },
     });
   }
 
   async update(id: string, dto: UpdateUserDto) {
     const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+    if (!user || user.deletedAt) throw new NotFoundException('Foydalanuvchi topilmadi');
 
     const data: any = { ...dto };
     if (dto.password) {
@@ -95,9 +98,12 @@ export class UsersService {
 
   async remove(id: string) {
     const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+    if (!user || user.deletedAt) throw new NotFoundException('Foydalanuvchi topilmadi');
 
-    await this.prisma.user.delete({ where: { id } });
+    await this.prisma.user.update({
+      where: { id },
+      data: { deletedAt: new Date(), isActive: false },
+    });
     return { id };
   }
 }

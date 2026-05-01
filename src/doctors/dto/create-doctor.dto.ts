@@ -4,15 +4,14 @@ import {
   IsString,
   MinLength,
   Matches,
-  IsBoolean,
   IsNumber,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-export class ScheduleSlotDto {
+export class AvailabilityDto {
   @IsNumber()
-  day: number;
+  dayOfWeek: number;
 
   @IsString()
   startTime: string;
@@ -20,27 +19,22 @@ export class ScheduleSlotDto {
   @IsString()
   endTime: string;
 
-  @IsBoolean()
-  isWorking: boolean;
+  @IsOptional()
+  @IsNumber()
+  slotDuration?: number;
 }
 
 export class CreateDoctorDto {
-  @IsOptional()
-  @IsString()
-  @MinLength(6)
-  password?: string;
-
   @IsString()
   @MinLength(1)
-  firstName: string;
-
-  @IsString()
-  @MinLength(1)
-  lastName: string;
+  userId: string;
 
   @IsString()
   @MinLength(1)
   specialty: string;
+
+  @IsNumber()
+  experienceYears: number;
 
   @IsString()
   @Matches(/^\+998\d{9}$/, {
@@ -50,16 +44,11 @@ export class CreateDoctorDto {
 
   @IsOptional()
   @IsString()
-  avatar?: string;
+  bio?: string;
 
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => ScheduleSlotDto)
-  schedule?: ScheduleSlotDto[];
-
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  daysOff?: string[];
+  @Type(() => AvailabilityDto)
+  availabilities?: AvailabilityDto[];
 }

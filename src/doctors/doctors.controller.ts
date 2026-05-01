@@ -28,19 +28,19 @@ import { Roles } from '../common/decorators/roles.decorator';
 @ApiBearerAuth('JWT')
 @Controller('doctors')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('admin', 'receptionist')
+@Roles('ADMIN', 'RECEPTIONIST')
 export class DoctorsController {
   constructor(private readonly doctorsService: DoctorsService) {}
 
   @Get('stats')
-  @Roles('admin')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Stats for doctors page' })
   getStats() {
     return this.doctorsService.getStats();
   }
 
   @Get('efficiency')
-  @Roles('admin')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Doctor efficiency and performance stats' })
   getEfficiency() {
     return this.doctorsService.getEfficiency();
@@ -60,7 +60,7 @@ export class DoctorsController {
   }
 
   @Post()
-  @Roles('admin')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Yangi shifokor' })
   @ApiForbiddenResponse({ description: 'Faqat admin' })
   create(@Body() dto: CreateDoctorDto) {
@@ -68,7 +68,7 @@ export class DoctorsController {
   }
 
   @Patch(':id')
-  @Roles('admin')
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Shifokorni yangilash' })
   @ApiParam({ name: 'id' })
   @ApiForbiddenResponse({ description: 'Faqat admin' })
@@ -77,7 +77,7 @@ export class DoctorsController {
   }
 
   @Delete(':id')
-  @Roles('admin')
+  @Roles('ADMIN')
   @ApiOperation({ summary: "Shifokorni o'chirish" })
   @ApiParam({ name: 'id' })
   @ApiForbiddenResponse({ description: 'Faqat admin' })

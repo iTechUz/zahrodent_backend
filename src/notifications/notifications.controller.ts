@@ -17,7 +17,7 @@ import { RecipientQueryDto, BulkSendDto } from './dto/bulk-sms.dto';
 @ApiBearerAuth('JWT')
 @Controller('notifications')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('admin', 'receptionist')
+@Roles('ADMIN', 'RECEPTIONIST')
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 

@@ -1,7 +1,13 @@
-import type { AppRole } from '../decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
 
-export const ROLES_STAFF: AppRole[] = ['admin', 'doctor', 'receptionist'];
+export const ROLES_STAFF: UserRole[] = [
+  UserRole.ADMIN,
+  UserRole.DOCTOR,
+  UserRole.RECEPTIONIST,
+  UserRole.SUPER_ADMIN,
+];
 
-export const ROLES_FINANCE: AppRole[] = ['admin'];
-
-export const ROLES_DOCTOR_WRITE: AppRole[] = ['admin', 'doctor'];
+export const ROLES_FINANCE: UserRole[] = [
+  UserRole.ADMIN,
+  UserRole.SUPER_ADMIN,
+];
