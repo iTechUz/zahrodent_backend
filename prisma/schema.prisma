@@ -41,17 +41,28 @@ enum PaymentMethod {
 // --- CORE MODELS ---
 
 model Branch {
-  id        String   @id @default(cuid())
-  name      String
-  address   String
-  phone     String
-  isActive  Boolean  @default(true)
+  id               String   @id @default(cuid())
+  name             String
+  address          String?
+  phone            String?
+  latitude         Float?
+  longitude        Float?
+  telegramBotToken String?
+  isActive         Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
   
   users     User[]
   patients  Patient[]
   bookings  Booking[]
   inventory Inventory[]
+  services  Service[]
+  payments  Payment[]
+  leads     Lead[]
+  auditLogs AuditLog[]
+  visits    Visit[]
+  comments  PatientComment[]
 
   @@map("branches")
 }
@@ -137,6 +148,7 @@ model Doctor {
   bookings         Booking[]
   notifications    Notification[]
   visits           Visit[]
+  payments         Payment[]
   assignedPatients Patient[] @relation("AssignedDoctor")
 
   @@map("doctors")
@@ -179,6 +191,7 @@ model Booking {
   doctor         Doctor        @relation(fields: [doctorId], references: [id])
   service        Service?      @relation(fields: [serviceId], references: [id])
   visits         Visit[]
+  payments       Payment[]
   
   @@unique([doctorId, startTime])
   @@index([startTime, status])
@@ -187,7 +200,10 @@ model Booking {
 
 model Payment {
   id          String        @id @default(cuid())
+  branchId    String        @map("branch_id")
   patientId   String        @map("patient_id")
+  doctorId    String?       @map("doctor_id")
+  bookingId   String?       @map("booking_id")
   visitId     String?       @map("visit_id")
   serviceId   String?       @map("service_id")
   
@@ -204,7 +220,10 @@ model Payment {
   createdAt   DateTime      @default(now()) @map("created_at")
   updatedAt   DateTime      @updatedAt @map("updated_at")
 
+  branch      Branch        @relation(fields: [branchId], references: [id])
   patient     Patient       @relation(fields: [patientId], references: [id])
+  doctor      Doctor?       @relation(fields: [doctorId], references: [id])
+  booking     Booking?      @relation(fields: [bookingId], references: [id])
   visit       Visit?        @relation(fields: [visitId], references: [id])
   service     Service?      @relation(fields: [serviceId], references: [id])
 
@@ -213,6 +232,7 @@ model Payment {
 
 model AuditLog {
   id        String   @id @default(cuid())
+  branchId  String?  @map("branch_id")
   userId    String   @map("user_id")
   action    String   
   entity    String   
@@ -223,6 +243,7 @@ model AuditLog {
   userAgent String?  @map("user_agent")
   createdAt DateTime @default(now()) @map("created_at")
 
+  branch    Branch?  @relation(fields: [branchId], references: [id])
   user      User     @relation(fields: [userId], references: [id])
 
   @@map("audit_logs")
@@ -250,6 +271,9 @@ model Service {
   category    String
   description String?
   
+  branchId    String   @map("branch_id")
+  
+  branch      Branch   @relation(fields: [branchId], references: [id])
   bookings    Booking[]
   visits      Visit[]
   payments    Payment[]
@@ -259,6 +283,7 @@ model Service {
 
 model Visit {
   id        String   @id @default(cuid())
+  branchId  String   @map("branch_id")
   patientId String   @map("patient_id")
   doctorId  String   @map("doctor_id")
   bookingId String?  @map("booking_id")
@@ -271,6 +296,7 @@ model Visit {
   date      DateTime @default(now())
   createdAt DateTime @default(now()) @map("created_at")
 
+  branch    Branch   @relation(fields: [branchId], references: [id])
   patient   Patient  @relation(fields: [patientId], references: [id])
   doctor    Doctor   @relation(fields: [doctorId], references: [id])
   booking   Booking? @relation(fields: [bookingId], references: [id])
@@ -282,13 +308,15 @@ model Visit {
 
 model PatientComment {
   id        String   @id @default(cuid())
-  content   String
-  createdAt DateTime @default(now()) @map("created_at")
+  branchId  String   @map("branch_id")
   patientId String   @map("patient_id")
   authorId  String   @map("author_id")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
 
-  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
   @@map("patient_comments")
 }
@@ -310,6 +338,7 @@ model Notification {
 
 model Lead {
   id        String   @id @default(cuid())
+  branchId  String?  @map("branch_id")
   patientId String?  @unique @map("patient_id")
   name      String
   phone     String
@@ -321,9 +350,11 @@ model Lead {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  branch    Branch?  @relation(fields: [branchId], references: [id])
   patient   Patient? @relation(fields: [patientId], references: [id])
 
   @@index([status])
   @@index([createdAt])
+  @@index([branchId])
   @@map("leads")
 }

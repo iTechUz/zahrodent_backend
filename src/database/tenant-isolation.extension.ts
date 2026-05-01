@@ -28,19 +28,32 @@ export const tenantIsolationExtension = (cls: ClsService) => {
               'Doctor',
               'Lead',
               'Service',
-              'User'
+              'User',
+              'AuditLog',
+              'PatientComment',
+              'Inventory'
             ];
 
             if (tenantModels.includes(model)) {
-              // For read operations, inject where: { branchId }
+              // 1. For READ operations, inject where: { branchId }
               if (['findMany', 'findFirst', 'findUnique', 'count', 'aggregate', 'groupBy'].includes(operation)) {
                 args.where = { ...args.where, branchId };
               }
 
-              // Special case for User: doctors are linked to branch via branchId,
-              // but we need to be careful with the mapping. 
-              // In our schema, Patient, Booking, Payment, Visit, Notification, Doctor, Lead, Service
-              // all have branchId directly. User also has branchId.
+              // 2. For WRITE operations, ensure branchId is set
+              if (['create', 'createMany'].includes(operation)) {
+                if (args.data) {
+                  if (Array.isArray(args.data)) {
+                    args.data = args.data.map((item: any) => ({ ...item, branchId }));
+                  } else {
+                    args.data.branchId = branchId;
+                  }
+                }
+              }
+
+              if (['update', 'updateMany', 'upsert'].includes(operation)) {
+                args.where = { ...args.where, branchId };
+              }
             }
           }
 

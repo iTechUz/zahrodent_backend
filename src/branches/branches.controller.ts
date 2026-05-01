@@ -13,6 +13,8 @@ import { BranchesService } from './branches.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
 
 @ApiTags('branches')
 @ApiBearerAuth('JWT')
@@ -28,11 +30,18 @@ export class BranchesController {
     return this.branchesService.findAll();
   }
 
-  @Get(':id')
+  @Get('stats')
   @Roles('SUPER_ADMIN')
+  @ApiOperation({ summary: 'Global SaaS statistikasi (Faqat SuperAdmin)' })
+  getGlobalStats() {
+    return this.branchesService.getGlobalStats();
+  }
+
+  @Get(':id')
+  @Roles('SUPER_ADMIN', 'ADMIN')
   @ApiOperation({ summary: "Filial ma'lumotlarini olish" })
-  findOne(@Param('id') id: string) {
-    return this.branchesService.findOne(id);
+  findOne(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.branchesService.findOne(id, user);
   }
 
   @Post()
@@ -43,10 +52,10 @@ export class BranchesController {
   }
 
   @Patch(':id')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'ADMIN')
   @ApiOperation({ summary: "Filial ma'lumotlarini yangilash" })
-  update(@Param('id') id: string, @Body() data: any) {
-    return this.branchesService.update(id, data);
+  update(@Param('id') id: string, @Body() data: any, @GetUser() user: AuthUserView) {
+    return this.branchesService.update(id, data, user);
   }
 
   @Delete(':id')

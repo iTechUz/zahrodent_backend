@@ -60,7 +60,6 @@ async function bootstrap() {
   );
   app.useGlobalFilters(new AllExceptionsFilter());
   app.enableCors(buildCorsOptions(prod));
-  app.useGlobalGuards(app.get(ThrottlerGuard));
   app.use(helmet({ contentSecurityPolicy: false }));
 
   // Graceful shutdown hooks

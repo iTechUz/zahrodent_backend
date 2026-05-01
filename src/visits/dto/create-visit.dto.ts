@@ -9,6 +9,10 @@ import {
 import { Type } from 'class-transformer';
 
 export class CreateVisitDto {
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsString()
   @MinLength(1)
   patientId: string;

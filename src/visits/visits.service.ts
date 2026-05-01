@@ -71,10 +71,37 @@ export class VisitsService {
     return this.toResponse(v);
   }
 
-  async create(dto: CreateVisitDto) {
+  async create(dto: CreateVisitDto, user: AuthUserView) {
+    const branchId = user.role === 'SUPER_ADMIN' ? dto.branchId : user.branchId;
+    if (!branchId) throw new NotFoundException('Filial ID ko\'rsatilmadi');
+
+    // 1. Verify Patient branch
+    const patient = await this.prisma.patient.findUnique({ where: { id: dto.patientId } });
+    if (!patient || patient.branchId !== branchId) {
+      throw new NotFoundException('Bemor topilmadi yoki boshqa filialga tegishli');
+    }
+
+    // 2. Verify Doctor branch
+    const doctor = await this.prisma.doctor.findUnique({ 
+      where: { id: dto.doctorId },
+      include: { user: true }
+    });
+    if (!doctor || doctor.user.branchId !== branchId) {
+      throw new NotFoundException('Shifokor topilmadi yoki boshqa filialga tegishli');
+    }
+
+    // 3. Verify Service branch (if provided)
+    if (dto.serviceId) {
+      const service = await this.prisma.service.findUnique({ where: { id: dto.serviceId } });
+      if (!service || service.branchId !== branchId) {
+        throw new NotFoundException('Xizmat topilmadi yoki boshqa filialga tegishli');
+      }
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const v = await tx.visit.create({
         data: {
+          branch: { connect: { id: branchId } },
           patient: { connect: { id: dto.patientId } },
           doctor: { connect: { id: dto.doctorId } },
           booking: dto.bookingId ? { connect: { id: dto.bookingId } } : undefined,

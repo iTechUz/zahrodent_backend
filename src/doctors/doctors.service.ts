@@ -115,8 +115,24 @@ export class DoctorsService {
   }
 
   async remove(id: string) {
-    await this.doctorsRepository.softDelete(id);
-    return { id };
+    const doctor = await this.doctorsRepository.findById(id);
+    if (!doctor) throw new NotFoundException('Doctor not found');
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Deactivate User
+      await tx.user.update({
+        where: { id: doctor.userId },
+        data: { isActive: false, deletedAt: new Date() },
+      });
+
+      // 2. Soft delete Doctor
+      await tx.doctor.update({
+        where: { id },
+        data: { deletedAt: new Date(), isActive: false },
+      });
+
+      return { id };
+    });
   }
 
   private toResponse(d: any) {

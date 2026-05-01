@@ -8,9 +8,14 @@ import {
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 
+import { ClsService } from 'nestjs-cls';
+
 @Injectable()
 export class ServicesService {
-  constructor(private readonly servicesRepository: ServicesRepository) {}
+  constructor(
+    private readonly servicesRepository: ServicesRepository,
+    private readonly cls: ClsService,
+  ) {}
 
   async findAll(
     query: PaginationQueryDto & { category?: string },
@@ -48,24 +53,28 @@ export class ServicesService {
   }
 
   async create(dto: CreateServiceDto) {
+    const branchId = this.cls.get('branchId');
     const s = await this.servicesRepository.create({
       name: dto.name,
       category: dto.category,
       basePrice: dto.price,
       duration: dto.duration,
       description: dto.description,
+      branch: { connect: { id: branchId } },
     });
     return this.toResponse(s);
   }
 
   async update(id: string, dto: UpdateServiceDto) {
     await this.ensureExists(id);
+    const branchId = this.cls.get('branchId');
     const s = await this.servicesRepository.update(id, {
       name: dto.name,
       category: dto.category,
       basePrice: dto.price,
       duration: dto.duration,
       description: dto.description,
+      branch: { connect: { id: branchId } },
     });
     return this.toResponse(s);
   }

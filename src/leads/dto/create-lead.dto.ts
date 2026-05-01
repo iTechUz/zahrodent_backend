@@ -32,8 +32,12 @@ export class CreateLeadDto {
   @IsString()
   notes?: string;
 
-  @ApiProperty({ enum: ['new', 'contacted', 'consultation', 'proposal', 'converted', 'cancelled'], required: false })
   @IsOptional()
   @IsEnum(['new', 'contacted', 'consultation', 'proposal', 'converted', 'cancelled'])
   status?: string;
+
+  @ApiProperty({ example: 'branch_id_123', required: false })
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }

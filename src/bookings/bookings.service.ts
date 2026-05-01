@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Booking, Prisma, BookingStatus, UserRole } from '@prisma/client';
 import { BookingsRepository } from './bookings.repository';
@@ -13,9 +14,14 @@ import {
 } from '../common/dto/pagination.dto';
 import { AuthUserView } from '../auth/auth.service';
 
+import { PrismaService } from '../database/prisma.service';
+
 @Injectable()
 export class BookingsService {
-  constructor(private readonly bookingsRepository: BookingsRepository) {}
+  constructor(
+    private readonly bookingsRepository: BookingsRepository,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async getStats(user: AuthUserView) {
     const today = new Date();
@@ -131,14 +137,40 @@ export class BookingsService {
     return this.toResponse(b);
   }
 
-  async create(dto: CreateBookingDto) {
+  async create(dto: CreateBookingDto, user: AuthUserView) {
+    const branchId = user.role === UserRole.SUPER_ADMIN ? dto.branchId : user.branchId;
+    if (!branchId) throw new ConflictException('Filial ID ko\'rsatilmadi');
+
     const start = new Date(dto.startTime);
     const end = new Date(dto.endTime);
+
+    // 1. Verify Doctor branch
+    const doctor = await this.prisma.doctor.findUnique({ 
+      where: { id: dto.doctorId }, 
+      include: { user: true } 
+    });
+    if (!doctor || doctor.user.branchId !== branchId) {
+      throw new ForbiddenException('Ushbu shifokor tanlangan filialda ishlamaydi');
+    }
+
+    // 2. Verify Patient branch
+    const patient = await this.prisma.patient.findUnique({ where: { id: dto.patientId } });
+    if (!patient || patient.branchId !== branchId) {
+      throw new ForbiddenException('Ushbu bemor tanlangan filialda ro\'yxatda yo\'q');
+    }
+
+    // 3. Verify Service branch (if provided)
+    if (dto.serviceId) {
+      const service = await this.prisma.service.findUnique({ where: { id: dto.serviceId } });
+      if (!service || service.branchId !== branchId) {
+        throw new ForbiddenException('Ushbu xizmat tanlangan filialda mavjud emas');
+      }
+    }
 
     await this.checkConflicts(dto.doctorId, start, end);
 
     const b = await this.bookingsRepository.create({
-      branch: { connect: { id: dto.branchId } },
+      branch: { connect: { id: branchId } },
       patient: { connect: { id: dto.patientId } },
       doctor: { connect: { id: dto.doctorId } },
       startTime: start,

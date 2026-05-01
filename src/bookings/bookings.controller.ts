@@ -69,10 +69,10 @@ export class BookingsController {
   }
 
   @Post()
-  @Roles('ADMIN', 'RECEPTIONIST')
+  @Roles('ADMIN', 'RECEPTIONIST', 'SUPER_ADMIN')
   @ApiOperation({ summary: 'Yangi qabul' })
-  create(@Body() dto: CreateBookingDto) {
-    return this.bookingsService.create(dto);
+  create(@Body() dto: CreateBookingDto, @GetUser() user: AuthUserView) {
+    return this.bookingsService.create(dto, user);
   }
 
   @Patch(':id')

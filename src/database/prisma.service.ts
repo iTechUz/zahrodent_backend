@@ -12,7 +12,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     this._client = client.$extends(tenantIsolationExtension(this.cls));
   }
 
-  // Delegate all calls to the extended client
+  // Delegate all calls to the extended client with proper binding
   get patient() { return this._client.patient; }
   get patientComment() { return this._client.patientComment; }
   get booking() { return this._client.booking; }
@@ -26,12 +26,14 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get branch() { return this._client.branch; }
   get auditLog() { return this._client.auditLog; }
 
-  // Transaction support
-  get $transaction() { return this._client.$transaction; }
-  get $queryRaw() { return this._client.$queryRaw; }
-  get $executeRaw() { return this._client.$executeRaw; }
+  // Transaction support (MUST BE BOUND to the client)
+  get $transaction() { return this._client.$transaction.bind(this._client); }
+  get $queryRaw() { return this._client.$queryRaw.bind(this._client); }
+  get $executeRaw() { return this._client.$executeRaw.bind(this._client); }
 
   async onModuleInit() {
+    // Note: use the base client for connection management if needed, 
+    // or just use the extended one.
     await (this._client as any).$connect();
   }
 

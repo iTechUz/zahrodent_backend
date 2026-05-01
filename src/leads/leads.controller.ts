@@ -35,15 +35,15 @@ export class LeadsController {
 
   @Get()
   @ApiOperation({ summary: "Murojaatlar (lids) ro'yxati" })
-  findAll(@Query() query: any) {
-    return this.leadsService.findAll(query);
+  findAll(@Query() query: any, @GetUser() user: AuthUserView) {
+    return this.leadsService.findAll(query, user);
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Bitta murojaat' })
   @ApiParam({ name: 'id' })
-  findOne(@Param('id') id: string) {
-    return this.leadsService.findOne(id);
+  findOne(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.leadsService.findOne(id, user);
   }
   
   @Post()
@@ -55,8 +55,12 @@ export class LeadsController {
   @Post(':id/convert')
   @ApiOperation({ summary: 'Murojaatni bemorga aylantirish' })
   @ApiParam({ name: 'id' })
-  convertToPatient(@Param('id') id: string, @GetUser() user: AuthUserView) {
-    return this.leadsService.convertToPatient(id, user.branchId!);
+  convertToPatient(
+    @Param('id') id: string, 
+    @Query('branchId') branchId: string,
+    @GetUser() user: AuthUserView
+  ) {
+    return this.leadsService.convertToPatient(id, branchId, user);
   }
   
   @Patch(':id')
@@ -65,8 +69,9 @@ export class LeadsController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateLeadDto,
+    @GetUser() user: AuthUserView,
   ) {
-    return this.leadsService.update(id, dto);
+    return this.leadsService.update(id, dto, user);
   }
 
   @Patch(':id/status')
@@ -75,14 +80,15 @@ export class LeadsController {
   updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateLeadDto,
+    @GetUser() user: AuthUserView,
   ) {
-    return this.leadsService.update(id, dto);
+    return this.leadsService.update(id, dto, user);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: "Murojaatni o'chirish" })
   @ApiParam({ name: 'id' })
-  remove(@Param('id') id: string) {
-    return this.leadsService.remove(id);
+  remove(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.leadsService.remove(id, user);
   }
 }

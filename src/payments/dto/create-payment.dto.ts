@@ -11,6 +11,10 @@ import { Type } from 'class-transformer';
 import { PaymentType, PaymentMethod } from '@prisma/client';
 
 export class CreatePaymentDto {
+  @IsOptional()
+  @IsString()
+  branchId?: string;
+
   @IsString()
   @MinLength(1)
   patientId: string;

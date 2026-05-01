@@ -70,8 +70,8 @@ export class PaymentsController {
 
   @Post()
   @ApiOperation({ summary: "Yangi to'lov" })
-  create(@Body() dto: CreatePaymentDto) {
-    return this.paymentsService.create(dto);
+  create(@Body() dto: CreatePaymentDto, @GetUser() user: AuthUserView) {
+    return this.paymentsService.create(dto, user);
   }
 
   @Patch(':id')

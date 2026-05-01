@@ -94,10 +94,36 @@ export class PaymentsService {
     return this.toResponse(p);
   }
 
-  async create(dto: CreatePaymentDto) {
+  async create(dto: CreatePaymentDto, user: AuthUserView) {
+    const branchId = user.role === UserRole.SUPER_ADMIN ? dto.branchId : user.branchId;
+    if (!branchId) throw new NotFoundException('Filial ID ko\'rsatilmadi');
+
+    // 1. Verify Patient branch
+    const patient = await this.prisma.patient.findUnique({ where: { id: dto.patientId } });
+    if (!patient || patient.branchId !== branchId) {
+      throw new NotFoundException('Bemor topilmadi yoki boshqa filialga tegishli');
+    }
+
+    // 2. Verify Service branch (if provided)
+    if (dto.serviceId) {
+      const service = await this.prisma.service.findUnique({ where: { id: dto.serviceId } });
+      if (!service || service.branchId !== branchId) {
+        throw new NotFoundException('Xizmat topilmadi yoki boshqa filialga tegishli');
+      }
+    }
+
+    // 3. Verify Visit branch (if provided)
+    if (dto.visitId) {
+      const visit = await this.prisma.visit.findUnique({ where: { id: dto.visitId } });
+      if (!visit || visit.branchId !== branchId) {
+        throw new NotFoundException('Tashrif topilmadi yoki boshqa filialga tegishli');
+      }
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const p = await tx.payment.create({
         data: {
+          branch: { connect: { id: branchId } },
           patient: { connect: { id: dto.patientId } },
           amount: dto.amount,
           discount: dto.discount || 0,
@@ -113,7 +139,7 @@ export class PaymentsService {
       });
 
       // Update patient balance
-      if (p.status === 'COMPLETED') {
+      if (p.status === 'COMPLETED' || p.status === 'paid') {
         let adjustment = p.amount;
         if (p.type === 'REFUND' || p.type === 'EXPENSE') {
           adjustment = adjustment.negated();

@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PatientsRepository } from './patients.repository';
 import { CreatePatientDto } from './dto/create-patient.dto';
@@ -8,10 +8,14 @@ import {
   PaginationQueryDto,
 } from '../common/dto/pagination.dto';
 import { AuthUserView } from '../auth/auth.service';
+import { PrismaService } from '../database/prisma.service';
 
 @Injectable()
 export class PatientsService {
-  constructor(private readonly patientsRepository: PatientsRepository) {}
+  constructor(
+    private readonly patientsRepository: PatientsRepository,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async findAll(
     query: PaginationQueryDto & { 
@@ -27,9 +31,15 @@ export class PatientsService {
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
 
-    const where: Prisma.PatientWhereInput = {};
+    const where: Prisma.PatientWhereInput = { deletedAt: null };
 
-    if (branchId) where.branchId = branchId;
+    // SaaS Isolation
+    if (user.role !== 'SUPER_ADMIN') {
+      where.branchId = user.branchId;
+    } else if (branchId) {
+      where.branchId = branchId;
+    }
+
     if (source) where.source = source;
 
     if (startDate || endDate) {
@@ -62,27 +72,15 @@ export class PatientsService {
   }
 
   async findOne(id: string, user: AuthUserView) {
-    const p = await this.patientsRepository.findById(id);
-    if (!p || p.deletedAt) throw new NotFoundException('Patient not found');
-
-    if (user.role === 'DOCTOR') {
-      const hasAccess = await this.patientsRepository.count({
-        id,
-        OR: [
-          { bookings: { some: { doctorId: user.doctorId } } },
-          { visits: { some: { doctorId: user.doctorId } } },
-          { assignedDoctorId: user.doctorId }
-        ],
-      });
-      if (!hasAccess) {
-        throw new NotFoundException('Patient not found (access restricted)');
-      }
-    }
+    const p = await this.ensureExists(id, user);
     return this.toResponse(p);
   }
 
   async getStats(user: AuthUserView) {
-    const where: Prisma.PatientWhereInput = {};
+    const where: Prisma.PatientWhereInput = { deletedAt: null };
+    if (user.role !== 'SUPER_ADMIN') {
+      where.branchId = user.branchId;
+    }
     if (user.role === 'DOCTOR') {
       where.OR = [
         { bookings: { some: { doctorId: user.doctorId } } },
@@ -93,12 +91,29 @@ export class PatientsService {
     return this.patientsRepository.getStats(where);
   }
 
-  async create(dto: CreatePatientDto) {
-    const existing = await this.patientsRepository.count({ phone: dto.phone });
-    if (existing > 0) throw new ConflictException('Bu telefon raqami bilan bemor allaqachon mavjud');
+  async create(dto: CreatePatientDto, user: AuthUserView) {
+    // Force branchId for non-SuperAdmin
+    const branchId = user.role === 'SUPER_ADMIN' ? dto.branchId : user.branchId;
+    
+    const existing = await this.patientsRepository.count({ 
+      phone: dto.phone, 
+      branchId, // Phone must be unique within a branch
+      deletedAt: null 
+    });
+    if (existing > 0) throw new ConflictException('Bu telefon raqami bilan bemor ushbu filialda mavjud');
+
+    if (dto.assignedDoctorId) {
+      const doctor = await this.prisma.doctor.findUnique({ 
+        where: { id: dto.assignedDoctorId },
+        include: { user: true } 
+      });
+      if (!doctor || doctor.user.branchId !== branchId) {
+        throw new ForbiddenException('Ushbu shifokor tanlangan filialda ishlamaydi');
+      }
+    }
 
     const p = await this.patientsRepository.create({
-      branch: { connect: { id: dto.branchId } },
+      branch: { connect: { id: branchId } },
       user: dto.userId ? { connect: { id: dto.userId } } : undefined,
       firstName: dto.firstName,
       lastName: dto.lastName,
@@ -121,8 +136,13 @@ export class PatientsService {
     const current = await this.ensureExists(id, user);
 
     if (dto.phone && dto.phone !== current.phone) {
-      const existing = await this.patientsRepository.count({ phone: dto.phone, id: { not: id } });
-      if (existing > 0) throw new ConflictException('Bu telefon raqami bilan boshqa bemor allaqachon mavjud');
+      const existing = await this.patientsRepository.count({ 
+        phone: dto.phone, 
+        branchId: current.branchId,
+        id: { not: id },
+        deletedAt: null
+      });
+      if (existing > 0) throw new ConflictException('Bu telefon raqami bilan boshqa bemor ushbu filialda mavjud');
     }
 
     const p = await this.patientsRepository.update(id, {
@@ -144,25 +164,64 @@ export class PatientsService {
   }
 
   async remove(id: string, user: AuthUserView) {
-    await this.ensureExists(id, user);
-    await this.patientsRepository.softDelete(id);
-    return { id };
+    const p = await this.ensureExists(id, user);
+    
+    return this.prisma.$transaction(async (tx) => {
+      // 1. If patient has a user account, deactivate it
+      if (p.userId) {
+        await tx.user.update({
+          where: { id: p.userId },
+          data: { isActive: false, deletedAt: new Date() }
+        });
+      }
+
+      // 2. Soft delete patient
+      await tx.patient.update({
+        where: { id },
+        data: { deletedAt: new Date() }
+      });
+
+      return { id };
+    });
   }
 
   private async ensureExists(id: string, user: AuthUserView) {
     const p = await this.patientsRepository.findById(id);
     if (!p || p.deletedAt) throw new NotFoundException('Patient not found');
+
+    // SaaS Isolation
+    if (user.role !== 'SUPER_ADMIN' && p.branchId !== user.branchId) {
+      throw new ForbiddenException('Boshqa filial bemoriga kirishga ruxsat yo\'q');
+    }
+
+    // Doctor specific isolation
+    if (user.role === 'DOCTOR') {
+      const hasAccess = await this.patientsRepository.count({
+        id,
+        OR: [
+          { bookings: { some: { doctorId: user.doctorId } } },
+          { visits: { some: { doctorId: user.doctorId } } },
+          { assignedDoctorId: user.doctorId }
+        ],
+      });
+      if (!hasAccess) {
+        throw new ForbiddenException('Siz ushbu bemorga mas\'ul emassiz');
+      }
+    }
+
     return p;
   }
 
   async addComment(
     data: { content: string; patientId: string },
-    authorId: string,
+    user: AuthUserView,
   ) {
+    const p = await this.ensureExists(data.patientId, user);
     return this.patientsRepository.createComment({
       content: data.content,
       patientId: data.patientId,
-      authorId,
+      authorId: user.id,
+      branchId: p.branchId,
     });
   }
 

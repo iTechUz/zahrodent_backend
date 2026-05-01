@@ -40,8 +40,8 @@ export class UsersController {
 
   @Post()
   @ApiOperation({ summary: 'Yangi xodim yaratish' })
-  create(@Body() dto: CreateUserDto) {
-    return this.usersService.create(dto);
+  create(@Body() dto: CreateUserDto, @GetUser() user: AuthUserView) {
+    return this.usersService.create(dto, user);
   }
 
   @Patch(':id')

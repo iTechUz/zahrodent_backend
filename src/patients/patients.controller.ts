@@ -58,10 +58,10 @@ export class PatientsController {
   }
 
   @Post()
-  @Roles('ADMIN', 'RECEPTIONIST')
+  @Roles('ADMIN', 'RECEPTIONIST', 'SUPER_ADMIN')
   @ApiOperation({ summary: 'Yangi bemor' })
-  create(@Body() dto: CreatePatientDto) {
-    return this.patientsService.create(dto);
+  create(@Body() dto: CreatePatientDto, @GetUser() user: AuthUserView) {
+    return this.patientsService.create(dto, user);
   }
 
   @Patch(':id')
@@ -91,7 +91,7 @@ export class PatientsController {
     @Body() dto: CreatePatientCommentDto,
     @GetUser() user: AuthUserView,
   ) {
-    return this.patientsService.addComment({ ...dto, patientId: id }, user.id);
+    return this.patientsService.addComment({ ...dto, patientId: id }, user);
   }
 
   @Get(':id/comments')
