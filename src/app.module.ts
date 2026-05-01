@@ -15,6 +15,7 @@ import { UsersModule } from './users/users.module';
 import { LeadsModule } from './leads/leads.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { BranchesModule } from './branches/branches.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { HealthController } from './health/health.controller';
 import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
 
@@ -40,6 +41,7 @@ import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
     LeadsModule,
     TelegramModule,
     BranchesModule,
+    SubscriptionsModule,
   ],
   controllers: [HealthController],
   providers: [

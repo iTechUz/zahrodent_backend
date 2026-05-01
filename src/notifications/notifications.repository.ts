@@ -29,6 +29,10 @@ export class NotificationsRepository {
       this.prisma.notification.findMany({
         where,
         orderBy: { sentAt: 'desc' },
+        include: {
+          patient: true,
+          doctor: { include: { user: true } },
+        },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),

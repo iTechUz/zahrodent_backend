@@ -25,7 +25,8 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto) {
-    const user = await this.usersRepository.findByPhone(dto.phone);
+    const normalizedPhone = dto.phone.replace(/\D/g, '');
+    const user = await this.usersRepository.findByPhone(normalizedPhone);
     if (!user || !user.isActive || user.deletedAt) {
       throw new UnauthorizedException("Bunday telefon raqamli foydalanuvchi topilmadi yoki hisob faol emas");
     }
@@ -56,6 +57,20 @@ export class AuthService {
       access_token,
       user: view,
     };
+  }
+
+  async changePassword(userId: string, dto: any) {
+    const user = await this.usersRepository.findById(userId);
+    if (!user) throw new UnauthorizedException('Foydalanuvchi topilmadi');
+
+    const ok = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!ok) {
+      throw new UnauthorizedException("Joriy parol noto'g'ri");
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, 10);
+    await this.usersRepository.updatePassword(userId, passwordHash);
+    return { success: true };
   }
 
   toUserView(

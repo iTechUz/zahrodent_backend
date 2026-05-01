@@ -8,14 +8,25 @@ import { AuthUserView } from '../auth/auth.service';
 export class BranchesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  async findAll(user: AuthUserView) {
+    const where: Prisma.BranchWhereInput = { deletedAt: null };
+
+    if (user.role !== UserRole.SUPER_ADMIN) {
+      // Only show branches the user is associated with
+      // Currently users have a single branchId, so we filter by that.
+      if (!user.branchId) return [];
+      where.id = user.branchId;
+    }
+
     return this.prisma.branch.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
       include: {
         _count: {
           select: {
             patients: true,
             users: true,
+            bookings: true,
           },
         },
       },
@@ -108,13 +119,14 @@ export class BranchesService {
 
   async create(data: any) {
     const { adminName, adminPhone, adminPassword, ...branchData } = data;
+    const normalizedPhone = adminPhone ? adminPhone.replace(/\D/g, '') : '';
 
     // Check if phone already exists
-    const existingUser = await this.prisma.user.findUnique({ where: { phone: adminPhone } });
+    const existingUser = await this.prisma.user.findUnique({ where: { phone: normalizedPhone } });
     if (existingUser) throw new ConflictException('Ushbu telefon raqami bilan foydalanuvchi allaqachon mavjud');
 
-    if (branchData.latitude) branchData.latitude = parseFloat(branchData.latitude);
-    if (branchData.longitude) branchData.longitude = parseFloat(branchData.longitude);
+    branchData.latitude = branchData.latitude ? parseFloat(branchData.latitude) : null;
+    branchData.longitude = branchData.longitude ? parseFloat(branchData.longitude) : null;
 
     return this.prisma.$transaction(async (tx) => {
       // 1. Create Branch
@@ -126,7 +138,7 @@ export class BranchesService {
         await tx.user.create({
           data: {
             name: adminName || `${branch.name} Admin`,
-            phone: adminPhone,
+            phone: normalizedPhone,
             passwordHash,
             role: UserRole.ADMIN,
             branchId: branch.id,
@@ -140,9 +152,19 @@ export class BranchesService {
 
   async update(id: string, data: any, user?: AuthUserView) {
     await this.findOne(id, user);
-    if (data.latitude) data.latitude = parseFloat(data.latitude);
-    if (data.longitude) data.longitude = parseFloat(data.longitude);
-    return this.prisma.branch.update({ where: { id }, data });
+    const updateData: any = {
+      ...(data.name && { name: data.name }),
+      ...(data.address && { address: data.address }),
+      ...(data.phone && { phone: data.phone }),
+      ...(data.latitude !== undefined && { latitude: data.latitude ? parseFloat(data.latitude) : null }),
+      ...(data.longitude !== undefined && { longitude: data.longitude ? parseFloat(data.longitude) : null }),
+      ...(data.telegramBotToken !== undefined && { telegramBotToken: data.telegramBotToken }),
+      ...(data.eskizEmail !== undefined && { eskizEmail: data.eskizEmail }),
+      ...(data.eskizToken !== undefined && { eskizToken: data.eskizToken }),
+      ...(data.eskizEnabled !== undefined && { eskizEnabled: data.eskizEnabled }),
+      ...(data.isActive !== undefined && { isActive: data.isActive }),
+    };
+    return this.prisma.branch.update({ where: { id }, data: updateData });
   }
 
   async remove(id: string) {

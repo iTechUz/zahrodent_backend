@@ -24,10 +24,10 @@ export class BranchesController {
   constructor(private readonly branchesService: BranchesService) {}
 
   @Get()
-  @Roles('SUPER_ADMIN')
-  @ApiOperation({ summary: 'Barcha filiallarni olish (Faqat SuperAdmin)' })
-  findAll() {
-    return this.branchesService.findAll();
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Filiallarni olish' })
+  findAll(@GetUser() user: AuthUserView) {
+    return this.branchesService.findAll(user);
   }
 
   @Get('stats')

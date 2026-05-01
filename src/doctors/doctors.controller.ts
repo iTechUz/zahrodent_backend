@@ -9,6 +9,8 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import {
   ApiBearerAuth,
@@ -28,7 +30,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 @ApiBearerAuth('JWT')
 @Controller('doctors')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'RECEPTIONIST')
+@Roles('ADMIN', 'RECEPTIONIST', 'DOCTOR')
 export class DoctorsController {
   constructor(private readonly doctorsService: DoctorsService) {}
 
@@ -52,6 +54,13 @@ export class DoctorsController {
     return this.doctorsService.findAll(query);
   }
 
+  @Get('me')
+  @Roles('DOCTOR', 'ADMIN', 'RECEPTIONIST')
+  @ApiOperation({ summary: 'Hozirgi shifokorning profili' })
+  getMe(@GetUser() user: AuthUserView) {
+    return this.doctorsService.findByUserId(user.id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Bitta shifokor' })
   @ApiParam({ name: 'id' })
@@ -63,17 +72,21 @@ export class DoctorsController {
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Yangi shifokor' })
   @ApiForbiddenResponse({ description: 'Faqat admin' })
-  create(@Body() dto: CreateDoctorDto) {
-    return this.doctorsService.create(dto);
+  create(@Body() dto: CreateDoctorDto, @GetUser() user: AuthUserView) {
+    return this.doctorsService.create(dto, user);
   }
 
   @Patch(':id')
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'DOCTOR')
   @ApiOperation({ summary: 'Shifokorni yangilash' })
   @ApiParam({ name: 'id' })
-  @ApiForbiddenResponse({ description: 'Faqat admin' })
-  update(@Param('id') id: string, @Body() dto: UpdateDoctorDto) {
-    return this.doctorsService.update(id, dto);
+  @ApiForbiddenResponse({ description: 'Faqat admin yoki o\'z profili' })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateDoctorDto,
+    @GetUser() user: AuthUserView,
+  ) {
+    return this.doctorsService.update(id, dto, user);
   }
 
   @Delete(':id')

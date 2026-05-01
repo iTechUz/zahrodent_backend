@@ -38,6 +38,13 @@ enum PaymentMethod {
   INSURANCE
 }
 
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  PAST_DUE
+  CANCELED
+}
+
 // --- CORE MODELS ---
 
 model Branch {
@@ -48,6 +55,9 @@ model Branch {
   latitude         Float?
   longitude        Float?
   telegramBotToken String?
+  eskizEmail       String?
+  eskizToken       String?
+  eskizEnabled     Boolean  @default(false)
   isActive         Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -63,6 +73,8 @@ model Branch {
   auditLogs AuditLog[]
   visits    Visit[]
   comments  PatientComment[]
+  notifications Notification[]
+  subscription BranchSubscription?
 
   @@map("branches")
 }
@@ -323,6 +335,7 @@ model PatientComment {
 
 model Notification {
   id        String   @id @default(cuid())
+  branchId  String?  @map("branch_id")
   patientId String?  @map("patient_id")
   doctorId  String?  @map("doctor_id")
   type      String
@@ -330,6 +343,7 @@ model Notification {
   sentAt    DateTime @default(now()) @map("sent_at")
   status    String
 
+  branch  Branch?  @relation(fields: [branchId], references: [id])
   patient Patient? @relation(fields: [patientId], references: [id], onDelete: Cascade)
   doctor  Doctor?  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
 
@@ -353,8 +367,54 @@ model Lead {
   branch    Branch?  @relation(fields: [branchId], references: [id])
   patient   Patient? @relation(fields: [patientId], references: [id])
 
-  @@index([status])
   @@index([createdAt])
   @@index([branchId])
   @@map("leads")
+}
+
+model SubscriptionPlan {
+  id          String   @id @default(cuid())
+  name        String
+  price       Decimal  @db.Decimal(15, 2)
+  features    Json     // Masalan: ["10 ta xodim", "SMS bot"]
+  isPopular   Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  subscriptions BranchSubscription[]
+  history       SubscriptionHistory[]
+
+  @@map("subscription_plans")
+}
+
+model BranchSubscription {
+  id          String             @id @default(cuid())
+  branchId    String             @unique @map("branch_id")
+  planId      String             @map("plan_id")
+  status      SubscriptionStatus @default(ACTIVE)
+  startDate   DateTime           @default(now()) @map("start_date")
+  endDate     DateTime?          @map("end_date")
+  
+  branch      Branch             @relation(fields: [branchId], references: [id])
+  plan        SubscriptionPlan   @relation(fields: [planId], references: [id])
+  history     SubscriptionHistory[]
+
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  @@map("branch_subscriptions")
+}
+
+model SubscriptionHistory {
+  id             String   @id @default(cuid())
+  subscriptionId String   @map("subscription_id")
+  planId         String   @map("plan_id")
+  status         SubscriptionStatus
+  changedAt      DateTime @default(now()) @map("changed_at")
+  note           String?
+
+  subscription   BranchSubscription @relation(fields: [subscriptionId], references: [id])
+  plan           SubscriptionPlan   @relation(fields: [planId], references: [id])
+
+  @@map("subscription_history")
 }

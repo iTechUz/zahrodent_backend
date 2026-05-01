@@ -25,4 +25,10 @@ export class UsersRepository {
       select: { id: true },
     });
   }
+  async updatePassword(id: string, passwordHash: string) {
+    return this.prisma.user.update({
+      where: { id },
+      data: { passwordHash },
+    });
+  }
 }

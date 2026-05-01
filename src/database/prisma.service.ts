@@ -25,6 +25,9 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get notification() { return this._client.notification; }
   get branch() { return this._client.branch; }
   get auditLog() { return this._client.auditLog; }
+  get subscriptionPlan() { return this._client.subscriptionPlan; }
+  get branchSubscription() { return this._client.branchSubscription; }
+  get subscriptionHistory() { return this._client.subscriptionHistory; }
 
   // Transaction support (MUST BE BOUND to the client)
   get $transaction() { return this._client.$transaction.bind(this._client); }

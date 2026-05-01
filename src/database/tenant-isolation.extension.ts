@@ -25,7 +25,6 @@ export const tenantIsolationExtension = (cls: ClsService) => {
               'Payment',
               'Visit',
               'Notification',
-              'Doctor',
               'Lead',
               'Service',
               'User',

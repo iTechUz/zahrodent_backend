@@ -25,9 +25,25 @@ export class AvailabilityDto {
 }
 
 export class CreateDoctorDto {
+  @IsOptional()
   @IsString()
-  @MinLength(1)
-  userId: string;
+  userId?: string;
+
+  @IsOptional()
+  @IsString()
+  firstName?: string;
+
+  @IsOptional()
+  @IsString()
+  lastName?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  password?: string;
 
   @IsString()
   @MinLength(1)
@@ -47,26 +63,3 @@ export class CreateDoctorDto {
   availabilities?: AvailabilityDto[];
 }
 
-export class UpdateDoctorDto {
-  @IsOptional()
-  @IsString()
-  specialty?: string;
-
-  @IsOptional()
-  @IsNumber()
-  experienceYears?: number;
-
-  @IsOptional()
-  @IsString()
-  bio?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
-
-  @IsOptional()
-  @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => AvailabilityDto)
-  availabilities?: AvailabilityDto[];
-}

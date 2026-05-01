@@ -94,9 +94,10 @@ export class PatientsService {
   async create(dto: CreatePatientDto, user: AuthUserView) {
     // Force branchId for non-SuperAdmin
     const branchId = user.role === 'SUPER_ADMIN' ? dto.branchId : user.branchId;
+    const normalizedPhone = dto.phone.replace(/\D/g, '');
     
     const existing = await this.patientsRepository.count({ 
-      phone: dto.phone, 
+      phone: normalizedPhone, 
       branchId, // Phone must be unique within a branch
       deletedAt: null 
     });
@@ -117,7 +118,7 @@ export class PatientsService {
       user: dto.userId ? { connect: { id: dto.userId } } : undefined,
       firstName: dto.firstName,
       lastName: dto.lastName,
-      phone: dto.phone,
+      phone: normalizedPhone,
       source: dto.source || 'DIRECT',
       notes: dto.notes ?? '',
       address: dto.address,
@@ -135,20 +136,23 @@ export class PatientsService {
   async update(id: string, dto: UpdatePatientDto, user: AuthUserView) {
     const current = await this.ensureExists(id, user);
 
-    if (dto.phone && dto.phone !== current.phone) {
-      const existing = await this.patientsRepository.count({ 
-        phone: dto.phone, 
-        branchId: current.branchId,
-        id: { not: id },
-        deletedAt: null
-      });
-      if (existing > 0) throw new ConflictException('Bu telefon raqami bilan boshqa bemor ushbu filialda mavjud');
+    if (dto.phone) {
+      const normalizedPhone = dto.phone.replace(/\D/g, '');
+      if (normalizedPhone !== current.phone) {
+        const existing = await this.patientsRepository.count({ 
+          phone: normalizedPhone, 
+          branchId: current.branchId,
+          id: { not: id },
+          deletedAt: null
+        });
+        if (existing > 0) throw new ConflictException('Bu telefon raqami bilan boshqa bemor ushbu filialda mavjud');
+      }
     }
 
     const p = await this.patientsRepository.update(id, {
       firstName: dto.firstName,
       lastName: dto.lastName,
-      phone: dto.phone,
+      phone: dto.phone ? dto.phone.replace(/\D/g, '') : undefined,
       source: dto.source,
       notes: dto.notes,
       address: dto.address,

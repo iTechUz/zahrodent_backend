@@ -6,9 +6,14 @@ import { PrismaService } from '../database/prisma.service';
 export class DoctorsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(where?: Prisma.DoctorWhereInput): Promise<Doctor[]> {
+  async findAll(
+    where?: Prisma.DoctorWhereInput,
+    opts?: { skip?: number; take?: number },
+  ): Promise<Doctor[]> {
     return this.prisma.doctor.findMany({
       where: { ...where, deletedAt: null },
+      skip: opts?.skip,
+      take: opts?.take,
       include: {
         user: true,
         availabilities: true,

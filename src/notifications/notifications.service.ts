@@ -32,13 +32,8 @@ export class NotificationsService {
 
     const where: Prisma.NotificationWhereInput = {};
     
-    // Multi-branch isolation
-    if (user.role !== UserRole.SUPER_ADMIN) {
-      where.OR = [
-        { patient: { branchId: user.branchId } },
-        { doctor: { user: { branchId: user.branchId } } }
-      ];
-    }
+    // Multi-branch isolation is now handled automatically by tenantIsolationExtension
+    // since Notification model now has branchId field.
 
     const { data, total } = await this.notificationsRepository.findAllWithFilter(where, {
       skip,
@@ -210,6 +205,8 @@ export class NotificationsService {
       message: n.message,
       sentAt: n.sentAt.toISOString(),
       status: n.status,
+      patient: (n as any).patient,
+      doctor: (n as any).doctor,
     };
   }
 }
