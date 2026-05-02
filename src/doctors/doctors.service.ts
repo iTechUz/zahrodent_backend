@@ -1,10 +1,34 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { DoctorsRepository } from './doctors.repository';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
 import { PrismaService } from '../database/prisma.service';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { AuthUserView } from '../auth/auth.service';
+import { getPagination } from '../common/utils/pagination.util';
+
+export interface DoctorResponse {
+  id: string;
+  userId: string;
+  specialty: string;
+  experienceYears: number;
+  bio: string;
+  isActive: boolean;
+  name: string;
+  phone?: string;
+  email?: string;
+  avatar?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  availabilities: any[];
+  schedule: Array<{
+    day: number;
+    startTime: string;
+    endTime: string;
+    isWorking: boolean;
+  }>;
+}
 
 @Injectable()
 export class DoctorsService {
@@ -14,14 +38,11 @@ export class DoctorsService {
   ) {}
 
   async findAll(query: { specialty?: string; branchId?: string; page?: number; limit?: number }) {
-    const where: any = { deletedAt: null };
+    const { skip, take, page, limit } = getPagination(query);
+    
+    const where: Prisma.DoctorWhereInput = { deletedAt: null };
     if (query.specialty) where.specialty = query.specialty;
     if (query.branchId) where.user = { branchId: query.branchId };
-
-    const page = Number(query.page) || 0;
-    const limit = Number(query.limit) || 10;
-    const skip = page * limit;
-    const take = limit;
 
     const [doctors, total] = await Promise.all([
       this.doctorsRepository.findAll(where, { skip, take }),
@@ -34,18 +55,18 @@ export class DoctorsService {
     };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string): Promise<DoctorResponse> {
     const doctor = await this.doctorsRepository.findById(id);
-    if (!doctor || doctor.deletedAt) throw new NotFoundException('Doctor not found');
+    if (!doctor || doctor.deletedAt) throw new NotFoundException('Doctor topilmadi');
     return this.toResponse(doctor);
   }
 
-  async findByUserId(userId: string) {
+  async findByUserId(userId: string): Promise<DoctorResponse> {
     const doctor = await this.prisma.doctor.findFirst({
       where: { userId, deletedAt: null },
       include: { user: true, availabilities: true },
     });
-    if (!doctor) throw new NotFoundException('Doctor not found');
+    if (!doctor) throw new NotFoundException('Doctor profili topilmadi');
     return this.toResponse(doctor);
   }
 
@@ -58,10 +79,9 @@ export class DoctorsService {
   }
 
   async getEfficiency() {
-    // Basic implementation: average bookings per doctor this month
     const startOfMonth = new Date();
     startOfMonth.setDate(1);
-    startOfMonth.setHours(0,0,0,0);
+    startOfMonth.setHours(0, 0, 0, 0);
 
     const stats = await this.prisma.doctor.findMany({
       where: { deletedAt: null, isActive: true },
@@ -80,12 +100,12 @@ export class DoctorsService {
 
     return stats.map(s => ({
       doctorId: s.id,
-      name: s.user.name,
+      name: s.user?.name || 'Noma\'lum',
       bookingsCount: s._count.bookings
     }));
   }
 
-  async create(dto: CreateDoctorDto, currentUser: AuthUserView) {
+  async create(dto: CreateDoctorDto, currentUser: AuthUserView): Promise<DoctorResponse> {
     return this.prisma.$transaction(async (tx) => {
       let userId = dto.userId;
 
@@ -101,7 +121,7 @@ export class DoctorsService {
         const passwordHash = await bcrypt.hash(dto.password, 10);
         const newUser = await tx.user.create({
           data: {
-            name: `${dto.firstName ?? ''} ${dto.lastName ?? ''}`.trim() || 'Shifokor',
+            name: dto.name || `${dto.firstName ?? ''} ${dto.lastName ?? ''}`.trim() || 'Shifokor',
             phone: normalizedPhone,
             passwordHash,
             role: 'DOCTOR',
@@ -139,35 +159,36 @@ export class DoctorsService {
     });
   }
 
-  async update(id: string, dto: UpdateDoctorDto, currentUser?: AuthUserView) {
+  async update(id: string, dto: UpdateDoctorDto, currentUser?: AuthUserView): Promise<DoctorResponse> {
     return this.prisma.$transaction(async (tx) => {
       const doctor = await tx.doctor.findUnique({
         where: { id },
         include: { user: true }
       });
-      if (!doctor || doctor.deletedAt) throw new NotFoundException('Doctor not found');
+      if (!doctor || doctor.deletedAt) throw new NotFoundException('Shifokor topilmadi');
 
-      // Doctor can only update their own profile
       if (currentUser?.role === 'DOCTOR' && doctor.userId !== currentUser.id) {
-        throw new NotFoundException('Doctor not found');
+        throw new ForbiddenException('Siz faqat o\'z profilingizni tahrirlay olasiz');
       }
 
-      const updateData: any = {
+      const updateData: Prisma.DoctorUpdateInput = {
         specialty: dto.specialty,
         experienceYears: dto.experienceYears !== undefined ? Number(dto.experienceYears) : undefined,
         bio: dto.bio,
         isActive: dto.isActive,
       };
 
-      // Update User details if provided
-      if (dto.firstName || dto.lastName || dto.phone || dto.password) {
-        const userUpdate: any = {};
-        if (dto.firstName || dto.lastName) {
+      if (dto.firstName || dto.lastName || dto.phone || dto.password || dto.name) {
+        const userUpdate: Prisma.UserUpdateInput = {};
+        if (dto.name) {
+          userUpdate.name = dto.name;
+        } else if (dto.firstName || dto.lastName) {
           const currentNameParts = (doctor.user?.name || '').split(' ');
           const fName = dto.firstName || currentNameParts[0] || '';
           const lName = dto.lastName || currentNameParts.slice(1).join(' ') || '';
           userUpdate.name = `${fName} ${lName}`.trim();
         }
+        
         if (dto.phone) userUpdate.phone = dto.phone.replace(/\D/g, '');
         if (dto.password) userUpdate.passwordHash = await bcrypt.hash(dto.password, 10);
 
@@ -201,16 +222,14 @@ export class DoctorsService {
 
   async remove(id: string) {
     const doctor = await this.doctorsRepository.findById(id);
-    if (!doctor) throw new NotFoundException('Doctor not found');
+    if (!doctor) throw new NotFoundException('Shifokor topilmadi');
 
     return this.prisma.$transaction(async (tx) => {
-      // 1. Deactivate User
       await tx.user.update({
         where: { id: doctor.userId },
         data: { isActive: false, deletedAt: new Date() },
       });
 
-      // 2. Soft delete Doctor
       await tx.doctor.update({
         where: { id },
         data: { deletedAt: new Date(), isActive: false },
@@ -220,14 +239,7 @@ export class DoctorsService {
     });
   }
 
-  private toResponse(d: any) {
-    if (!d) return null;
-    
-    const nameParts = (d.user?.name || '').split(' ');
-    const firstName = d.firstName || nameParts[0] || '';
-    const lastName = d.lastName || nameParts.slice(1).join(' ') || '';
-
-    // Extract availabilities safely
+  private toResponse(d: any): DoctorResponse {
     const rawAvailabilities = d.availabilities || [];
     
     return {
@@ -237,9 +249,7 @@ export class DoctorsService {
       experienceYears: d.experienceYears,
       bio: d.bio,
       isActive: d.isActive,
-      name: d.user?.name || `${firstName} ${lastName}`.trim(),
-      firstName,
-      lastName,
+      name: d.user?.name || 'Noma\'lum',
       phone: d.user?.phone,
       email: d.user?.email,
       avatar: d.user?.avatar,

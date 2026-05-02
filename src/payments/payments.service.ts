@@ -1,14 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Payment, Prisma, PaymentMethod, PaymentType, UserRole } from '@prisma/client';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Prisma, PaymentMethod, PaymentType, UserRole } from '@prisma/client';
 import { PaymentsRepository } from './payments.repository';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
-import {
-  PaginationQueryDto,
-  PaginatedResponse,
-} from '../common/dto/pagination.dto';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { PrismaService } from '../database/prisma.service';
 import { AuthUserView } from '../auth/auth.service';
+import { getPagination } from '../common/utils/pagination.util';
 
 @Injectable()
 export class PaymentsService {
@@ -19,7 +17,6 @@ export class PaymentsService {
 
   async findAll(
     query: PaginationQueryDto & {
-      status?: string;
       patientId?: string;
       method?: string;
       type?: string;
@@ -27,29 +24,18 @@ export class PaymentsService {
       endDate?: string;
     },
     user: AuthUserView,
-  ): Promise<PaginatedResponse<any>> {
-    const {
-      search,
-      status,
-      patientId,
-      method,
-      type,
-      startDate,
-      endDate,
-    } = query;
-    const pageNum = Number(query.page || 0);
-    const limitNum = Number(query.limit || 10);
-    const skip = pageNum * limitNum;
+  ) {
+    const { skip, take } = getPagination(query);
+    const { patientId, method, type, search, startDate, endDate } = query;
 
     const where: Prisma.PaymentWhereInput = {};
-
-    // Multi-branch isolation
+    
+    // SaaS Isolation
     if (user.role !== UserRole.SUPER_ADMIN) {
       where.patient = { branchId: user.branchId };
     }
 
     if (patientId) where.patientId = patientId;
-    if (status && status !== 'all') where.status = status;
     if (method && method !== 'all') where.method = method as PaymentMethod;
     if (type && type !== 'all') where.type = type as PaymentType;
 
@@ -77,18 +63,17 @@ export class PaymentsService {
     const { data, total } = await this.paymentsRepository.findAll({
       where,
       skip,
-      take: limitNum,
+      take,
     });
     return { data: data.map((p) => this.toResponse(p)), total };
   }
 
   async findOne(id: string, user: AuthUserView) {
     const p = await this.paymentsRepository.findById(id);
-    if (!p) throw new NotFoundException('Payment not found');
+    if (!p) throw new NotFoundException('To\'lov topilmadi');
     
-    // Multi-branch isolation
     if (user.role !== UserRole.SUPER_ADMIN && (p as any).patient.branchId !== user.branchId) {
-      throw new NotFoundException('Payment not found (access restricted)');
+      throw new ForbiddenException('Boshqa filial to\'loviga kirishga ruxsat yo\'q');
     }
     
     return this.toResponse(p);
@@ -98,26 +83,9 @@ export class PaymentsService {
     const branchId = user.role === UserRole.SUPER_ADMIN ? dto.branchId : user.branchId;
     if (!branchId) throw new NotFoundException('Filial ID ko\'rsatilmadi');
 
-    // 1. Verify Patient branch
     const patient = await this.prisma.patient.findUnique({ where: { id: dto.patientId } });
     if (!patient || patient.branchId !== branchId) {
       throw new NotFoundException('Bemor topilmadi yoki boshqa filialga tegishli');
-    }
-
-    // 2. Verify Service branch (if provided)
-    if (dto.serviceId) {
-      const service = await this.prisma.service.findUnique({ where: { id: dto.serviceId } });
-      if (!service || service.branchId !== branchId) {
-        throw new NotFoundException('Xizmat topilmadi yoki boshqa filialga tegishli');
-      }
-    }
-
-    // 3. Verify Visit branch (if provided)
-    if (dto.visitId) {
-      const visit = await this.prisma.visit.findUnique({ where: { id: dto.visitId } });
-      if (!visit || visit.branchId !== branchId) {
-        throw new NotFoundException('Tashrif topilmadi yoki boshqa filialga tegishli');
-      }
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -138,8 +106,9 @@ export class PaymentsService {
         include: { patient: true }
       });
 
-      // Update patient balance
-      if (p.status === 'COMPLETED' || p.status === 'paid') {
+      const isPaid = p.status.toUpperCase() === 'COMPLETED' || p.status.toLowerCase() === 'paid';
+
+      if (isPaid) {
         let adjustment = p.amount;
         if (p.type === 'REFUND' || p.type === 'EXPENSE') {
           adjustment = adjustment.negated();
@@ -157,11 +126,10 @@ export class PaymentsService {
 
   async update(id: string, dto: UpdatePaymentDto, user: AuthUserView) {
     const current = await this.paymentsRepository.findById(id);
-    if (!current) throw new NotFoundException('Payment not found');
+    if (!current) throw new NotFoundException('To\'lov topilmadi');
     
-    // Multi-branch isolation
     if (user.role !== UserRole.SUPER_ADMIN && (current as any).patient.branchId !== user.branchId) {
-      throw new NotFoundException('Payment not found (access restricted)');
+      throw new ForbiddenException('Boshqa filial to\'loviga kirishga ruxsat yo\'q');
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -186,10 +154,11 @@ export class PaymentsService {
         include: { patient: true }
       });
 
-      // Revert old balance adjustment and apply new one
-      if (current.status === 'COMPLETED' || updated.status === 'COMPLETED') {
-        // Revert old
-        if (current.status === 'COMPLETED') {
+      const wasPaid = current.status.toUpperCase() === 'COMPLETED' || current.status.toLowerCase() === 'paid';
+      const isPaid = updated.status.toUpperCase() === 'COMPLETED' || updated.status.toLowerCase() === 'paid';
+
+      if (wasPaid || isPaid) {
+        if (wasPaid) {
           let oldAdj = current.amount;
           if (current.type === 'REFUND' || current.type === 'EXPENSE') {
             oldAdj = oldAdj.negated();
@@ -200,8 +169,7 @@ export class PaymentsService {
           });
         }
 
-        // Apply new
-        if (updated.status === 'COMPLETED') {
+        if (isPaid) {
           let newAdj = updated.amount;
           if (updated.type === 'REFUND' || updated.type === 'EXPENSE') {
             newAdj = newAdj.negated();
@@ -219,15 +187,15 @@ export class PaymentsService {
 
   async remove(id: string, user: AuthUserView) {
     const current = await this.paymentsRepository.findById(id);
-    if (!current) throw new NotFoundException('Payment not found');
+    if (!current) throw new NotFoundException('To\'lov topilmadi');
 
-    // Multi-branch isolation
     if (user.role !== UserRole.SUPER_ADMIN && (current as any).patient.branchId !== user.branchId) {
-      throw new NotFoundException('Payment not found (access restricted)');
+      throw new ForbiddenException('Boshqa filial to\'loviga kirishga ruxsat yo\'q');
     }
 
     await this.prisma.$transaction(async (tx) => {
-      if (current.status === 'COMPLETED') {
+      const isPaid = current.status.toUpperCase() === 'COMPLETED' || current.status.toLowerCase() === 'paid';
+      if (isPaid) {
         let adjustment = current.amount;
         if (current.type === 'REFUND' || current.type === 'EXPENSE') {
           adjustment = adjustment.negated();
@@ -288,3 +256,4 @@ export class PaymentsService {
     };
   }
 }
+
