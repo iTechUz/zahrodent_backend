@@ -48,17 +48,17 @@ export class DoctorsController {
     return this.doctorsService.getEfficiency();
   }
 
-  @Get()
-  @ApiOperation({ summary: "Shifokorlar ro'yxati" })
-  findAll(@Query() query: PaginationQueryDto & { specialty?: string }) {
-    return this.doctorsService.findAll(query);
-  }
-
   @Get('me')
   @Roles('DOCTOR', 'ADMIN', 'RECEPTIONIST')
   @ApiOperation({ summary: 'Hozirgi shifokorning profili' })
   getMe(@GetUser() user: AuthUserView) {
     return this.doctorsService.findByUserId(user.id);
+  }
+
+  @Get()
+  @ApiOperation({ summary: "Shifokorlar ro'yxati" })
+  findAll(@Query() query: PaginationQueryDto & { specialty?: string }) {
+    return this.doctorsService.findAll(query);
   }
 
   @Get(':id')

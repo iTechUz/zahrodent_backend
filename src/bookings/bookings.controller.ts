@@ -27,6 +27,8 @@ import { GetUser } from '../common/decorators/get-user.decorator';
 import { AuthUserView } from '../auth/auth.service';
 import { BookingStatus } from '@prisma/client';
 
+import { BookingFilterDto } from './dto/booking-filter.dto';
+
 @ApiTags('bookings')
 @ApiBearerAuth('JWT')
 @Controller('bookings')
@@ -44,21 +46,10 @@ export class BookingsController {
   @Get()
   @ApiOperation({ summary: "Qabullar ro'yxati" })
   findAll(
-    @Query()
-    query: PaginationQueryDto & {
-      status?: string;
-      source?: string;
-      patientId?: string;
-      dateRange?: 'today' | 'week' | 'month' | 'all';
-    },
+    @Query() query: BookingFilterDto,
     @GetUser() user: AuthUserView,
   ) {
-    // Cast status to BookingStatus if it's provided and not 'all'
-    const filters: any = { ...query };
-    if (query.status === 'all') delete filters.status;
-    else if (query.status) filters.status = query.status as BookingStatus;
-
-    return this.bookingsService.findAll(filters, user);
+    return this.bookingsService.findAll(query, user);
   }
 
   @Get(':id')

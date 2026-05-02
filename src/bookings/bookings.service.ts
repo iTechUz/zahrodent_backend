@@ -96,8 +96,8 @@ export class BookingsService {
     }
 
     if (patientId) where.patientId = patientId;
-    if (status) where.status = status;
-    if (source) where.source = source;
+    if (status && status !== 'all') where.status = status;
+    if (source && source !== 'all') where.source = source;
 
     if (search?.trim()) {
       where.patient = {

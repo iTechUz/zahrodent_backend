@@ -33,9 +33,7 @@ export class CreateVisitDto {
   @IsDateString()
   date?: string;
 
-  @IsString()
-  @MinLength(1)
-  status: string; // e.g. "completed"
+
 
   @IsOptional()
   @IsString()

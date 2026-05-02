@@ -40,13 +40,15 @@ export class PatientsService {
       where.branchId = branchId;
     }
 
-    if (source) where.source = source;
+    if (source && source !== 'all') where.source = source;
 
     if (startDate || endDate) {
       where.createdAt = {};
       if (startDate) where.createdAt.gte = new Date(startDate);
       if (endDate) where.createdAt.lte = new Date(endDate);
     }
+
+    const debtOnly = (query as any).debtOnly === 'true';
 
     if (search?.trim()) {
       where.OR = [
@@ -56,11 +58,24 @@ export class PatientsService {
       ];
     }
 
+    // Debt filter
+    if (debtOnly) {
+      where.balance = { lt: 0 };
+    }
+
+    // Doctor sees only their own patients — combine with AND to not break search
     if (user.role === 'DOCTOR') {
-      where.OR = [
-        { bookings: { some: { doctorId: user.doctorId } } },
-        { visits: { some: { doctorId: user.doctorId } } },
-        { assignedDoctorId: user.doctorId }
+      const doctorFilter: Prisma.PatientWhereInput = {
+        OR: [
+          { bookings: { some: { doctorId: user.doctorId } } },
+          { visits: { some: { doctorId: user.doctorId } } },
+          { assignedDoctorId: user.doctorId },
+        ],
+      };
+      // Merge with existing AND conditions
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        doctorFilter,
       ];
     }
 
@@ -82,10 +97,16 @@ export class PatientsService {
       where.branchId = user.branchId;
     }
     if (user.role === 'DOCTOR') {
-      where.OR = [
-        { bookings: { some: { doctorId: user.doctorId } } },
-        { visits: { some: { doctorId: user.doctorId } } },
-        { assignedDoctorId: user.doctorId }
+      const doctorFilter: Prisma.PatientWhereInput = {
+        OR: [
+          { bookings: { some: { doctorId: user.doctorId } } },
+          { visits: { some: { doctorId: user.doctorId } } },
+          { assignedDoctorId: user.doctorId },
+        ],
+      };
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        doctorFilter,
       ];
     }
     return this.patientsRepository.getStats(where);

@@ -49,7 +49,7 @@ export function buildCorsOptions(prod: boolean): CorsOptions {
   > = {
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'x-branch-id'],
   };
 
   if (list.length > 0) {

@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { UsersRepository } from './users.repository';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { AppRole } from '../common/decorators/roles.decorator';
 import type { JwtAccessPayload } from '../common/auth/jwt-access-payload';
 import { UserRole } from '@prisma/client';
@@ -15,6 +16,7 @@ export type AuthUserView = {
   avatar?: string;
   doctorId?: string; 
   branchId?: string;
+  subscriptionStatus?: string;
 };
 
 @Injectable()
@@ -41,7 +43,15 @@ export class AuthService {
       doctorId = doctor?.id;
     }
 
-    const view = this.toUserView(user, doctorId);
+    let subscriptionStatus: string | undefined;
+    if (user.branchId && user.role !== UserRole.SUPER_ADMIN) {
+      const sub = await this.usersRepository.prisma.branchSubscription.findUnique({
+        where: { branchId: user.branchId }
+      });
+      subscriptionStatus = sub?.status;
+    }
+
+    const view = this.toUserView(user, doctorId, subscriptionStatus);
     const payload: JwtAccessPayload = {
       sub: user.id,
       role: view.role,
@@ -59,7 +69,7 @@ export class AuthService {
     };
   }
 
-  async changePassword(userId: string, dto: any) {
+  async changePassword(userId: string, dto: ChangePasswordDto) {
     const user = await this.usersRepository.findById(userId);
     if (!user) throw new UnauthorizedException('Foydalanuvchi topilmadi');
 
@@ -76,6 +86,7 @@ export class AuthService {
   toUserView(
     user: any,
     doctorId?: string,
+    subscriptionStatus?: string,
   ): AuthUserView {
     return {
       id: user.id,
@@ -85,6 +96,7 @@ export class AuthService {
       avatar: user.avatar ?? undefined,
       branchId: user.branchId ?? undefined,
       doctorId,
+      subscriptionStatus,
     };
   }
 }

@@ -146,6 +146,21 @@ export class BranchesService {
         });
       }
 
+      // 3. Assign Default Subscription Plan
+      const defaultPlan = await tx.subscriptionPlan.findFirst({ orderBy: { price: 'asc' } });
+      if (defaultPlan) {
+        await tx.branchSubscription.create({
+          data: {
+            branchId: branch.id,
+            planId: defaultPlan.id,
+            status: 'ACTIVE',
+            startDate: new Date(),
+            // Set 14 day trial by default if no end date
+            endDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+          },
+        });
+      }
+
       return branch;
     });
   }

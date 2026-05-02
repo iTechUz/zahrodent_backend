@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ClsModule } from 'nestjs-cls';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { SubscriptionGuard } from './common/guards/subscription.guard';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { PatientsModule } from './patients/patients.module';
@@ -26,7 +27,7 @@ import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
       middleware: { mount: true },
     }),
     ThrottlerModule.forRoot({
-      throttlers: [{ name: 'default', ttl: 60_000, limit: 600 }],
+      throttlers: [{ name: 'default', ttl: 60_000, limit: 200 }],
     }),
     DatabaseModule,
     AuthModule,
@@ -45,6 +46,10 @@ import { TenantInterceptor } from './common/interceptors/tenant.interceptor';
   ],
   controllers: [HealthController],
   providers: [
+    {
+      provide: APP_GUARD,
+      useClass: SubscriptionGuard,
+    },
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,

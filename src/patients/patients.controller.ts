@@ -27,6 +27,8 @@ import { GetUser } from '../common/decorators/get-user.decorator';
 import { AuthUserView } from '../auth/auth.service';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 
+import { PatientFilterDto } from './dto/patient-filter.dto';
+
 @ApiTags('patients')
 @ApiBearerAuth('JWT')
 @Controller('patients')
@@ -44,7 +46,7 @@ export class PatientsController {
   @Get()
   @ApiOperation({ summary: "Bemorlar ro'yxati" })
   findAll(
-    @Query() query: PaginationQueryDto & { source?: string },
+    @Query() query: PatientFilterDto,
     @GetUser() user: AuthUserView,
   ) {
     return this.patientsService.findAll(query, user);

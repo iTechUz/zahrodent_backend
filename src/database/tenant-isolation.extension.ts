@@ -14,9 +14,15 @@ export const tenantIsolationExtension = (cls: ClsService) => {
           const branchId = cls.get('branchId');
           const userRole = cls.get('userRole');
 
-          // If we have a branchId and the user is NOT a SUPER_ADMIN,
-          // we must enforce data isolation.
-          if (branchId && userRole !== UserRole.SUPER_ADMIN) {
+          // SaaS isolation logic
+          // If we have a branchId, we apply isolation.
+          // For SUPER_ADMIN, we ONLY skip isolation if NO branchId is provided in CLS.
+          // This allows SUPER_ADMIN to switch branch context using headers.
+          if (branchId) {
+            
+            // Skip isolation ONLY if SuperAdmin AND no branchId was set in the context
+            // Actually, if branchId is set, we SHOULD isolate.
+            // The only case to skip is when SuperAdmin wants to see EVERYTHING (branchId is null/undefined)
             
             // Models that strictly belong to a branch
             const tenantModels = [
