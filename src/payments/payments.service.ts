@@ -8,11 +8,14 @@ import { PrismaService } from '../database/prisma.service';
 import { AuthUserView } from '../auth/auth.service';
 import { getPagination } from '../common/utils/pagination.util';
 
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+
 @Injectable()
 export class PaymentsService {
   constructor(
     private readonly paymentsRepository: PaymentsRepository,
     private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async findAll(
@@ -120,6 +123,15 @@ export class PaymentsService {
         });
       }
 
+      await this.auditLogs.log({
+        branchId: p.branchId,
+        userId: user.id,
+        action: 'CREATE',
+        entity: 'PAYMENT',
+        entityId: p.id,
+        newValue: p,
+      });
+
       return this.toResponse(p);
     });
   }
@@ -181,6 +193,16 @@ export class PaymentsService {
         }
       }
 
+      await this.auditLogs.log({
+        branchId: updated.branchId,
+        userId: user.id,
+        action: 'UPDATE',
+        entity: 'PAYMENT',
+        entityId: id,
+        oldValue: current,
+        newValue: updated,
+      });
+
       return this.toResponse(updated);
     });
   }
@@ -206,6 +228,15 @@ export class PaymentsService {
         });
       }
       await tx.payment.delete({ where: { id } });
+
+      await this.auditLogs.log({
+        branchId: current.branchId,
+        userId: user.id,
+        action: 'DELETE',
+        entity: 'PAYMENT',
+        entityId: id,
+        oldValue: current,
+      });
     });
 
     return { id };

@@ -10,11 +10,14 @@ import {
 import { AuthUserView } from '../auth/auth.service';
 import { PrismaService } from '../database/prisma.service';
 
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+
 @Injectable()
 export class PatientsService {
   constructor(
     private readonly patientsRepository: PatientsRepository,
     private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async findAll(
@@ -151,6 +154,16 @@ export class PatientsService {
       toothChart: dto.toothChart as object,
       medicalHistory: dto.medicalHistory as object,
     });
+
+    await this.auditLogs.log({
+      branchId: p.branchId,
+      userId: user.id,
+      action: 'CREATE',
+      entity: 'PATIENT',
+      entityId: p.id,
+      newValue: p,
+    });
+
     return this.toResponse(p);
   }
 
@@ -185,6 +198,17 @@ export class PatientsService {
       toothChart: dto.toothChart as object,
       medicalHistory: dto.medicalHistory as object,
     });
+
+    await this.auditLogs.log({
+      branchId: p.branchId,
+      userId: user.id,
+      action: 'UPDATE',
+      entity: 'PATIENT',
+      entityId: p.id,
+      oldValue: current,
+      newValue: p,
+    });
+
     return this.toResponse(p);
   }
 
@@ -204,6 +228,14 @@ export class PatientsService {
       await tx.patient.update({
         where: { id },
         data: { deletedAt: new Date() }
+      });
+
+      await this.auditLogs.log({
+        branchId: p.branchId,
+        userId: user.id,
+        action: 'DELETE',
+        entity: 'PATIENT',
+        entityId: id,
       });
 
       return { id };

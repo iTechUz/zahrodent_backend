@@ -15,6 +15,8 @@ import { AuthUserView } from '../auth/auth.service';
 
 type ReminderStatus = 'sent' | 'failed';
 
+import { ClsService } from 'nestjs-cls';
+
 @Injectable()
 export class NotificationsService {
   constructor(
@@ -23,6 +25,7 @@ export class NotificationsService {
     private readonly patientsRepository: PatientsRepository,
     private readonly eskiz: EskizService,
     private readonly prisma: PrismaService,
+    private readonly cls: ClsService,
   ) {}
 
   async findAll(query: PaginationQueryDto, user: AuthUserView): Promise<PaginatedResponse<any>> {
@@ -47,26 +50,33 @@ export class NotificationsService {
     let status = dto.status ?? 'sent';
     let targetPhone: string | null = null;
 
+    let branchId = this.cls.get('branchId');
+
     if (dto.patientId) {
-      const patient = await this.patientsRepository.findById(dto.patientId);
+      const patient = await this.prisma.patient.findUnique({ where: { id: dto.patientId } });
       targetPhone = patient?.phone ?? null;
+      if (patient) branchId = branchId || patient.branchId;
     } else if (dto.doctorId) {
       const doctor = await this.prisma.doctor.findUnique({
         where: { id: dto.doctorId },
         include: { user: true },
       });
       targetPhone = doctor?.user?.phone ?? null;
+      if (doctor?.user) branchId = branchId || doctor.user.branchId;
     }
 
-    if (dto.type === 'sms' && this.eskiz.isConfigured()) {
-      targetPhone = targetPhone
-        ? this.eskiz.normalizeMobile(targetPhone)
-        : null;
-      if (!targetPhone) {
-        status = 'failed';
+    if (dto.type === 'sms' && branchId) {
+      const isConfigured = await this.eskiz.isConfigured(branchId);
+      if (isConfigured) {
+        targetPhone = targetPhone ? this.eskiz.normalizeMobile(targetPhone) : null;
+        if (!targetPhone) {
+          status = 'failed';
+        } else {
+          const r = await this.eskiz.sendSms(branchId, targetPhone, dto.message);
+          status = r.ok ? 'sent' : 'failed';
+        }
       } else {
-        const r = await this.eskiz.sendSms(targetPhone, dto.message);
-        status = r.ok ? 'sent' : 'failed';
+        status = 'failed';
       }
     }
 

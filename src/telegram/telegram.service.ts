@@ -1,34 +1,68 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { Telegraf, Markup } from 'telegraf';
 import { LeadsService } from '../leads/leads.service';
+import { PrismaService } from '../database/prisma.service';
 
 @Injectable()
 export class TelegramService implements OnModuleInit {
-  private bot: Telegraf;
+  private bots = new Map<string, Telegraf>();
   private readonly logger = new Logger(TelegramService.name);
-  private userStates = new Map<number, string>(); // simple state management
+  private userStates = new Map<string, string>(); // Format: `${branchId}_${userId}` -> JSON state
 
-  constructor(private readonly leadsService: LeadsService) {}
+  constructor(
+    private readonly leadsService: LeadsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
-  onModuleInit() {
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    if (!token) {
-      this.logger.warn('TELEGRAM_BOT_TOKEN topilmadi. Telegram bot ishlamaydi.');
-      return;
+  async onModuleInit() {
+    this.logger.log('Starting dynamic Telegram bots initialization...');
+    const branches = await this.prisma.branch.findMany({
+      where: { telegramBotToken: { not: null }, isActive: true, deletedAt: null },
+      select: { id: true, telegramBotToken: true, name: true },
+    });
+
+    for (const branch of branches) {
+      if (branch.telegramBotToken && branch.telegramBotToken.trim() !== '') {
+        await this.startBot(branch.id, branch.telegramBotToken, branch.name);
+      }
     }
-
-    this.bot = new Telegraf(token);
-    this.registerCommands();
-    
-    // Webhook o'rniga hozircha long-polling ishlatamiz oson ishlashi uchun
-    this.bot.launch().catch(err => this.logger.error('Telegram bot launch error:', err));
-    this.logger.log('Telegram bot is running...');
   }
 
-  private registerCommands() {
-    this.bot.start((ctx) => {
+  async updateBot(branchId: string, token: string | null | undefined, branchName: string) {
+    // Stop existing bot if running
+    const existingBot = this.bots.get(branchId);
+    if (existingBot) {
+      this.logger.log(`Stopping bot for branch ${branchName}...`);
+      existingBot.stop('Settings changed');
+      this.bots.delete(branchId);
+    }
+
+    if (token) {
+      await this.startBot(branchId, token, branchName);
+    }
+  }
+
+  private async startBot(branchId: string, token: string, branchName: string) {
+    try {
+      const bot = new Telegraf(token);
+      this.registerCommands(bot, branchId, branchName);
+      
+      // We use catch to prevent one faulty token from bringing down the whole app
+      bot.launch().catch(err => {
+        this.logger.error(`Failed to launch bot for branch ${branchName}:`, err);
+      });
+      
+      this.bots.set(branchId, bot);
+      this.logger.log(`Telegram bot started successfully for branch: ${branchName}`);
+    } catch (err) {
+      this.logger.error(`Error initializing bot for branch ${branchName}:`, err);
+    }
+  }
+
+  private registerCommands(bot: Telegraf, branchId: string, branchName: string) {
+    bot.start((ctx) => {
       ctx.reply(
-        `Zahro Dental klinikasiga xush kelibsiz, ${ctx.from.first_name}!\n\nIltimos, telefon raqamingizni yuboring:`,
+        `${branchName} klinikasiga xush kelibsiz, ${ctx.from.first_name}!\n\nIltimos, telefon raqamingizni yuboring:`,
         Markup.keyboard([
           Markup.button.contactRequest('📱 Telefon raqamni yuborish'),
         ])
@@ -37,11 +71,11 @@ export class TelegramService implements OnModuleInit {
       );
     });
 
-    this.bot.on('contact', async (ctx) => {
+    bot.on('contact', async (ctx) => {
       const contact = ctx.message.contact;
+      const stateKey = `${branchId}_${ctx.from.id}`;
       
-      // Save contact info to session/state
-      this.userStates.set(ctx.from.id, JSON.stringify({ phone: contact.phone_number, name: contact.first_name }));
+      this.userStates.set(stateKey, JSON.stringify({ phone: contact.phone_number, name: contact.first_name }));
 
       await ctx.reply(
         'Rahmat! Endi qaysi xizmat bo\'yicha murojaat qilmoqchisiz?',
@@ -55,9 +89,10 @@ export class TelegramService implements OnModuleInit {
       );
     });
 
-    this.bot.action(/service_(.+)/, async (ctx) => {
+    bot.action(/service_(.+)/, async (ctx) => {
       const serviceType = ctx.match[1];
-      const state = this.userStates.get(ctx.from.id);
+      const stateKey = `${branchId}_${ctx.from.id}`;
+      const state = this.userStates.get(stateKey);
       
       let serviceName = 'Boshqa';
       if (serviceType === 'consultation') serviceName = 'Konsultatsiya';
@@ -67,17 +102,17 @@ export class TelegramService implements OnModuleInit {
 
       if (state) {
         const userData = JSON.parse(state);
-        // Create lead in database
         try {
           await this.leadsService.create({
             name: userData.name || ctx.from.first_name,
             phone: userData.phone,
             service: serviceName,
-            source: 'telegram_bot'
+            source: 'telegram_bot',
+            branchId, // inject the correct branchId
           });
           
           await ctx.reply('Sizning murojaatingiz muvaffaqiyatli qabul qilindi. Tez orada ma\'muriyatimiz siz bilan bog\'lanadi!', Markup.removeKeyboard());
-          this.userStates.delete(ctx.from.id);
+          this.userStates.delete(stateKey);
         } catch (error) {
           this.logger.error('Error creating lead:', error);
           await ctx.reply('Kechirasiz, xatolik yuz berdi. Iltimos keyinroq qayta urinib ko\'ring.');
@@ -87,12 +122,13 @@ export class TelegramService implements OnModuleInit {
       }
     });
 
-    // Handle normal messages as 'other' requests if they already provided contact
-    this.bot.on('text', async (ctx) => {
+    bot.on('text', async (ctx) => {
       const text = ctx.message.text;
-      if (text.startsWith('/')) return; // ignore commands
+      if (text.startsWith('/')) return;
       
-      const state = this.userStates.get(ctx.from.id);
+      const stateKey = `${branchId}_${ctx.from.id}`;
+      const state = this.userStates.get(stateKey);
+      
       if (state) {
         const userData = JSON.parse(state);
         try {
@@ -100,11 +136,12 @@ export class TelegramService implements OnModuleInit {
             name: userData.name || ctx.from.first_name,
             phone: userData.phone,
             message: text,
-            source: 'telegram_bot'
+            source: 'telegram_bot',
+            branchId, // inject the correct branchId
           });
           
           await ctx.reply('Sizning xabaringiz va murojaatingiz qabul qilindi!', Markup.removeKeyboard());
-          this.userStates.delete(ctx.from.id);
+          this.userStates.delete(stateKey);
         } catch (error) {
            await ctx.reply('Xatolik yuz berdi.');
         }

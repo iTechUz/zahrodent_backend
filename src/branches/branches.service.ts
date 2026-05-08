@@ -3,10 +3,14 @@ import { PrismaService } from '../database/prisma.service';
 import { Prisma, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { AuthUserView } from '../auth/auth.service';
+import { TelegramService } from '../telegram/telegram.service';
 
 @Injectable()
 export class BranchesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly telegramService: TelegramService,
+  ) {}
 
   async findAll(user: AuthUserView) {
     const where: Prisma.BranchWhereInput = { deletedAt: null };
@@ -179,7 +183,13 @@ export class BranchesService {
       ...(data.eskizEnabled !== undefined && { eskizEnabled: data.eskizEnabled }),
       ...(data.isActive !== undefined && { isActive: data.isActive }),
     };
-    return this.prisma.branch.update({ where: { id }, data: updateData });
+    const updatedBranch = await this.prisma.branch.update({ where: { id }, data: updateData });
+
+    if (data.telegramBotToken !== undefined) {
+      await this.telegramService.updateBot(id, data.telegramBotToken, updatedBranch.name);
+    }
+
+    return updatedBranch;
   }
 
   async remove(id: string) {

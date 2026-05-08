@@ -1,13 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../database/prisma.service';
 
 @Injectable()
 export class EskizService {
   private readonly logger = new Logger(EskizService.name);
-  private accessToken: string | null = null;
+  private accessTokens = new Map<string, string>(); // branchId -> token
   private readonly timeoutMs = Number.parseInt(
     process.env.ESKIZ_HTTP_TIMEOUT_MS || '8000',
     10,
   );
+
+  constructor(private readonly prisma: PrismaService) {}
 
   private get baseUrl(): string {
     return (
@@ -19,10 +22,12 @@ export class EskizService {
     return process.env.ESKIZ_FROM?.trim() || '4546';
   }
 
-  isConfigured(): boolean {
-    const email = process.env.ESKIZ_EMAIL?.trim();
-    const password = process.env.ESKIZ_PASSWORD?.trim();
-    return Boolean(email && password);
+  async isConfigured(branchId: string): Promise<boolean> {
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { eskizEmail: true, eskizToken: true, eskizEnabled: true },
+    });
+    return Boolean(branch?.eskizEnabled && branch?.eskizEmail && branch?.eskizToken);
   }
 
   normalizeMobile(phone: string): string | null {
@@ -45,12 +50,19 @@ export class EskizService {
     }
   }
 
-  private async login(): Promise<string> {
-    const email = process.env.ESKIZ_EMAIL?.trim();
-    const password = process.env.ESKIZ_PASSWORD?.trim();
-    if (!email || !password) {
-      throw new Error('ESKIZ_EMAIL / ESKIZ_PASSWORD sozlanmagan');
+  private async login(branchId: string): Promise<string> {
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { eskizEmail: true, eskizToken: true, name: true },
+    });
+    
+    if (!branch || !branch.eskizEmail || !branch.eskizToken) {
+      throw new Error('Eskiz branch sozlanmagan');
     }
+
+    const email = branch.eskizEmail.trim();
+    const password = branch.eskizToken.trim();
+
     const res = await this.fetchWithTimeout(`${this.baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: {
@@ -61,7 +73,7 @@ export class EskizService {
     });
     const raw = await res.text();
     if (!res.ok) {
-      this.logger.warn(`Eskiz login xato: ${res.status} ${raw.slice(0, 200)}`);
+      this.logger.warn(`Eskiz login xato (${branch.name}): ${res.status} ${raw.slice(0, 200)}`);
       throw new Error(`Eskiz login: HTTP ${res.status}`);
     }
     let json: { data?: { token?: string }; token?: string };
@@ -74,28 +86,31 @@ export class EskizService {
     if (!token) {
       throw new Error('Eskiz login: token topilmadi');
     }
-    this.accessToken = token;
+    this.accessTokens.set(branchId, token);
     return token;
   }
 
-  private async getToken(): Promise<string> {
-    if (this.accessToken) return this.accessToken;
-    return this.login();
+  private async getToken(branchId: string): Promise<string> {
+    const cached = this.accessTokens.get(branchId);
+    if (cached) return cached;
+    return this.login(branchId);
   }
 
   async sendSms(
+    branchId: string,
     mobilePhone: string,
     message: string,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
-    if (!this.isConfigured()) {
-      return { ok: false, error: 'Eskiz sozlanmagan' };
+    const isConf = await this.isConfigured(branchId);
+    if (!isConf) {
+      return { ok: false, error: 'Eskiz ushbu filial uchun sozlanmagan yoki o\'chirilgan' };
     }
     const attempt = async (
       retryOn401: boolean,
     ): Promise<{ ok: true } | { ok: false; error: string }> => {
       let token: string;
       try {
-        token = await this.getToken();
+        token = await this.getToken(branchId);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return { ok: false, error: msg };
@@ -117,12 +132,12 @@ export class EskizService {
         },
       );
       if (res.status === 401 && retryOn401) {
-        this.accessToken = null;
+        this.accessTokens.delete(branchId);
         return attempt(false);
       }
       const raw = await res.text();
       if (!res.ok) {
-        this.logger.warn(`Eskiz SMS xato: ${res.status} ${raw.slice(0, 300)}`);
+        this.logger.warn(`Eskiz SMS xato (Branch ${branchId}): ${res.status} ${raw.slice(0, 300)}`);
         return { ok: false, error: `HTTP ${res.status}: ${raw.slice(0, 200)}` };
       }
       return { ok: true };

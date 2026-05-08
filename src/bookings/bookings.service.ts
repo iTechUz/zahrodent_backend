@@ -16,11 +16,14 @@ import { AuthUserView } from '../auth/auth.service';
 
 import { PrismaService } from '../database/prisma.service';
 
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+
 @Injectable()
 export class BookingsService {
   constructor(
     private readonly bookingsRepository: BookingsRepository,
     private readonly prisma: PrismaService,
+    private readonly auditLogs: AuditLogsService,
   ) {}
 
   async getStats(user: AuthUserView) {
@@ -65,7 +68,7 @@ export class BookingsService {
 
   async findAll(
     query: PaginationQueryDto & {
-      status?: BookingStatus;
+      status?: BookingStatus | string;
       source?: string;
       patientId?: string;
       doctorId?: string;
@@ -96,7 +99,7 @@ export class BookingsService {
     }
 
     if (patientId) where.patientId = patientId;
-    if (status && status !== 'all') where.status = status;
+    if (status && status !== 'all') where.status = status as BookingStatus;
     if (source && source !== 'all') where.source = source;
 
     if (search?.trim()) {
@@ -180,6 +183,16 @@ export class BookingsService {
       notes: dto.notes ?? '',
       service: dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
     });
+
+    await this.auditLogs.log({
+      branchId: b.branchId,
+      userId: user.id,
+      action: 'CREATE',
+      entity: 'BOOKING',
+      entityId: b.id,
+      newValue: b,
+    });
+
     return this.toResponse(b);
   }
 
@@ -207,12 +220,32 @@ export class BookingsService {
         ? { disconnect: true } 
         : dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
     });
+
+    await this.auditLogs.log({
+      branchId: b.branchId,
+      userId: user.id,
+      action: 'UPDATE',
+      entity: 'BOOKING',
+      entityId: b.id,
+      oldValue: current,
+      newValue: b,
+    });
+
     return this.toResponse(b);
   }
 
   async remove(id: string, user: AuthUserView) {
-    await this.ensureExists(id, user);
+    const b = await this.ensureExists(id, user);
     await this.bookingsRepository.softDelete(id);
+
+    await this.auditLogs.log({
+      branchId: b.branchId,
+      userId: user.id,
+      action: 'DELETE',
+      entity: 'BOOKING',
+      entityId: id,
+    });
+
     return { id };
   }
 

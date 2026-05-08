@@ -83,26 +83,39 @@ export class DoctorsService {
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const stats = await this.prisma.doctor.findMany({
+    const doctors = await this.prisma.doctor.findMany({
       where: { deletedAt: null, isActive: true },
-      select: {
-        id: true,
+      include: {
         user: { select: { name: true } },
-        _count: {
-          select: {
-            bookings: {
-              where: { startTime: { gte: startOfMonth } }
-            }
-          }
+        bookings: {
+          where: { startTime: { gte: startOfMonth } },
+          select: { status: true }
+        },
+        payments: {
+          where: { createdAt: { gte: startOfMonth }, type: 'INCOME' },
+          select: { amount: true }
         }
       }
     });
 
-    return stats.map(s => ({
-      doctorId: s.id,
-      name: s.user?.name || 'Noma\'lum',
-      bookingsCount: s._count.bookings
-    }));
+    return doctors.map(d => {
+      const totalBookings = d.bookings.length;
+      const completedBookings = d.bookings.filter(b => b.status === 'COMPLETED').length;
+      const totalRevenue = d.payments.reduce((sum, p) => sum + Number(p.amount), 0);
+      const conversionRate = totalBookings > 0 ? Math.round((completedBookings / totalBookings) * 100) : 0;
+      const avgCheck = completedBookings > 0 ? Math.round(totalRevenue / completedBookings) : 0;
+
+      return {
+        doctorId: d.id,
+        name: d.user?.name || 'Noma\'lum',
+        specialty: d.specialty,
+        totalBookings,
+        completedBookings,
+        totalRevenue,
+        conversionRate,
+        avgCheck
+      };
+    });
   }
 
   async create(dto: CreateDoctorDto, currentUser: AuthUserView): Promise<DoctorResponse> {
