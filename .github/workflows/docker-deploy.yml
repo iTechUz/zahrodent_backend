@@ -21,7 +21,6 @@ jobs:
       # 🐳 Docker login
       - name: Login to Docker Hub
         run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u 10449 --password-stdin
-
       # 🔨 Build & push
       - name: Build and push Docker image
         run: |
