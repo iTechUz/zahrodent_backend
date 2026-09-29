@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiOperation,
   ApiParam,
   ApiTags,
@@ -25,7 +26,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { AuthUserView } from '../auth/auth.service';
-import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { PatientsQueryDto } from './dto/patients-query.dto';
 
 @ApiTags('patients')
 @ApiBearerAuth('JWT')
@@ -43,10 +44,7 @@ export class PatientsController {
 
   @Get()
   @ApiOperation({ summary: "Bemorlar ro'yxati" })
-  findAll(
-    @Query() query: PaginationQueryDto & { source?: string },
-    @GetUser() user: AuthUserView,
-  ) {
+  findAll(@Query() query: PatientsQueryDto, @GetUser() user: AuthUserView) {
     return this.patientsService.findAll(query, user);
   }
 
@@ -76,8 +74,13 @@ export class PatientsController {
   }
 
   @Delete(':id')
-  @Roles('admin', 'receptionist')
-  @ApiOperation({ summary: "Bemorni o'chirish" })
+  @Roles('admin')
+  @ApiOperation({
+    summary: "Bemorni o'chirish (faqat admin)",
+    description:
+      "Tashrif yoki to'lovlari bor bemor o'chirilmaydi — 409 qaytadi.",
+  })
+  @ApiConflictResponse({ description: "Bemorda tashrif/to'lov tarixi bor" })
   @ApiParam({ name: 'id' })
   remove(@Param('id') id: string, @GetUser() user: AuthUserView) {
     return this.patientsService.remove(id, user);
@@ -91,13 +94,13 @@ export class PatientsController {
     @Body() dto: CreatePatientCommentDto,
     @GetUser() user: AuthUserView,
   ) {
-    return this.patientsService.addComment({ ...dto, patientId: id }, user.id);
+    return this.patientsService.addComment({ ...dto, patientId: id }, user);
   }
 
   @Get(':id/comments')
   @ApiOperation({ summary: "Bemor izohlari ro'yxati" })
   @ApiParam({ name: 'id' })
-  findComments(@Param('id') id: string) {
-    return this.patientsService.findComments(id);
+  findComments(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.patientsService.findComments(id, user);
   }
 }

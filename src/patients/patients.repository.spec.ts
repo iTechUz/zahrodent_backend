@@ -5,9 +5,12 @@ describe('PatientsRepository', () => {
   let prisma: any;
   let repo: PatientsRepository;
   const include = {
-    payments: { where: { status: 'paid' }, select: { amount: true } },
+    payments: {
+      where: { type: 'INCOME' },
+      select: { amount: true, status: true, discount: true },
+    },
     visits: { where: { status: 'completed' }, select: { price: true } },
-    assignedDoctor: { select: { firstName: true, lastName: true } },
+    assignedDoctor: { select: { id: true, firstName: true, lastName: true } },
   };
 
   beforeEach(() => {
@@ -26,7 +29,7 @@ describe('PatientsRepository', () => {
     repo = new PatientsRepository(prisma as PrismaService);
   });
 
-  it('findAll — balans uchun paid payments va completed visits include', async () => {
+  it('findAll — balans uchun INCOME payments va completed visits include', async () => {
     prisma.patient.count.mockResolvedValue(0);
     await repo.findAll({ source: 'phone' }, { skip: 5, take: 5 });
     expect(prisma.patient.findMany).toHaveBeenCalledWith({
@@ -55,9 +58,10 @@ describe('PatientsRepository', () => {
   it('count / groupBySource', async () => {
     prisma.patient.count.mockResolvedValue(2);
     await expect(repo.count({ id: 'p1' })).resolves.toBe(2);
-    await repo.groupBySource();
+    await repo.groupBySource({ source: 'x' });
     expect(prisma.patient.groupBy).toHaveBeenCalledWith({
       by: ['source'],
+      where: { source: 'x' },
       _count: { source: true },
       orderBy: { _count: { source: 'desc' } },
       take: 1,
@@ -93,14 +97,49 @@ describe('PatientsRepository', () => {
     await repo.create({ firstName: 'A' } as any);
     expect(prisma.patient.create).toHaveBeenCalledWith({
       data: { firstName: 'A' },
+      include,
     });
     await repo.update('p1', { firstName: 'B' });
     expect(prisma.patient.update).toHaveBeenCalledWith({
       where: { id: 'p1' },
       data: { firstName: 'B' },
+      include,
     });
     await repo.delete('p1');
     expect(prisma.patient.delete).toHaveBeenCalledWith({ where: { id: 'p1' } });
+  });
+
+  it('findAll — orderBy berilsa ishlatiladi', async () => {
+    prisma.patient.count.mockResolvedValue(0);
+    await repo.findAll({}, { orderBy: [{ age: 'asc' }, { id: 'asc' }] });
+    expect(prisma.patient.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: [{ age: 'asc' }, { id: 'asc' }] }),
+    );
+  });
+
+  it('findDebtors — raw SQL (INCOME paid|partial + chegirma − completed visits < 0)', async () => {
+    prisma.$queryRaw = jest.fn().mockResolvedValue([{ id: 'p1', balance: -5 }]);
+    await expect(repo.findDebtors()).resolves.toEqual([
+      { id: 'p1', balance: -5 },
+    ]);
+    const sql = prisma.$queryRaw.mock.calls[0][0];
+    const text = sql.strings.join('?');
+    expect(text).toContain("WHERE type = 'INCOME'");
+    expect(text).toContain("status IN ('paid', 'partial')");
+    expect(text).toContain("WHERE status = 'completed'");
+    expect(text).toContain('< 0');
+  });
+
+  it('countHistory — visits va payments soni', async () => {
+    prisma.visit = { count: jest.fn().mockResolvedValue(2) };
+    prisma.payment = { count: jest.fn().mockResolvedValue(0) };
+    await expect(repo.countHistory('p1')).resolves.toEqual({
+      visits: 2,
+      payments: 0,
+    });
+    expect(prisma.visit.count).toHaveBeenCalledWith({
+      where: { patientId: 'p1' },
+    });
   });
 
   it('comments — author include, yangi birinchi', async () => {
