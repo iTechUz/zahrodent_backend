@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { VisitsService } from './visits.service';
 import { VisitsRepository } from './visits.repository';
 import type { AuthUserView } from '../auth/auth.service';
@@ -111,14 +111,14 @@ describe('VisitsService', () => {
     it('404', async () => {
       repo.findById.mockResolvedValue(null);
       await expect(service.findOne('x', admin)).rejects.toThrow(
-        new NotFoundException('Visit not found'),
+        new NotFoundException('Tashrif topilmadi'),
       );
     });
 
     it('doctor — begona tashrif 404 (access restricted)', async () => {
       repo.findById.mockResolvedValue(visit({ doctorId: 'other' }));
       await expect(service.findOne('v1', doctor)).rejects.toThrow(
-        'Visit not found (access restricted)',
+        new NotFoundException('Tashrif topilmadi'),
       );
     });
 
@@ -131,18 +131,24 @@ describe('VisitsService', () => {
   });
 
   describe('create', () => {
-    it('minimal dto — defaultlar va bugungi sana', async () => {
+    afterEach(() => jest.useRealTimers());
+
+    it('minimal dto — defaultlar va bugungi sana (Asia/Tashkent)', async () => {
+      // 2026-06-17 20:00Z = 2026-06-18 01:00 Toshkent
       jest.useFakeTimers({ now: new Date('2026-06-17T20:00:00.000Z') });
-      await service.create({
-        patientId: 'p1',
-        doctorId: 'd1',
-        status: 'not-started',
-      });
+      await service.create(
+        {
+          patientId: 'p1',
+          doctorId: 'd1',
+          status: 'not-started',
+        },
+        admin,
+      );
       expect(repo.create).toHaveBeenCalledWith({
         patient: { connect: { id: 'p1' } },
         doctor: { connect: { id: 'd1' } },
         booking: undefined,
-        date: new Date('2026-06-17T00:00:00.000Z'),
+        date: new Date('2026-06-18T00:00:00.000Z'),
         status: 'not-started',
         diagnosis: '',
         treatment: '',
@@ -152,17 +158,20 @@ describe('VisitsService', () => {
     });
 
     it('to‘liq dto — booking connect va berilgan sana', async () => {
-      await service.create({
-        patientId: 'p1',
-        doctorId: 'd1',
-        bookingId: 'b1',
-        date: '2026-06-10',
-        status: 'completed',
-        diagnosis: 'D',
-        treatment: 'T',
-        notes: 'N',
-        price: 150_000,
-      });
+      await service.create(
+        {
+          patientId: 'p1',
+          doctorId: 'd1',
+          bookingId: 'b1',
+          date: '2026-06-10',
+          status: 'completed',
+          diagnosis: 'D',
+          treatment: 'T',
+          notes: 'N',
+          price: 150_000,
+        },
+        admin,
+      );
       expect(repo.create).toHaveBeenCalledWith(
         expect.objectContaining({
           booking: { connect: { id: 'b1' } },
@@ -175,12 +184,37 @@ describe('VisitsService', () => {
       );
     });
 
-    // BUG (visits.service.ts:63 + visits.controller.ts:53-58): doctors may
-    // POST /visits, but create() ignores the caller — a doctor can create a
-    // visit attributed to any other doctorId. Likewise update() lets a doctor
-    // reassign doctorId (visits.service.ts:92-95). Expected: for role
-    // 'doctor', doctorId is forced to user.doctorId (or 403 on mismatch).
-    it.todo('doctor — boshqa shifokor nomidan tashrif yarata olmasligi kerak');
+    // Fixed: create() ignored the caller, so a doctor could create a visit
+    // attributed to any doctorId. Now doctorId is forced to the doctor's own.
+    it('doctor — boshqa shifokor nomidan tashrif yarata olmaydi (o‘z doctorId majburiy)', async () => {
+      await service.create(
+        { patientId: 'p1', doctorId: 'd2', status: 'completed' },
+        doctor,
+      );
+      expect(repo.create.mock.calls[0][0].doctor).toEqual({
+        connect: { id: 'd1' },
+      });
+    });
+
+    it('admin — istalgan shifokor nomidan yaratadi', async () => {
+      await service.create(
+        { patientId: 'p1', doctorId: 'd2', status: 'completed' },
+        admin,
+      );
+      expect(repo.create.mock.calls[0][0].doctor).toEqual({
+        connect: { id: 'd2' },
+      });
+    });
+
+    it('doctor profili yo‘q — 403, yaratilmaydi', async () => {
+      await expect(
+        service.create(
+          { patientId: 'p1', doctorId: 'd2', status: 'completed' },
+          { ...doctor, doctorId: undefined },
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(repo.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('update', () => {
@@ -234,6 +268,13 @@ describe('VisitsService', () => {
         doctor: { connect: { id: 'd2' } },
         booking: { connect: { id: 'b2' } },
       });
+    });
+
+    it('doctor — tashrifni boshqa shifokorga o‘tkaza olmaydi (doctorId e’tiborsiz)', async () => {
+      repo.findById.mockResolvedValue(visit());
+      await service.update('v1', { doctorId: 'd2', notes: 'x' }, doctor);
+      expect(repo.update.mock.calls[0][1].doctor).toBeUndefined();
+      expect(repo.update.mock.calls[0][1].notes).toBe('x');
     });
 
     it('bookingId "" — disconnect', async () => {

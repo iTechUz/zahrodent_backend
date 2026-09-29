@@ -8,7 +8,12 @@ import {
   Matches,
 } from 'class-validator';
 
-const STATUSES = ['not-started', 'in-progress', 'completed'] as const;
+export const VISIT_STATUSES = [
+  'not-started',
+  'in-progress',
+  'completed',
+] as const;
+const STATUSES = VISIT_STATUSES;
 
 export class CreateVisitDto {
   @IsString()
