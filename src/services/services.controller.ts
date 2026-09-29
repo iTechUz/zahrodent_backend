@@ -22,7 +22,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
-import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { ServicesQueryDto } from './dto/services-query.dto';
 
 @ApiTags('services')
 @ApiBearerAuth('JWT')
@@ -33,7 +33,7 @@ export class ServicesController {
   constructor(private readonly servicesService: ServicesService) {}
 
   @Get('stats')
-  @Roles('admin')
+  @Roles('admin', 'receptionist')
   @ApiOperation({ summary: 'Stats for services page' })
   getStats() {
     return this.servicesService.getStats();
@@ -41,7 +41,7 @@ export class ServicesController {
 
   @Get()
   @ApiOperation({ summary: 'Xizmatlar katalogi' })
-  findAll(@Query() query: PaginationQueryDto & { category?: string }) {
+  findAll(@Query() query: ServicesQueryDto) {
     return this.servicesService.findAll(query);
   }
 

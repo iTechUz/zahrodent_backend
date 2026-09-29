@@ -19,6 +19,7 @@ import {
 import { LeadsService } from './leads.service';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
+import { LeadsQueryDto } from './dto/leads-query.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -33,7 +34,7 @@ export class LeadsController {
 
   @Get()
   @ApiOperation({ summary: "Murojaatlar (lids) ro'yxati" })
-  findAll(@Query() query: any) {
+  findAll(@Query() query: LeadsQueryDto) {
     return this.leadsService.findAll(query);
   }
 
@@ -43,30 +44,24 @@ export class LeadsController {
   findOne(@Param('id') id: string) {
     return this.leadsService.findOne(id);
   }
-  
+
   @Post()
-  @ApiOperation({ summary: 'Qo\'lda murojaat qo\'shish' })
+  @ApiOperation({ summary: "Qo'lda murojaat qo'shish" })
   create(@Body() dto: CreateLeadDto) {
     return this.leadsService.create(dto);
   }
-  
+
   @Patch(':id')
   @ApiOperation({ summary: 'Murojaatni yangilash' })
   @ApiParam({ name: 'id' })
-  update(
-    @Param('id') id: string,
-    @Body() dto: UpdateLeadDto,
-  ) {
+  update(@Param('id') id: string, @Body() dto: UpdateLeadDto) {
     return this.leadsService.update(id, dto);
   }
 
   @Patch(':id/status')
   @ApiOperation({ summary: 'Murojaat holatini yangilash' })
   @ApiParam({ name: 'id' })
-  updateStatus(
-    @Param('id') id: string,
-    @Body() dto: UpdateLeadDto,
-  ) {
+  updateStatus(@Param('id') id: string, @Body() dto: UpdateLeadDto) {
     return this.leadsService.update(id, dto);
   }
 

@@ -1,10 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Service } from '@prisma/client';
 import { ServicesRepository } from './services.repository';
-import {
-  PaginationQueryDto,
-  PaginatedResponse,
-} from '../common/dto/pagination.dto';
+import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
+import { ServicesQueryDto } from './dto/services-query.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
 
@@ -13,8 +11,8 @@ export class ServicesService {
   constructor(private readonly servicesRepository: ServicesRepository) {}
 
   async findAll(
-    query: PaginationQueryDto & { category?: string },
-  ): Promise<PaginatedResponse<any>> {
+    query: ServicesQueryDto,
+  ): Promise<PaginatedResponse<ReturnType<ServicesService['toResponse']>>> {
     const { search, category } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
@@ -37,6 +35,7 @@ export class ServicesService {
     const { data, total } = await this.servicesRepository.findAll(where, {
       skip,
       take: limitNum,
+      ...orderByOption<Prisma.ServiceOrderByWithRelationInput[]>(query, 'name'),
     });
     return { data: data.map((x) => this.toResponse(x)), total };
   }

@@ -1,5 +1,14 @@
-import { IsString, IsOptional, IsEnum, IsNotEmpty } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+
+export const LEAD_STATUSES = [
+  'new',
+  'contacted',
+  'consultation',
+  'proposal',
+  'converted',
+  'cancelled',
+] as const;
 
 export class CreateLeadDto {
   @ApiProperty({ example: 'Ali Valiyev' })
@@ -27,13 +36,16 @@ export class CreateLeadDto {
   @IsString()
   source?: string;
 
-  @ApiProperty({ example: 'Yaxshi mijoz, konsultatsiya kerak', required: false })
+  @ApiProperty({
+    example: 'Yaxshi mijoz, konsultatsiya kerak',
+    required: false,
+  })
   @IsOptional()
   @IsString()
   notes?: string;
 
-  @ApiProperty({ enum: ['new', 'contacted', 'consultation', 'proposal', 'converted', 'cancelled'], required: false })
+  @ApiProperty({ enum: LEAD_STATUSES, required: false })
   @IsOptional()
-  @IsEnum(['new', 'contacted', 'consultation', 'proposal', 'converted', 'cancelled'])
+  @IsIn(LEAD_STATUSES)
   status?: string;
 }

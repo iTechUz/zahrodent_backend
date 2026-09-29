@@ -57,7 +57,7 @@ describe('LeadsService', () => {
     });
 
     it('string page/limit raqamga aylanadi', async () => {
-      await service.findAll({ page: '2', limit: '25' });
+      await service.findAll({ page: 2, limit: 25 });
       expect(repo.findAll).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 50, take: 25 }),
       );
@@ -80,23 +80,35 @@ describe('LeadsService', () => {
       });
     });
 
-    it('faqat startDate', async () => {
+    it('status "all" — filtr yo‘q; source filtri', async () => {
+      await service.findAll({ status: 'all', source: 'crm' });
+      expect(repo.findAll.mock.calls[0][0].where).toEqual({ source: 'crm' });
+    });
+
+    // created_at is a timestamp: day bounds are Asia/Tashkent (UTC+5),
+    // independent of the server's TZ.
+    it('faqat startDate — 00:00 Toshkent (oldingi kun 19:00Z)', async () => {
       await service.findAll({ startDate: '2026-06-01' });
       expect(repo.findAll.mock.calls[0][0].where).toEqual({
-        createdAt: { gte: new Date('2026-06-01') },
+        createdAt: { gte: new Date('2026-05-31T19:00:00.000Z') },
       });
     });
 
-    it('endDate — kun oxirigacha (inclusive)', async () => {
+    it('endDate — Toshkent kunining oxirigacha (inclusive)', async () => {
       await service.findAll({ startDate: '2026-06-01', endDate: '2026-06-10' });
-      const expectedEnd = new Date('2026-06-10');
-      expectedEnd.setHours(23, 59, 59, 999);
       const { createdAt } = repo.findAll.mock.calls[0][0].where as any;
-      expect(createdAt.gte).toEqual(new Date('2026-06-01'));
-      expect(createdAt.lte).toEqual(expectedEnd);
-      expect(createdAt.lte.getTime()).toBeGreaterThan(
-        new Date('2026-06-10').getTime(),
-      );
+      expect(createdAt).toEqual({
+        gte: new Date('2026-05-31T19:00:00.000Z'),
+        lte: new Date('2026-06-10T18:59:59.999Z'),
+      });
+    });
+
+    it('sortBy/order — orderBy uzatiladi', async () => {
+      await service.findAll({ sortBy: 'name', order: 'asc' });
+      expect(repo.findAll.mock.calls[0][0].orderBy).toEqual([
+        { name: 'asc' },
+        { id: 'asc' },
+      ]);
     });
   });
 
@@ -104,7 +116,7 @@ describe('LeadsService', () => {
     it('findOne — topilmasa 404', async () => {
       repo.findById.mockResolvedValue(null);
       await expect(service.findOne('x')).rejects.toThrow(
-        new NotFoundException('Lead not found'),
+        new NotFoundException('Murojaat topilmadi'),
       );
     });
 

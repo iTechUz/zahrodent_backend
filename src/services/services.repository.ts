@@ -8,12 +8,16 @@ export class ServicesRepository {
 
   async findAll(
     where?: Prisma.ServiceWhereInput,
-    opts?: { skip?: number; take?: number },
+    opts?: {
+      skip?: number;
+      take?: number;
+      orderBy?: Prisma.ServiceOrderByWithRelationInput[];
+    },
   ): Promise<{ data: Service[]; total: number }> {
     const [data, total] = await Promise.all([
       this.prisma.service.findMany({
         where,
-        orderBy: [{ category: 'asc' }, { name: 'asc' }],
+        orderBy: opts?.orderBy ?? [{ category: 'asc' }, { name: 'asc' }],
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
