@@ -1,9 +1,20 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MinLength, Matches } from 'class-validator';
+import {
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  Matches,
+} from 'class-validator';
+
+export const USER_ROLES = ['admin', 'doctor', 'receptionist'] as const;
 
 export class CreateUserDto {
   @ApiProperty({ example: 'Shokir Xodjayev' })
   @IsString()
+  @MinLength(1)
+  @MaxLength(100)
   name: string;
 
   @ApiProperty({ example: '+998901234567' })
@@ -18,12 +29,11 @@ export class CreateUserDto {
   @MinLength(6)
   password: string;
 
-  @ApiProperty({
-    example: 'receptionist',
-    enum: ['admin', 'doctor', 'receptionist'],
+  @ApiProperty({ example: 'receptionist', enum: USER_ROLES })
+  @IsIn(USER_ROLES, {
+    message: "role faqat admin, doctor yoki receptionist bo'lishi mumkin",
   })
-  @IsString()
-  role: string;
+  role: (typeof USER_ROLES)[number];
 
   @ApiPropertyOptional({ example: 'Terapevt' })
   @IsOptional()
