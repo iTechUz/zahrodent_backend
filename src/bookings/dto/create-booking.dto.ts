@@ -5,9 +5,16 @@ import {
   MinLength,
   Matches,
 } from 'class-validator';
+import { TIME_HH_MM_REGEX } from '../../common/utils/date.util';
 
-const SOURCES = ['walk-in', 'telegram', 'website', 'phone'] as const;
-const STATUSES = [
+export const BOOKING_SOURCES = [
+  'walk-in',
+  'telegram',
+  'website',
+  'phone',
+] as const;
+const SOURCES = BOOKING_SOURCES;
+export const BOOKING_STATUSES = [
   'pending',
   'confirmed',
   'arrived',
@@ -15,6 +22,7 @@ const STATUSES = [
   'completed',
   'cancelled',
 ] as const;
+const STATUSES = BOOKING_STATUSES;
 
 export class CreateBookingDto {
   @IsString()
@@ -32,7 +40,9 @@ export class CreateBookingDto {
   date: string;
 
   @IsString()
-  @MinLength(1)
+  @Matches(TIME_HH_MM_REGEX, {
+    message: 'time HH:mm formatida bo‘lishi kerak (00:00–23:59)',
+  })
   time: string;
 
   @IsIn(SOURCES)

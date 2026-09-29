@@ -85,4 +85,42 @@ describe('BookingsRepository', () => {
     await repo.delete('b1');
     expect(prisma.booking.delete).toHaveBeenCalledWith({ where: { id: 'b1' } });
   });
+
+  it('findAll — orderBy berilsa standart o‘rniga ishlatiladi', async () => {
+    await repo.findAll({}, { orderBy: [{ time: 'asc' }, { id: 'asc' }] });
+    expect(prisma.booking.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: [{ time: 'asc' }, { id: 'asc' }] }),
+    );
+  });
+
+  it('withDoctorDayLock — tranzaksiya ichida advisory lock, keyin fn(tx)', async () => {
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      booking: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    prisma.$transaction = jest.fn(async (cb: any) => cb(tx));
+    const fn = jest.fn(async (t: any) => {
+      await repo.findManyWithService({ doctorId: 'd1' }, t);
+      return 'done';
+    });
+    await expect(repo.withDoctorDayLock('d1', '2026-06-10', fn)).resolves.toBe(
+      'done',
+    );
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    const [strings, key] = tx.$executeRaw.mock.calls[0];
+    expect(strings.join('?')).toContain('pg_advisory_xact_lock(hashtext(?))');
+    expect(key).toBe('booking:d1:2026-06-10');
+    // queries inside the lock use the transaction client
+    expect(tx.booking.findMany).toHaveBeenCalled();
+    expect(prisma.booking.findMany).not.toHaveBeenCalled();
+  });
+
+  it('findDoctorAvailability — schedule va daysOff', async () => {
+    prisma.doctor = { findUnique: jest.fn().mockResolvedValue(null) };
+    await repo.findDoctorAvailability('d1');
+    expect(prisma.doctor.findUnique).toHaveBeenCalledWith({
+      where: { id: 'd1' },
+      select: { id: true, schedule: true, daysOff: true },
+    });
+  });
 });
