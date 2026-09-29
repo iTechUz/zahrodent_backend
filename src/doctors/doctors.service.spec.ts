@@ -1,4 +1,5 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { DoctorsService } from './doctors.service';
 import { DoctorsRepository } from './doctors.repository';
 import { UsersService } from '../users/users.service';
@@ -17,9 +18,15 @@ describe('DoctorsService', () => {
       | 'getActiveCountToday'
       | 'getTotalVisitsCount'
       | 'getDetailedEfficiencyStats'
+      | 'createWithUser'
+      | 'updateWithUser'
+      | 'deleteWithUser'
+      | 'countHistory'
     >
   >;
-  let users: jest.Mocked<Pick<UsersService, 'create' | 'update' | 'remove'>>;
+  let users: jest.Mocked<
+    Pick<UsersService, 'buildCreateData' | 'buildUpdateData'>
+  >;
 
   const doc = (partial: Record<string, unknown> = {}) =>
     ({
@@ -47,11 +54,21 @@ describe('DoctorsService', () => {
       getActiveCountToday: jest.fn(),
       getTotalVisitsCount: jest.fn(),
       getDetailedEfficiencyStats: jest.fn(),
+      createWithUser: jest.fn().mockResolvedValue(doc()),
+      updateWithUser: jest.fn().mockResolvedValue(doc()),
+      deleteWithUser: jest.fn().mockResolvedValue(undefined),
+      countHistory: jest.fn().mockResolvedValue({ bookings: 0, visits: 0 }),
     };
     users = {
-      create: jest.fn().mockResolvedValue({ id: 'u1' } as any),
-      update: jest.fn(),
-      remove: jest.fn(),
+      buildCreateData: jest.fn(async (d: any) => ({
+        name: d.name,
+        phone: d.phone,
+        role: d.role,
+        passwordHash: `hashed:${d.password}`,
+      })) as any,
+      buildUpdateData: jest.fn(async (_id: string, d: any) => ({
+        name: d.name,
+      })) as any,
     };
     service = new DoctorsService(
       repo as unknown as DoctorsRepository,
@@ -126,7 +143,7 @@ describe('DoctorsService', () => {
     it('topilmasa 404', async () => {
       repo.findById.mockResolvedValue(null);
       await expect(service.findOne('x')).rejects.toThrow(
-        new NotFoundException('Doctor not found'),
+        new NotFoundException('Shifokor topilmadi'),
       );
     });
 
@@ -146,17 +163,19 @@ describe('DoctorsService', () => {
 
     it('parolsiz — user yaratilmaydi', async () => {
       await service.create(dto);
-      expect(users.create).not.toHaveBeenCalled();
-      expect(repo.create).toHaveBeenCalledWith({
-        ...dto,
-        avatar: undefined,
-        user: undefined,
-        schedule: undefined,
-        daysOff: undefined,
-      });
+      expect(users.buildCreateData).not.toHaveBeenCalled();
+      expect(repo.createWithUser).toHaveBeenCalledWith(
+        {
+          ...dto,
+          avatar: undefined,
+          schedule: undefined,
+          daysOff: undefined,
+        },
+        null,
+      );
     });
 
-    it('parol bilan — doctor rolida user yaratib connect qiladi', async () => {
+    it('parol bilan — doctor rolidagi user ma’lumoti bitta tranzaksiyaga uzatiladi', async () => {
       const schedule = [
         { day: 1, startTime: '09:00', endTime: '18:00', isWorking: true },
       ];
@@ -167,7 +186,7 @@ describe('DoctorsService', () => {
         schedule,
         daysOff: ['2026-06-01'],
       });
-      expect(users.create).toHaveBeenCalledWith({
+      expect(users.buildCreateData).toHaveBeenCalledWith({
         name: 'Aziz Karimov',
         phone: '+998901112233',
         password: 'secret1',
@@ -175,30 +194,38 @@ describe('DoctorsService', () => {
         specialty: 'Terapevt',
         avatar: 'a.png',
       });
-      expect(repo.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          user: { connect: { id: 'u1' } },
-          schedule,
-          daysOff: ['2026-06-01'],
-        }),
+      expect(repo.createWithUser).toHaveBeenCalledWith(
+        expect.objectContaining({ schedule, daysOff: ['2026-06-01'] }),
+        {
+          name: 'Aziz Karimov',
+          phone: '+998901112233',
+          role: 'doctor',
+          passwordHash: 'hashed:secret1',
+        },
       );
     });
 
-    it('user yaratish xatosi (masalan 409) — doctor yaratilmaydi', async () => {
-      users.create.mockRejectedValue(new Error('conflict'));
+    it('telefon band (409) — hech narsa yozilmaydi', async () => {
+      users.buildCreateData.mockRejectedValue(new ConflictException('band'));
       await expect(
         service.create({ ...dto, password: 'secret1' }),
-      ).rejects.toThrow('conflict');
-      expect(repo.create).not.toHaveBeenCalled();
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(repo.createWithUser).not.toHaveBeenCalled();
     });
 
-    // BUG (doctors.service.ts:56-77): user and doctor are created in two
-    // separate writes without a transaction; if doctorsRepository.create
-    // fails, the freshly created login user is left orphaned (and the phone
-    // is then "taken" for the retry → 409).
-    it.todo(
-      'create — doctor yaratish yiqilsa user ham qaytarilishi (rollback) kerak',
-    );
+    // Fixed: user and doctor used to be two separate writes — a failing
+    // doctor insert left an orphaned login user. Now both happen inside
+    // repo.createWithUser (one $transaction), so the error propagates and
+    // nothing is committed.
+    it('create — doctor yaratish yiqilsa user ham qaytariladi (bitta tranzaksiya)', async () => {
+      repo.createWithUser.mockRejectedValue(new Error('doctor insert failed'));
+      await expect(
+        service.create({ ...dto, password: 'secret1' }),
+      ).rejects.toThrow('doctor insert failed');
+      // no separate, non-transactional user write exists anymore
+      expect(repo.create).not.toHaveBeenCalled();
+      expect(repo.createWithUser).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('update', () => {
@@ -207,30 +234,22 @@ describe('DoctorsService', () => {
       await expect(service.update('x', {})).rejects.toBeInstanceOf(
         NotFoundException,
       );
-      expect(repo.update).not.toHaveBeenCalled();
+      expect(repo.updateWithUser).not.toHaveBeenCalled();
     });
 
-    it('parolsiz — user tegilmaydi, userId saqlanadi', async () => {
+    it('parolsiz — user tegilmaydi', async () => {
       repo.findById.mockResolvedValue(doc({ userId: 'u5' }));
       await service.update('d1', { specialty: 'Ortoped' });
-      expect(users.update).not.toHaveBeenCalled();
-      expect(users.create).not.toHaveBeenCalled();
-      expect(repo.update).toHaveBeenCalledWith(
+      expect(users.buildUpdateData).not.toHaveBeenCalled();
+      expect(users.buildCreateData).not.toHaveBeenCalled();
+      expect(repo.updateWithUser).toHaveBeenCalledWith(
         'd1',
-        expect.objectContaining({
-          specialty: 'Ortoped',
-          user: { connect: { id: 'u5' } },
-        }),
+        expect.objectContaining({ specialty: 'Ortoped' }),
+        null,
       );
     });
 
-    it('parolsiz va user yo‘q — user undefined', async () => {
-      repo.findById.mockResolvedValue(doc());
-      await service.update('d1', { firstName: 'B' });
-      expect(repo.update.mock.calls[0][1].user).toBeUndefined();
-    });
-
-    it('parol + mavjud user — yangi ism bilan update', async () => {
+    it('parol + mavjud user — yangi ism bilan update (tranzaksiyada)', async () => {
       repo.findById.mockResolvedValue(doc({ userId: 'u5' }));
       await service.update('d1', {
         password: 'newpass',
@@ -238,19 +257,22 @@ describe('DoctorsService', () => {
         lastName: 'Aliyev',
         phone: '+998909999999',
       });
-      expect(users.update).toHaveBeenCalledWith('u5', {
+      expect(users.buildUpdateData).toHaveBeenCalledWith('u5', {
         name: 'Bek Aliyev',
         phone: '+998909999999',
         password: 'newpass',
         specialty: undefined,
         avatar: undefined,
       });
+      expect(repo.updateWithUser.mock.calls[0][2]).toEqual({
+        update: { id: 'u5', data: { name: 'Bek Aliyev' } },
+      });
     });
 
     it('parol + mavjud user — ism/telefon berilmasa eski qiymatlar', async () => {
       repo.findById.mockResolvedValue(doc({ userId: 'u5' }));
       await service.update('d1', { password: 'newpass', firstName: 'Only' });
-      expect(users.update).toHaveBeenCalledWith(
+      expect(users.buildUpdateData).toHaveBeenCalledWith(
         'u5',
         expect.objectContaining({
           name: 'Aziz Karimov',
@@ -259,11 +281,10 @@ describe('DoctorsService', () => {
       );
     });
 
-    it('parol + user yo‘q — yangi user yaratib bog‘laydi (fallback qiymatlar)', async () => {
+    it('parol + user yo‘q — yangi user yaratish ma’lumoti (fallback qiymatlar)', async () => {
       repo.findById.mockResolvedValue(doc({ avatar: 'old.png' }));
-      users.create.mockResolvedValue({ id: 'u7' } as any);
       await service.update('d1', { password: 'newpass', lastName: 'Yangi' });
-      expect(users.create).toHaveBeenCalledWith({
+      expect(users.buildCreateData).toHaveBeenCalledWith({
         name: 'Aziz Yangi',
         phone: '+998901112233',
         password: 'newpass',
@@ -271,47 +292,71 @@ describe('DoctorsService', () => {
         specialty: 'Terapevt',
         avatar: 'old.png',
       });
-      expect(repo.update.mock.calls[0][1].user).toEqual({
-        connect: { id: 'u7' },
+      expect(repo.updateWithUser.mock.calls[0][2]).toEqual({
+        create: expect.objectContaining({ name: 'Aziz Yangi', role: 'doctor' }),
       });
     });
 
     it('parol + user yo‘q + avatar yo‘q — avatar undefined', async () => {
       repo.findById.mockResolvedValue(doc());
       await service.update('d1', { password: 'newpass' });
-      expect(users.create.mock.calls[0][0].avatar).toBeUndefined();
+      expect(users.buildCreateData.mock.calls[0][0].avatar).toBeUndefined();
     });
   });
 
   describe('remove', () => {
+    const HISTORY_MSG =
+      "Shifokorni o'chirib bo'lmaydi: unga bog'langan qabullar yoki tashriflar mavjud";
+
     it('topilmasa 404', async () => {
       repo.findById.mockResolvedValue(null);
       await expect(service.remove('x')).rejects.toBeInstanceOf(
         NotFoundException,
       );
-      expect(repo.delete).not.toHaveBeenCalled();
+      expect(repo.deleteWithUser).not.toHaveBeenCalled();
     });
 
-    it('user bo‘lsa uni ham o‘chiradi', async () => {
+    it('user bo‘lsa doctor + user bitta tranzaksiyada o‘chiriladi', async () => {
       repo.findById.mockResolvedValue(doc({ userId: 'u5' }));
       await expect(service.remove('d1')).resolves.toEqual({ id: 'd1' });
-      expect(users.remove).toHaveBeenCalledWith('u5');
-      expect(repo.delete).toHaveBeenCalledWith('d1');
+      expect(repo.deleteWithUser).toHaveBeenCalledWith('d1', 'u5');
     });
 
     it('user yo‘q — faqat doctor', async () => {
       repo.findById.mockResolvedValue(doc());
       await service.remove('d1');
-      expect(users.remove).not.toHaveBeenCalled();
-      expect(repo.delete).toHaveBeenCalledWith('d1');
+      expect(repo.deleteWithUser).toHaveBeenCalledWith('d1', null);
     });
 
-    // BUG (doctors.service.ts:134-138): the login user is deleted BEFORE the
-    // doctor. Booking/Visit → Doctor relations are onDelete: Restrict, so for
-    // any doctor with history the doctor delete fails (500) after the user
-    // account is already gone — the doctor remains but can no longer log in.
-    // Needs a transaction (or delete doctor first / pre-check relations).
-    it.todo('remove — doctor o‘chmasa user ham o‘chirilmasligi kerak (atomik)');
+    // Fixed: the login user used to be deleted BEFORE the doctor; with
+    // bookings/visits (onDelete: Restrict) the doctor delete failed with 500
+    // after the account was already gone. Now: pre-check → 409, and the
+    // delete itself is atomic.
+    it('remove — tarixi bor shifokor: 409, user ham o‘chirilmaydi (atomik)', async () => {
+      repo.findById.mockResolvedValue(doc({ userId: 'u5' }));
+      repo.countHistory.mockResolvedValue({ bookings: 3, visits: 0 });
+      await expect(service.remove('d1')).rejects.toThrow(
+        new ConflictException(HISTORY_MSG),
+      );
+      expect(repo.deleteWithUser).not.toHaveBeenCalled();
+    });
+
+    it('remove — tekshiruvdan keyin paydo bo‘lgan bog‘liqlik (P2003) ham 409', async () => {
+      repo.findById.mockResolvedValue(doc({ userId: 'u5' }));
+      repo.deleteWithUser.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('fk', {
+          code: 'P2003',
+          clientVersion: '5.22.0',
+        }),
+      );
+      await expect(service.remove('d1')).rejects.toThrow(HISTORY_MSG);
+    });
+
+    it('remove — boshqa xatolar o‘zgarmasdan uzatiladi', async () => {
+      repo.findById.mockResolvedValue(doc());
+      repo.deleteWithUser.mockRejectedValue(new Error('db down'));
+      await expect(service.remove('d1')).rejects.toThrow('db down');
+    });
   });
 
   describe('getStats', () => {

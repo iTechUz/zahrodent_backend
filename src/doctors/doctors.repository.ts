@@ -2,18 +2,25 @@ import { Injectable } from '@nestjs/common';
 import { Doctor, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 
+const USER_PHONE = { user: { select: { phone: true } } } as const;
+export type DoctorWithUser = Doctor & { user?: { phone: string } | null };
+
 @Injectable()
 export class DoctorsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(
     where?: Prisma.DoctorWhereInput,
-    opts?: { skip?: number; take?: number },
+    opts?: {
+      skip?: number;
+      take?: number;
+      orderBy?: Prisma.DoctorOrderByWithRelationInput[];
+    },
   ): Promise<{ data: Doctor[]; total: number }> {
     const [data, total] = await Promise.all([
       this.prisma.doctor.findMany({
         where,
-        orderBy: { firstName: 'asc' },
+        orderBy: opts?.orderBy ?? { firstName: 'asc' },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
@@ -144,5 +151,70 @@ export class DoctorsRepository {
 
   delete(id: string): Promise<Doctor> {
     return this.prisma.doctor.delete({ where: { id } });
+  }
+
+  /** Creates the optional login user and the doctor atomically. */
+  createWithUser(
+    data: Prisma.DoctorCreateInput,
+    user: Prisma.UserCreateInput | null,
+  ): Promise<DoctorWithUser> {
+    return this.prisma.$transaction(async (tx) => {
+      let doctorData = data;
+      if (user) {
+        const u = await tx.user.create({ data: user, select: { id: true } });
+        doctorData = { ...data, user: { connect: { id: u.id } } };
+      }
+      return tx.doctor.create({ data: doctorData, include: USER_PHONE });
+    });
+  }
+
+  /** Updates the doctor and creates/updates its login user atomically. */
+  updateWithUser(
+    id: string,
+    data: Prisma.DoctorUpdateInput,
+    user:
+      | { create: Prisma.UserCreateInput }
+      | { update: { id: string; data: Prisma.UserUpdateInput } }
+      | null,
+  ): Promise<DoctorWithUser> {
+    return this.prisma.$transaction(async (tx) => {
+      let doctorData = data;
+      if (user && 'create' in user) {
+        const u = await tx.user.create({
+          data: user.create,
+          select: { id: true },
+        });
+        doctorData = { ...data, user: { connect: { id: u.id } } };
+      } else if (user && 'update' in user) {
+        await tx.user.update({
+          where: { id: user.update.id },
+          data: user.update.data,
+        });
+      }
+      return tx.doctor.update({
+        where: { id },
+        data: doctorData,
+        include: USER_PHONE,
+      });
+    });
+  }
+
+  /** Deletes the doctor and its login user in one transaction. */
+  async deleteWithUser(id: string, userId: string | null): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.doctor.delete({ where: { id } });
+      if (userId) await tx.user.delete({ where: { id: userId } });
+    });
+  }
+
+  /** Bookings/visits reference doctors with onDelete: Restrict. */
+  async countHistory(
+    id: string,
+  ): Promise<{ bookings: number; visits: number }> {
+    const [bookings, visits] = await Promise.all([
+      this.prisma.booking.count({ where: { doctorId: id } }),
+      this.prisma.visit.count({ where: { doctorId: id } }),
+    ]);
+    return { bookings, visits };
   }
 }

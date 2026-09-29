@@ -9,7 +9,6 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import {
   ApiBearerAuth,
   ApiForbiddenResponse,
@@ -20,6 +19,7 @@ import {
 import { DoctorsService } from './doctors.service';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
+import { DoctorsQueryDto } from './dto/doctors-query.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -47,12 +47,17 @@ export class DoctorsController {
   }
 
   @Get()
-  @ApiOperation({ summary: "Shifokorlar ro'yxati" })
-  findAll(@Query() query: PaginationQueryDto & { specialty?: string }) {
+  @Roles('admin', 'receptionist', 'doctor')
+  @ApiOperation({
+    summary: "Shifokorlar ro'yxati",
+    description: 'doctor roli uchun faqat o‘qish',
+  })
+  findAll(@Query() query: DoctorsQueryDto) {
     return this.doctorsService.findAll(query);
   }
 
   @Get(':id')
+  @Roles('admin', 'receptionist', 'doctor')
   @ApiOperation({ summary: 'Bitta shifokor' })
   @ApiParam({ name: 'id' })
   findOne(@Param('id') id: string) {
@@ -78,7 +83,11 @@ export class DoctorsController {
 
   @Delete(':id')
   @Roles('admin')
-  @ApiOperation({ summary: "Shifokorni o'chirish" })
+  @ApiOperation({
+    summary: "Shifokorni o'chirish",
+    description:
+      "Shifokor va uning login hisobi bitta tranzaksiyada o'chiriladi. Qabul/tashrif tarixi bo'lsa — 409.",
+  })
   @ApiParam({ name: 'id' })
   @ApiForbiddenResponse({ description: 'Faqat admin' })
   remove(@Param('id') id: string) {

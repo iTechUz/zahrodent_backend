@@ -5,19 +5,32 @@ import {
   MinLength,
   Matches,
   IsBoolean,
-  IsNumber,
+  IsInt,
+  Max,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
+/** HH:mm (optional :ss accepted for schedules saved by older clients). */
+const SCHEDULE_TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+
 export class ScheduleSlotDto {
-  @IsNumber()
+  @IsInt()
+  @Min(0)
+  @Max(6)
   day: number;
 
   @IsString()
+  @Matches(SCHEDULE_TIME_REGEX, {
+    message: 'startTime HH:mm formatida bo‘lishi kerak',
+  })
   startTime: string;
 
   @IsString()
+  @Matches(SCHEDULE_TIME_REGEX, {
+    message: 'endTime HH:mm formatida bo‘lishi kerak',
+  })
   endTime: string;
 
   @IsBoolean()
@@ -60,6 +73,9 @@ export class CreateDoctorDto {
 
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    each: true,
+    message: 'daysOff sanalari YYYY-MM-DD formatida bo‘lishi kerak',
+  })
   daysOff?: string[];
 }
