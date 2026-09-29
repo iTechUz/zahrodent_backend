@@ -6,7 +6,11 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { AllExceptionsFilter } from './http-exception.filter';
+import { Prisma } from '@prisma/client';
+import {
+  AllExceptionsFilter,
+  INTERNAL_ERROR_MESSAGE,
+} from './http-exception.filter';
 
 describe('AllExceptionsFilter', () => {
   let filter: AllExceptionsFilter;
@@ -14,12 +18,13 @@ describe('AllExceptionsFilter', () => {
   let host: ArgumentsHost;
   let warnSpy: jest.SpyInstance;
   let errorSpy: jest.SpyInstance;
+  let req: { url: string; method: string };
 
   beforeEach(() => {
     filter = new AllExceptionsFilter();
     res = { status: jest.fn(), json: jest.fn() };
     res.status.mockReturnValue(res);
-    const req = { url: '/patients/1', method: 'GET' };
+    req = { url: '/patients/1', method: 'GET' };
     host = {
       switchToHttp: () => ({
         getResponse: () => res,
@@ -77,18 +82,69 @@ describe('AllExceptionsFilter', () => {
     );
   });
 
-  it('Error bo‘lmagan qiymat — 500 va default xabar', () => {
+  it('Error bo‘lmagan qiymat — 500 va umumiy Uzbek xabar', () => {
     filter.catch('something', host);
     expect(res.status).toHaveBeenCalledWith(500);
-    expect(body().message).toBe('Internal server error');
+    expect(body().message).toBe(INTERNAL_ERROR_MESSAGE);
     expect(errorSpy).toHaveBeenCalledWith(expect.any(String), undefined);
   });
 
-  // BUG (http-exception.filter.ts:34-35): non-HTTP errors (e.g. Prisma
-  // errors with SQL/constraint details) have their raw `message` sent to the
-  // client in the 500 response body. It should return a generic message and
-  // only log the details.
-  it.todo(
-    'HttpException bo‘lmagan xatoning ichki xabari clientga chiqmasligi kerak',
-  );
+  // Fixed: non-HTTP errors used to send their raw message (SQL/constraint
+  // details) to the client.
+  it('HttpException bo‘lmagan xatoning ichki xabari clientga chiqmaydi', () => {
+    const err = new Error('relation "users" violates constraint xyz');
+    filter.catch(err, host);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(body().message).toBe(INTERNAL_ERROR_MESSAGE);
+    expect(JSON.stringify(body())).not.toContain('constraint');
+    // …but the real message is logged
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('violates constraint xyz'),
+      err.stack,
+    );
+  });
+
+  describe('Prisma xatolari', () => {
+    const prismaError = (code: string, message = 'secret sql detail') =>
+      new Prisma.PrismaClientKnownRequestError(message, {
+        code,
+        clientVersion: '5.22.0',
+      });
+
+    it.each([
+      ['P2002', 'POST', 409, 'Bunday qiymatli yozuv allaqachon mavjud'],
+      ['P2025', 'PATCH', 404, "So'ralgan yoki bog'langan yozuv topilmadi"],
+      ['P2003', 'POST', 400, "Bog'langan yozuv (id) mavjud emas"],
+      [
+        'P2003',
+        'DELETE',
+        409,
+        "Yozuvni o'chirib bo'lmaydi: unga bog'langan boshqa yozuvlar mavjud",
+      ],
+      [
+        'P2034',
+        'PATCH',
+        409,
+        "Parallel o'zgarish aniqlandi — qayta urinib ko'ring",
+      ],
+    ])('%s (%s) → %i', (code, method, status, message) => {
+      req.method = method;
+      filter.catch(prismaError(code), host);
+      expect(res.status).toHaveBeenCalledWith(status);
+      expect(body()).toMatchObject({ statusCode: status, message });
+      expect(JSON.stringify(body())).not.toContain('secret sql detail');
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(code));
+    });
+
+    it('noma’lum Prisma kodi — 500 umumiy xabar, tafsilot faqat logda', () => {
+      filter.catch(prismaError('P1001', 'cannot reach db at 10.0.0.5'), host);
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(body().message).toBe(INTERNAL_ERROR_MESSAGE);
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('cannot reach db at 10.0.0.5'),
+        expect.any(String),
+      );
+    });
+  });
 });
