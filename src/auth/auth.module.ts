@@ -6,12 +6,13 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { UsersRepository } from './users.repository';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { getJwtSecret } from '../bootstrap/env-config';
 
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'dev-secret-change-me',
+      secret: getJwtSecret(),
       signOptions: {
         expiresIn: (process.env.JWT_EXPIRES_IN ||
           '7d') as SignOptions['expiresIn'],
@@ -20,6 +21,6 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   ],
   controllers: [AuthController],
   providers: [AuthService, UsersRepository, JwtStrategy],
-  exports: [AuthService, UsersRepository],
+  exports: [AuthService, UsersRepository, JwtModule],
 })
 export class AuthModule {}

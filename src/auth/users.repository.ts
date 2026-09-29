@@ -14,6 +14,22 @@ export class UsersRepository {
     return this.prisma.user.findUnique({ where: { id } });
   }
 
+  /** Fresh identity for token validation (role/doctor may have changed). */
+  findAuthById(id: string) {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        role: true,
+        specialty: true,
+        avatar: true,
+        doctor: { select: { id: true } },
+      },
+    });
+  }
+
   findDoctorByUserId(userId: string): Promise<{ id: string } | null> {
     return this.prisma.doctor.findUnique({
       where: { userId },
