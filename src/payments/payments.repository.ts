@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Payment, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { debtSummarySql } from '../patients/patient-balance';
 
 @Injectable()
 export class PaymentsRepository {
@@ -8,12 +9,16 @@ export class PaymentsRepository {
 
   async findAll(
     where?: Prisma.PaymentWhereInput,
-    opts?: { skip?: number; take?: number },
+    opts?: {
+      skip?: number;
+      take?: number;
+      orderBy?: Prisma.PaymentOrderByWithRelationInput[];
+    },
   ): Promise<{ data: Payment[]; total: number }> {
     const [data, total] = await Promise.all([
       this.prisma.payment.findMany({
         where,
-        orderBy: { date: 'desc' },
+        orderBy: opts?.orderBy ?? { date: 'desc' },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
@@ -30,10 +35,33 @@ export class PaymentsRepository {
     return result._sum.amount || 0;
   }
 
+  /** Outstanding patient debt — see patients/patient-balance.ts. */
+  async getDebtSummary(): Promise<{ total: number; count: number }> {
+    const rows =
+      await this.prisma.$queryRaw<{ total: number; count: number }[]>(
+        debtSummarySql,
+      );
+    return {
+      total: Number(rows[0]?.total ?? 0),
+      count: Number(rows[0]?.count ?? 0),
+    };
+  }
+
+  findVisitOwner(visitId: string) {
+    return this.prisma.visit.findUnique({
+      where: { id: visitId },
+      select: { id: true, patientId: true },
+    });
+  }
+
   async getDoctorStats(): Promise<{ doctorId: string; total: number }[]> {
     const result = await this.prisma.payment.groupBy({
       by: ['visitId'],
-      where: { status: 'paid', visitId: { not: null } },
+      where: {
+        type: 'INCOME',
+        status: { in: ['paid', 'partial'] },
+        visitId: { not: null },
+      },
       _sum: { amount: true },
     });
 

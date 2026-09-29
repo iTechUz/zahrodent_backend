@@ -9,9 +9,17 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-const METHODS = ['cash', 'card', 'transfer', 'insurance'] as const;
-const STATUSES = ['paid', 'partial', 'unpaid'] as const;
-const TYPES = ['INCOME', 'EXPENSE'] as const;
+export const PAYMENT_METHODS = [
+  'cash',
+  'card',
+  'transfer',
+  'insurance',
+] as const;
+export const PAYMENT_STATUSES = ['paid', 'partial', 'unpaid'] as const;
+export const PAYMENT_TYPES = ['INCOME', 'EXPENSE'] as const;
+const METHODS = PAYMENT_METHODS;
+const STATUSES = PAYMENT_STATUSES;
+const TYPES = PAYMENT_TYPES;
 
 export class CreatePaymentDto {
   @IsString()

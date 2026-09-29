@@ -22,7 +22,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_FINANCE } from '../common/constants/role-groups';
-import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { PaymentsQueryDto } from './dto/payments-query.dto';
 
 @ApiTags('payments')
 @ApiBearerAuth('JWT')
@@ -33,7 +33,11 @@ export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 
   @Get('stats')
-  @ApiOperation({ summary: 'Stats for payments page' })
+  @ApiOperation({
+    summary: 'Stats for payments page',
+    description:
+      'totalRevenue/todayRevenue — faqat INCOME (paid|partial); totalExpenses/todayExpenses — EXPENSE alohida; pendingAmount — bemorlarning umumiy qarzi',
+  })
   getStats() {
     return this.paymentsService.getStats();
   }
@@ -46,15 +50,7 @@ export class PaymentsController {
 
   @Get()
   @ApiOperation({ summary: "To'lovlar ro'yxati" })
-  findAll(
-    @Query()
-    query: PaginationQueryDto & {
-      status?: string;
-      patientId?: string;
-      method?: string;
-      dateRange?: 'today' | 'week' | 'month' | 'all';
-    },
-  ) {
+  findAll(@Query() query: PaymentsQueryDto) {
     return this.paymentsService.findAll(query);
   }
 

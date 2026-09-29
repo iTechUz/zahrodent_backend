@@ -74,7 +74,11 @@ describe('PaymentsRepository', () => {
     ]);
     expect(prisma.payment.groupBy).toHaveBeenCalledWith({
       by: ['visitId'],
-      where: { status: 'paid', visitId: { not: null } },
+      where: {
+        type: 'INCOME',
+        status: { in: ['paid', 'partial'] },
+        visitId: { not: null },
+      },
       _sum: { amount: true },
     });
     expect(prisma.visit.findMany).toHaveBeenCalledWith({
@@ -97,5 +101,29 @@ describe('PaymentsRepository', () => {
     });
     await repo.delete('x');
     expect(prisma.payment.delete).toHaveBeenCalledWith({ where: { id: 'x' } });
+  });
+
+  it('getDebtSummary — raw SQL natijasi raqamga aylanadi', async () => {
+    prisma.$queryRaw = jest
+      .fn()
+      .mockResolvedValue([{ total: '1500', count: 2 }]);
+    await expect(repo.getDebtSummary()).resolves.toEqual({
+      total: 1500,
+      count: 2,
+    });
+    prisma.$queryRaw.mockResolvedValue([]);
+    await expect(repo.getDebtSummary()).resolves.toEqual({
+      total: 0,
+      count: 0,
+    });
+  });
+
+  it('findVisitOwner — faqat id va patientId', async () => {
+    prisma.visit.findUnique = jest.fn().mockResolvedValue(null);
+    await repo.findVisitOwner('v1');
+    expect(prisma.visit.findUnique).toHaveBeenCalledWith({
+      where: { id: 'v1' },
+      select: { id: true, patientId: true },
+    });
   });
 });
