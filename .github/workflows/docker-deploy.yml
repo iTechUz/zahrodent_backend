@@ -30,6 +30,9 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit -p tsconfig.json
 
+      - name: Lint
+        run: npx eslint src --max-warnings=0
+
       - name: Unit tests
         run: npx jest --ci --coverage
 
@@ -73,6 +76,7 @@ jobs:
 
             docker run -d \
               --name zahrodent_backend \
+              --restart unless-stopped \
               --network zaxro_network \
               -p 7878:7878 \
               --env-file /home/ubuntu/projects/zaxro_dent/backend/zahrodent_backend/.env \
