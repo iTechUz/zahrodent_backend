@@ -18,28 +18,54 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  doctor   Doctor?
-  comments PatientComment[]
+  doctor        Doctor?
+  comments      PatientComment[]
+  refreshTokens RefreshToken[]
 
   @@map("users")
 }
 
-model Patient {
-  id               String   @id @default(cuid())
-  firstName        String   @map("first_name")
-  lastName         String   @map("last_name")
-  age              Int
-  phone            String
-  address          String   @default("")
-  workplace        String   @default("")
-  source           String
-  notes            String   @default("")
-  avatar           String?
-  createdAt        DateTime @default(now()) @map("created_at") @db.Date
-  toothChart       Json?    @map("tooth_chart")
+/// Refresh tokens (rotating). Only the sha256 hash of the token is stored.
+model RefreshToken {
+  id           String    @id @default(cuid())
+  userId       String    @map("user_id")
+  tokenHash    String    @unique @map("token_hash")
+  familyId     String    @map("family_id")
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  replacedById String?   @map("replaced_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  userAgent    String?   @map("user_agent")
+  ip           String?
 
-  assignedDoctorId String?  @map("assigned_doctor_id")
-  assignedDoctor   Doctor?  @relation("AssignedDoctor", fields: [assignedDoctorId], references: [id])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model Patient {
+  id             String    @id @default(cuid())
+  firstName      String    @map("first_name")
+  lastName       String    @map("last_name")
+  age            Int
+  phone          String
+  address        String    @default("")
+  workplace      String    @default("")
+  source         String
+  notes          String    @default("")
+  avatar         String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Date
+  toothChart     Json?     @map("tooth_chart")
+  /// Soft delete: set → hidden from every patient list/lookup.
+  deletedAt      DateTime? @map("deleted_at")
+  /// Telegram chat id (bigint as string) — reminders go via the bot when set.
+  telegramChatId String?   @map("telegram_chat_id")
+
+  assignedDoctorId String? @map("assigned_doctor_id")
+  assignedDoctor   Doctor? @relation("AssignedDoctor", fields: [assignedDoctorId], references: [id])
 
   bookings      Booking[]
   visits        Visit[]
@@ -51,13 +77,14 @@ model Patient {
   @@index([phone])
   @@index([lastName, firstName])
   @@index([assignedDoctorId])
+  @@index([deletedAt])
   @@map("patients")
 }
 
 model Doctor {
   id        String  @id @default(cuid())
-  firstName String  @map("first_name") @default("")
-  lastName  String  @map("last_name") @default("")
+  firstName String  @default("") @map("first_name")
+  lastName  String  @default("") @map("last_name")
   specialty String
   phone     String
   avatar    String?
@@ -213,4 +240,19 @@ model Lead {
   @@index([status])
   @@index([createdAt])
   @@map("leads")
+}
+
+/// Single-row clinic settings (id is always 1).
+model ClinicSettings {
+  id                       Int      @id @default(1)
+  clinicName               String   @default("Zahro Dental") @map("clinic_name")
+  address                  String   @default("")
+  phone                    String   @default("")
+  workingHours             String   @default("") @map("working_hours")
+  smsReminderTemplate      String   @map("sms_reminder_template")
+  telegramReminderTemplate String   @map("telegram_reminder_template")
+  reminderDaysAhead        Int      @default(1) @map("reminder_days_ahead")
+  updatedAt                DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("clinic_settings")
 }
