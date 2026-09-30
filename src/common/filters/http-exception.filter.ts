@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Request, Response } from 'express';
+import { getRequestId } from '../logging/request-context';
 
 export const INTERNAL_ERROR_MESSAGE =
   "Serverda ichki xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring";
@@ -89,12 +90,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
       logDetail = exception.message;
     }
 
+    const requestId =
+      (req as Request & { requestId?: string }).requestId ?? getRequestId();
     const body = {
       success: false,
       statusCode: status,
       message,
       path: req.url,
       timestamp: new Date().toISOString(),
+      ...(requestId ? { requestId } : {}),
     };
 
     if (status >= 500) {

@@ -8,6 +8,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { requestIdMiddleware } from './common/middleware/request-id.middleware';
+import { AppLogger, useJsonLogs } from './common/logging/app-logger';
 import {
   buildCorsOptions,
   getListenHost,
@@ -27,6 +28,11 @@ async function bootstrap() {
   const port = parsePort();
   const host = getListenHost();
   const logger = new Logger('Bootstrap');
+  const appLogger = new AppLogger(
+    useJsonLogs(),
+    prod ? ['error', 'warn', 'log'] : undefined,
+  );
+  Logger.overrideLogger(appLogger);
 
   warnWeakJwtSecret(prod);
   enforceProductionJwtSecret();
@@ -34,7 +40,7 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
-    logger: prod ? ['error', 'warn', 'log'] : undefined,
+    logger: appLogger,
   });
 
   app.use(requestIdMiddleware);
