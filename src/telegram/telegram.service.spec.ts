@@ -10,6 +10,7 @@ const handlers: {
   action?: { re: RegExp; fn: Handler };
 } = { on: {} };
 const launch = jest.fn();
+const stop = jest.fn();
 const ctorArgs: string[] = [];
 
 jest.mock('telegraf', () => {
@@ -28,6 +29,9 @@ jest.mock('telegraf', () => {
     }
     launch() {
       return launch();
+    }
+    stop(reason?: string) {
+      return stop(reason);
     }
   }
   const chain = () => {
@@ -67,6 +71,8 @@ describe('TelegramService', () => {
     handlers.action = undefined;
     ctorArgs.length = 0;
     launch.mockReset().mockResolvedValue(undefined);
+    stop.mockReset();
+    delete process.env.TELEGRAM_BOT_ENABLED;
     leads = { create: jest.fn().mockResolvedValue({ id: 'l1' } as any) };
     service = new TelegramService(leads as unknown as LeadsService);
     warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
@@ -88,6 +94,16 @@ describe('TelegramService', () => {
     );
     expect(ctorArgs).toHaveLength(0);
     expect(launch).not.toHaveBeenCalled();
+  });
+
+  it('TELEGRAM_BOT_ENABLED=false — token bo‘lsa ham ishga tushmaydi', () => {
+    process.env.TELEGRAM_BOT_TOKEN = 'TEST_TOKEN';
+    process.env.TELEGRAM_BOT_ENABLED = 'false';
+    service.onModuleInit();
+    expect(ctorArgs).toHaveLength(0);
+    expect(launch).not.toHaveBeenCalled();
+    service.onModuleDestroy();
+    expect(stop).not.toHaveBeenCalled();
   });
 
   describe('token bor', () => {
@@ -114,9 +130,44 @@ describe('TelegramService', () => {
       expect(handlers.action?.re.test('service_braces')).toBe(true);
     });
 
+    it('ikkinchi onModuleInit — qayta launch qilinmaydi (dublikat poller yo‘q)', () => {
+      service.onModuleInit();
+      expect(launch).toHaveBeenCalledTimes(1);
+      expect(ctorArgs).toHaveLength(1);
+    });
+
+    it('onModuleDestroy — bot.stop() chaqiriladi, ikkinchi marta emas', () => {
+      service.onModuleDestroy();
+      service.onModuleDestroy();
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(stop).toHaveBeenCalledWith('shutdown');
+    });
+
+    it('onModuleDestroy — stop xatosi yutiladi', () => {
+      stop.mockImplementationOnce(() => {
+        throw new Error('Bot is not running!');
+      });
+      expect(() => service.onModuleDestroy()).not.toThrow();
+    });
+
+    it('rate limit — 1 soatda 3 tadan ko‘p lead yaratilmaydi', async () => {
+      for (let i = 0; i < 4; i++) {
+        await shareContact();
+        const c = ctx({ message: { text: `savol ${i}` } });
+        await handlers.on.text(c);
+        if (i === 3) {
+          expect(c.reply).toHaveBeenCalledWith(
+            expect.stringContaining('bir nechta murojaat'),
+          );
+        }
+      }
+      expect(leads.create).toHaveBeenCalledTimes(3);
+    });
+
     it('launch xatosi log qilinadi (crash yo‘q)', async () => {
       launch.mockRejectedValueOnce(new Error('409 Conflict'));
-      service.onModuleInit();
+      const fresh = new TelegramService(leads as unknown as LeadsService);
+      fresh.onModuleInit();
       await new Promise((r) => setImmediate(r));
       expect(errorSpy).toHaveBeenCalledWith(
         'Telegram bot launch error:',

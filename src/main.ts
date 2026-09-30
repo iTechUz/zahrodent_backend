@@ -86,6 +86,10 @@ async function bootstrap() {
       .addTag('services', 'Xizmatlar katalogi')
       .addTag('payments', "To'lovlar")
       .addTag('notifications', 'Bildirishnomalar')
+      .addTag('analytics', 'Dashboard va hisobotlar')
+      .addTag('leads', 'Murojaatlar (lidlar)')
+      .addTag('users', 'Xodimlar')
+      .addTag('health', 'Holat tekshiruvi')
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);

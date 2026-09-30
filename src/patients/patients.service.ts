@@ -1,106 +1,108 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PatientsRepository } from './patients.repository';
+import {
+  PatientsRepository,
+  PatientWithRelations,
+} from './patients.repository';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
-import { toDateOnlyString } from '../common/utils/date.util';
+import { PatientsQueryDto } from './dto/patients-query.dto';
 import {
-  PaginatedResponse,
-  PaginationQueryDto,
-} from '../common/dto/pagination.dto';
+  dateOnlyColumnRange,
+  monthBoundsOf,
+  parseDateOnlyToUTC,
+  toDateOnlyString,
+  todayInTashkent,
+} from '../common/utils/date.util';
+import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
 import { AuthUserView } from '../auth/auth.service';
+import {
+  doctorPatientsWhere,
+  doctorScopeId,
+} from '../common/auth/doctor-scope';
+import { computePatientBalance } from './patient-balance';
+
+export const PATIENT_NOT_FOUND = 'Bemor topilmadi';
+export const PATIENT_HAS_HISTORY =
+  "Bemorni o'chirib bo'lmaydi: unga bog'langan tashriflar yoki to'lovlar mavjud";
 
 @Injectable()
 export class PatientsService {
   constructor(private readonly patientsRepository: PatientsRepository) {}
 
+  /** Doctor → only own patients; other roles → no restriction. */
+  private scopeWhere(user: AuthUserView): Prisma.PatientWhereInput | null {
+    const doctorId = doctorScopeId(user);
+    return doctorId ? doctorPatientsWhere(doctorId) : null;
+  }
+
   async findAll(
-    query: PaginationQueryDto & { 
-      source?: string; 
-      startDate?: string; 
-      endDate?: string;
-      debtOnly?: string;
-    },
+    query: PatientsQueryDto,
     user: AuthUserView,
-  ): Promise<PaginatedResponse<any>> {
-    const { search, source, startDate, endDate, debtOnly } = query;
+  ): Promise<PaginatedResponse<ReturnType<PatientsService['toResponse']>>> {
+    const { search, source, startDate, endDate, debtOnly, doctorId } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
 
-    const where: Prisma.PatientWhereInput = {};
+    const and: Prisma.PatientWhereInput[] = [];
 
-    if (source && source !== 'all') {
-      where.source = source;
-    }
+    const scope = this.scopeWhere(user);
+    if (scope) and.push(scope);
+
+    if (source && source !== 'all') and.push({ source });
+    if (doctorId) and.push({ assignedDoctorId: doctorId });
 
     if (startDate || endDate) {
-      where.createdAt = {};
-      if (startDate) where.createdAt.gte = new Date(startDate);
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        where.createdAt.lte = end;
-      }
+      // created_at is a DATE column → compare calendar days directly.
+      and.push({ createdAt: dateOnlyColumnRange(startDate, endDate) });
+    }
+
+    const s = search?.trim();
+    if (s) {
+      and.push({
+        OR: [
+          { firstName: { contains: s, mode: 'insensitive' } },
+          { lastName: { contains: s, mode: 'insensitive' } },
+          { phone: { contains: s, mode: 'insensitive' } },
+        ],
+      });
     }
 
     if (debtOnly === 'true') {
-      // In Prisma, filtering by calculated balance (sum of payments - sum of visits) 
-      // is hard directly in 'where'. We might need to do it via repository or raw query.
-      // But for now, let's keep it simple or implement it in the repository.
+      const debtors = await this.patientsRepository.findDebtors();
+      if (!debtors.length) return { data: [], total: 0 };
+      and.push({ id: { in: debtors.map((d) => d.id) } });
     }
 
-    if (search?.trim()) {
-      where.OR = [
-        { firstName: { contains: search, mode: 'insensitive' } },
-        { lastName: { contains: search, mode: 'insensitive' } },
-        { phone: { contains: search, mode: 'insensitive' } },
-      ];
-    }
-
-    if (user.role === 'doctor') {
-      where.OR = undefined;
-      where.AND = [
-        {
-          OR: [
-            { bookings: { some: { doctorId: user.doctorId } } },
-            { visits: { some: { doctorId: user.doctorId } } },
-          ],
-        },
-      ];
-      if (search?.trim()) {
-        (where.AND as any[]).push({
-          OR: [
-            { firstName: { contains: search, mode: 'insensitive' } },
-            { lastName: { contains: search, mode: 'insensitive' } },
-            { phone: { contains: search, mode: 'insensitive' } },
-          ],
-        });
-      }
-    }
+    const where: Prisma.PatientWhereInput = and.length ? { AND: and } : {};
 
     const { data, total } = await this.patientsRepository.findAll(where, {
       skip,
       take: limitNum,
+      ...orderByOption<Prisma.PatientOrderByWithRelationInput[]>(
+        query,
+        'createdAt',
+      ),
     });
     return { data: data.map((p) => this.toResponse(p)), total };
   }
 
   async findOne(id: string, user: AuthUserView) {
+    const scope = this.scopeWhere(user);
     const p = await this.patientsRepository.findById(id);
-    if (!p) throw new NotFoundException('Patient not found');
+    if (!p) throw new NotFoundException(PATIENT_NOT_FOUND);
 
-    if (user.role === 'doctor') {
+    if (scope) {
       const hasAccess = await this.patientsRepository.count({
-        id,
-        OR: [
-          { bookings: { some: { doctorId: user.doctorId } } },
-          { visits: { some: { doctorId: user.doctorId } } },
-        ],
+        AND: [{ id }, scope],
       });
-      if (!hasAccess) {
-        throw new NotFoundException('Patient not found (access restricted)');
-      }
+      // Same 404 as "missing" so a doctor can't probe other patients' ids.
+      if (!hasAccess) throw new NotFoundException(PATIENT_NOT_FOUND);
     }
     return this.toResponse(p);
   }
@@ -121,6 +123,8 @@ export class PatientsService {
       avatar: dto.avatar,
       toothChart:
         dto.toothChart === undefined ? undefined : (dto.toothChart as object),
+      // DATE column: use the clinic's calendar day, not the DB server's TZ.
+      createdAt: parseDateOnlyToUTC(todayInTashkent()),
     });
     return this.toResponse(p);
   }
@@ -136,9 +140,12 @@ export class PatientsService {
       notes: dto.notes,
       address: dto.address,
       workplace: dto.workplace,
-      assignedDoctor: dto.assignedDoctorId
-        ? { connect: { id: dto.assignedDoctorId } }
-        : undefined,
+      assignedDoctor:
+        dto.assignedDoctorId === null
+          ? { disconnect: true }
+          : dto.assignedDoctorId
+            ? { connect: { id: dto.assignedDoctorId } }
+            : undefined,
       avatar: dto.avatar,
       toothChart:
         dto.toothChart === undefined ? undefined : (dto.toothChart as object),
@@ -148,6 +155,11 @@ export class PatientsService {
 
   async remove(id: string, user: AuthUserView) {
     await this.ensureExists(id, user);
+    // visits/payments cascade on delete — refuse instead of wiping history.
+    const history = await this.patientsRepository.countHistory(id);
+    if (history.visits > 0 || history.payments > 0) {
+      throw new ConflictException(PATIENT_HAS_HISTORY);
+    }
     await this.patientsRepository.delete(id);
     return { id };
   }
@@ -157,62 +169,45 @@ export class PatientsService {
   }
 
   async getStats(user: AuthUserView) {
-    const where: Prisma.PatientWhereInput = {};
-    if (user.role === 'doctor') {
-      where.OR = [
-        { bookings: { some: { doctorId: user.doctorId } } },
-        { visits: { some: { doctorId: user.doctorId } } },
-      ];
-    }
+    const scope = this.scopeWhere(user);
+    const where: Prisma.PatientWhereInput = scope ?? {};
 
-    const total = await this.patientsRepository.count(where);
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
+    const month = monthBoundsOf(todayInTashkent());
 
-    const newThisMonth = await this.patientsRepository.count({
-      ...where,
-      createdAt: { gte: startOfMonth },
-    });
-
-    // Top source
-    const sources = await this.patientsRepository.groupBySource();
-    const topSource = sources[0]?.source || 'N/A';
+    const [total, newThisMonth, sources] = await Promise.all([
+      this.patientsRepository.count(where),
+      this.patientsRepository.count({
+        AND: [where, { createdAt: { gte: parseDateOnlyToUTC(month.start) } }],
+      }),
+      this.patientsRepository.groupBySource(where),
+    ]);
 
     return {
       total,
       newThisMonth,
-      topSource,
+      topSource: sources[0]?.source || 'N/A',
     };
   }
 
   // Comments
   async addComment(
     data: { content: string; patientId: string },
-    authorId: string,
+    user: AuthUserView,
   ) {
+    await this.ensureExists(data.patientId, user);
     return this.patientsRepository.createComment({
       content: data.content,
       patientId: data.patientId,
-      authorId,
+      authorId: user.id,
     });
   }
 
-  async findComments(patientId: string) {
+  async findComments(patientId: string, user: AuthUserView) {
+    await this.ensureExists(patientId, user);
     return this.patientsRepository.findCommentsByPatientId(patientId);
   }
 
-  private toResponse(p: any) {
-    const paid = (p.payments || []).reduce(
-      (acc: number, curr: any) => acc + (curr.amount || 0),
-      0,
-    );
-    const owed = (p.visits || []).reduce(
-      (acc: number, curr: any) => acc + (curr.price || 0),
-      0,
-    );
-    const balance = paid - owed;
-
+  toResponse(p: PatientWithRelations) {
     return {
       id: p.id,
       firstName: p.firstName,
@@ -224,8 +219,9 @@ export class PatientsService {
       address: p.address,
       workplace: p.workplace,
       avatar: p.avatar ?? undefined,
-      balance,
+      balance: computePatientBalance(p),
       createdAt: toDateOnlyString(p.createdAt),
+      assignedDoctorId: p.assignedDoctorId ?? null,
       assignedDoctor: p.assignedDoctor
         ? {
             firstName: p.assignedDoctor.firstName,

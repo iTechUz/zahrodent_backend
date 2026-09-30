@@ -8,12 +8,16 @@ export class VisitsRepository {
 
   async findAll(
     where?: Prisma.VisitWhereInput,
-    opts?: { skip?: number; take?: number },
+    opts?: {
+      skip?: number;
+      take?: number;
+      orderBy?: Prisma.VisitOrderByWithRelationInput[];
+    },
   ): Promise<{ data: Visit[]; total: number }> {
     const [data, total] = await Promise.all([
       this.prisma.visit.findMany({
         where,
-        orderBy: { date: 'desc' },
+        orderBy: opts?.orderBy ?? { date: 'desc' },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),

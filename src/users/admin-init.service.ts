@@ -23,7 +23,15 @@ export class AdminInitService implements OnModuleInit {
       );
 
       const phone = process.env.INITIAL_ADMIN_PHONE || '+998901234567';
-      const password = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
+      const envPassword = process.env.INITIAL_ADMIN_PASSWORD?.trim();
+      if (!envPassword && process.env.NODE_ENV === 'production') {
+        // Never create an admin with a well-known default password in prod.
+        this.logger.error(
+          "Production: INITIAL_ADMIN_PASSWORD o'rnatilmagan — admin yaratilmadi. O'zgaruvchini qo'yib, serverni qayta ishga tushiring.",
+        );
+        return;
+      }
+      const password = envPassword || 'admin123';
       const name = process.env.INITIAL_ADMIN_NAME || 'Dr. Zahro Admin';
 
       const passwordHash = await bcrypt.hash(password, 10);

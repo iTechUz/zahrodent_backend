@@ -22,7 +22,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
-import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { BookingsQueryDto } from './dto/bookings-query.dto';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { AuthUserView } from '../auth/auth.service';
 
@@ -42,16 +42,7 @@ export class BookingsController {
 
   @Get()
   @ApiOperation({ summary: "Qabullar ro'yxati" })
-  findAll(
-    @Query()
-    query: PaginationQueryDto & {
-      status?: string;
-      source?: string;
-      patientId?: string;
-      dateRange?: 'today' | 'week' | 'month' | 'all';
-    },
-    @GetUser() user: AuthUserView,
-  ) {
+  findAll(@Query() query: BookingsQueryDto, @GetUser() user: AuthUserView) {
     return this.bookingsService.findAll(query, user);
   }
 

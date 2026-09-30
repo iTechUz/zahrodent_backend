@@ -8,12 +8,23 @@ dotenv.config();
 const prisma = new PrismaClient();
 
 async function main() {
+  // The seed wipes every table — never allow it against production.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      "Seed production muhitida taqiqlangan: u barcha ma'lumotlarni o'chiradi (NODE_ENV=production)",
+    );
+  }
+
   const hash = (plain: string) => bcrypt.hash(plain, 10);
 
   // Admin ma'lumotlarini .env dan olish va qo'shtirnoqlardan tozalash
-  const adminPhone = (process.env.INITIAL_ADMIN_PHONE || '+998901234567').replace(/^["']|["']$/g, '');
+  const adminPhone = (
+    process.env.INITIAL_ADMIN_PHONE || '+998901234567'
+  ).replace(/^["']|["']$/g, '');
   const adminPassword = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
-  const adminName = (process.env.INITIAL_ADMIN_NAME || 'Dr. Zahro Admin').replace(/^["']|["']$/g, '');
+  const adminName = (
+    process.env.INITIAL_ADMIN_NAME || 'Dr. Zahro Admin'
+  ).replace(/^["']|["']$/g, '');
 
   console.log(`Seeding: Admin phone set to ${adminPhone}`);
 

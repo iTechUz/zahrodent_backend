@@ -87,4 +87,31 @@ describe('AdminInitService', () => {
       expect.any(Error),
     );
   });
+
+  describe('production', () => {
+    const savedEnv = process.env.NODE_ENV;
+    afterEach(() => {
+      process.env.NODE_ENV = savedEnv;
+    });
+
+    it('INITIAL_ADMIN_PASSWORD yo‘q — default parolli admin yaratilmaydi', async () => {
+      process.env.NODE_ENV = 'production';
+      prisma.user.count.mockResolvedValue(0);
+      await service.onModuleInit();
+      expect(prisma.user.create).not.toHaveBeenCalled();
+      expect(bcrypt.hash).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('INITIAL_ADMIN_PASSWORD'),
+      );
+    });
+
+    it('INITIAL_ADMIN_PASSWORD bor — yaratiladi', async () => {
+      process.env.NODE_ENV = 'production';
+      process.env.INITIAL_ADMIN_PASSWORD = 'Str0ngPass!';
+      prisma.user.count.mockResolvedValue(0);
+      await service.onModuleInit();
+      expect(bcrypt.hash).toHaveBeenCalledWith('Str0ngPass!', 10);
+      expect(prisma.user.create).toHaveBeenCalled();
+    });
+  });
 });

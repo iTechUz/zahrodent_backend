@@ -25,7 +25,7 @@ function mockUser(partial: Partial<User>): User {
 describe('AuthService', () => {
   let service: AuthService;
   let usersRepository: jest.Mocked<
-    Pick<UsersRepository, 'findByPhone' | 'findDoctorByUserId'>
+    Pick<UsersRepository, 'findByPhone' | 'findDoctorByUserId' | 'findAuthById'>
   >;
   let jwtService: jest.Mocked<Pick<JwtService, 'signAsync'>>;
 
@@ -33,6 +33,7 @@ describe('AuthService', () => {
     usersRepository = {
       findByPhone: jest.fn(),
       findDoctorByUserId: jest.fn(),
+      findAuthById: jest.fn(),
     };
     jwtService = { signAsync: jest.fn().mockResolvedValue('signed-jwt') };
     service = new AuthService(
@@ -85,18 +86,18 @@ describe('AuthService', () => {
     );
   });
 
-  it('login — xato xabarlari Uzbekcha', async () => {
+  it('login — noma’lum telefon va noto‘g‘ri parol uchun bir xil Uzbek xabar', async () => {
     usersRepository.findByPhone.mockResolvedValue(null);
     await expect(
       service.login({ phone: '+998900000000', password: 'x' }),
-    ).rejects.toThrow('Bunday telefon raqamli foydalanuvchi topilmadi');
+    ).rejects.toThrow("Telefon raqami yoki parol noto'g'ri");
 
     usersRepository.findByPhone.mockResolvedValue(
       mockUser({ passwordHash: await bcrypt.hash('right', 4) }),
     );
     await expect(
       service.login({ phone: '+998901234567', password: 'wrong' }),
-    ).rejects.toThrow("Kiritilgan parol noto'g'ri");
+    ).rejects.toThrow("Telefon raqami yoki parol noto'g'ri");
     expect(jwtService.signAsync).not.toHaveBeenCalled();
   });
 
@@ -183,5 +184,69 @@ describe('AuthService', () => {
       avatar: undefined,
       doctorId: undefined,
     });
+  });
+
+  describe('resolveTokenUser', () => {
+    const payload = {
+      sub: 'u9',
+      role: 'doctor',
+      phone: '+998901234567',
+      name: 'Old name',
+      doctorId: 'stale',
+    };
+    const dbUser = {
+      id: 'u9',
+      name: 'Dr New',
+      phone: '+998901234567',
+      role: 'doctor',
+      specialty: null,
+      avatar: null,
+      doctor: { id: 'd9' },
+    };
+
+    it('DB dagi rol/doctorId ishlatiladi (token emas)', async () => {
+      usersRepository.findAuthById.mockResolvedValue(dbUser as any);
+      await expect(service.resolveTokenUser(payload)).resolves.toEqual({
+        id: 'u9',
+        name: 'Dr New',
+        phone: '+998901234567',
+        role: 'doctor',
+        specialty: undefined,
+        avatar: undefined,
+        doctorId: 'd9',
+      });
+      expect(usersRepository.findAuthById).toHaveBeenCalledWith('u9');
+    });
+
+    it('rol o‘zgargan bo‘lsa yangi rol qo‘llanadi, doctorId faqat doctor uchun', async () => {
+      usersRepository.findAuthById.mockResolvedValue({
+        ...dbUser,
+        role: 'receptionist',
+      } as any);
+      const out = await service.resolveTokenUser(payload);
+      expect(out).toMatchObject({ role: 'receptionist' });
+      expect(out?.doctorId).toBeUndefined();
+    });
+
+    it('user o‘chirilgan (token bekor) — null', async () => {
+      usersRepository.findAuthById.mockResolvedValue(null);
+      await expect(service.resolveTokenUser(payload)).resolves.toBeNull();
+    });
+
+    it('DB da noma’lum rol — null', async () => {
+      usersRepository.findAuthById.mockResolvedValue({
+        ...dbUser,
+        role: 'superadmin',
+      } as any);
+      await expect(service.resolveTokenUser(payload)).resolves.toBeNull();
+    });
+
+    it.each([null, 'x', { ...payload, sub: 1 }, { ...payload, role: 'root' }])(
+      'noto‘g‘ri payload %p — DB ga bormaydi',
+      async (p) => {
+        await expect(service.resolveTokenUser(p)).resolves.toBeNull();
+        expect(usersRepository.findAuthById).not.toHaveBeenCalled();
+      },
+    );
   });
 });

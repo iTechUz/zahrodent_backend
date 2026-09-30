@@ -12,6 +12,8 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { RecipientQueryDto, BulkSendDto } from './dto/bulk-sms.dto';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
 
 @ApiTags('notifications')
 @ApiBearerAuth('JWT')
@@ -22,9 +24,14 @@ export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'Bildirishnomalar tarixi' })
-  findAll(@Query() query: PaginationQueryDto) {
-    return this.notificationsService.findAll(query);
+  @Roles('admin', 'receptionist', 'doctor')
+  @ApiOperation({
+    summary: 'Bildirishnomalar tarixi',
+    description:
+      'doctor — faqat o‘ziga (doctorId) yuborilgan bildirishnomalar. search — xabar matni bo‘yicha.',
+  })
+  findAll(@Query() query: PaginationQueryDto, @GetUser() user: AuthUserView) {
+    return this.notificationsService.findAll(query, user);
   }
 
   @Post()
@@ -37,7 +44,7 @@ export class NotificationsController {
   @ApiOperation({
     summary: 'Eslatmalar yuborish',
     description:
-      'pending va confirmed qabullar uchun avtomatik xabar yaratish (frontend dagi tugma bilan bir xil)',
+      "Bugungi va ertangi (Asia/Tashkent) pending/confirmed qabullar uchun eslatma. Faqat muvaffaqiyatli yuborilganlari belgilanadi (qayta yuborilmaydi); Eskiz sozlanmagan yoki Telegram kanal bo'lmasa — 'failed' yoziladi.",
   })
   @ApiOkResponse({
     description: 'Yaratilgan yozuvlar soni',

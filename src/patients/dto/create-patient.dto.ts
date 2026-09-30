@@ -10,7 +10,13 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-const SOURCES = ['walk-in', 'telegram', 'website', 'phone'] as const;
+export const PATIENT_SOURCES = [
+  'walk-in',
+  'telegram',
+  'website',
+  'phone',
+] as const;
+const SOURCES = PATIENT_SOURCES;
 
 export class CreatePatientDto {
   @IsString()
@@ -45,9 +51,10 @@ export class CreatePatientDto {
   @MinLength(1)
   workplace: string;
 
+  /** PATCH: `null` → shifokor biriktirilishini olib tashlash */
   @IsOptional()
   @IsString()
-  assignedDoctorId?: string;
+  assignedDoctorId?: string | null;
 
   @IsOptional()
   @IsString()

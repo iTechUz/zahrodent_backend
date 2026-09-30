@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { PaymentsRepository } from './payments.repository';
 
@@ -14,6 +14,8 @@ describe('PaymentsService', () => {
       | 'delete'
       | 'sumAmount'
       | 'getDoctorStats'
+      | 'getDebtSummary'
+      | 'findVisitOwner'
     >
   >;
 
@@ -42,6 +44,10 @@ describe('PaymentsService', () => {
       delete: jest.fn(),
       sumAmount: jest.fn(),
       getDoctorStats: jest.fn(),
+      getDebtSummary: jest.fn().mockResolvedValue({ total: 0, count: 0 }),
+      findVisitOwner: jest
+        .fn()
+        .mockResolvedValue({ id: 'v1', patientId: 'p1' }),
     };
     service = new PaymentsService(repo as unknown as PaymentsRepository);
   });
@@ -113,12 +119,30 @@ describe('PaymentsService', () => {
       });
     });
 
+    it('dateRange today — Toshkent kuni (UTC 19:00 dan keyin ertangi kun)', async () => {
+      jest.useFakeTimers({ now: new Date('2026-06-17T19:30:00.000Z') });
+      await service.findAll({ dateRange: 'today' });
+      expect(where().date).toEqual({
+        gte: new Date('2026-06-18T00:00:00.000Z'),
+        lte: new Date('2026-06-18T00:00:00.000Z'),
+      });
+    });
+
+    it('sortBy — orderBy uzatiladi', async () => {
+      await service.findAll({ sortBy: 'amount', order: 'desc' });
+      expect(repo.findAll.mock.calls[0][1]).toEqual({
+        skip: 0,
+        take: 10,
+        orderBy: [{ amount: 'desc' }, { id: 'desc' }],
+      });
+    });
+
     it('dateRange today', async () => {
       jest.useFakeTimers({ now: new Date('2026-06-17T05:00:00.000Z') });
       await service.findAll({ dateRange: 'today' });
       expect(where().date).toEqual({
         gte: new Date('2026-06-17T00:00:00.000Z'),
-        lte: new Date('2026-06-17T23:59:59.999Z'),
+        lte: new Date('2026-06-17T00:00:00.000Z'),
       });
     });
 
@@ -127,7 +151,7 @@ describe('PaymentsService', () => {
       await service.findAll({ dateRange: 'week' });
       expect(where().date).toEqual({
         gte: new Date('2026-06-15T00:00:00.000Z'),
-        lte: new Date('2026-06-21T23:59:59.999Z'),
+        lte: new Date('2026-06-21T00:00:00.000Z'),
       });
     });
 
@@ -136,7 +160,7 @@ describe('PaymentsService', () => {
       await service.findAll({ dateRange: 'week' });
       expect(where().date).toEqual({
         gte: new Date('2026-06-15T00:00:00.000Z'),
-        lte: new Date('2026-06-21T23:59:59.999Z'),
+        lte: new Date('2026-06-21T00:00:00.000Z'),
       });
     });
 
@@ -145,7 +169,7 @@ describe('PaymentsService', () => {
       await service.findAll({ dateRange: 'month' });
       expect(where().date).toEqual({
         gte: new Date('2026-12-01T00:00:00.000Z'),
-        lte: new Date('2026-12-31T23:59:59.999Z'),
+        lte: new Date('2026-12-31T00:00:00.000Z'),
       });
     });
 
@@ -183,7 +207,7 @@ describe('PaymentsService', () => {
     it('404', async () => {
       repo.findById.mockResolvedValue(null);
       await expect(service.findOne('x')).rejects.toThrow(
-        new NotFoundException('Payment not found'),
+        new NotFoundException("To'lov topilmadi"),
       );
     });
 
@@ -204,7 +228,8 @@ describe('PaymentsService', () => {
       description: 'Plomba',
     };
 
-    it('default type INCOME va bugungi UTC sana', async () => {
+    it('default type INCOME va bugungi sana (Asia/Tashkent)', async () => {
+      // 2026-06-17 22:00Z = 2026-06-18 03:00 Toshkent
       jest.useFakeTimers({ now: new Date('2026-06-17T22:00:00.000Z') });
       await service.create(dto);
       expect(repo.create).toHaveBeenCalledWith({
@@ -212,7 +237,7 @@ describe('PaymentsService', () => {
         amount: 100_000,
         method: 'cash',
         status: 'paid',
-        date: new Date('2026-06-17T00:00:00.000Z'),
+        date: new Date('2026-06-18T00:00:00.000Z'),
         description: 'Plomba',
         type: 'INCOME',
         discount: undefined,
@@ -239,6 +264,52 @@ describe('PaymentsService', () => {
           visit: { connect: { id: 'v1' } },
         }),
       );
+    });
+  });
+
+  describe('visitId — tashrif shu bemorga tegishli bo‘lishi shart', () => {
+    const dto = {
+      patientId: 'p1',
+      amount: 100_000,
+      method: 'cash' as const,
+      status: 'paid' as const,
+      description: 'Plomba',
+    };
+
+    it('create — boshqa bemor tashrifi 400, yozilmaydi', async () => {
+      repo.findVisitOwner.mockResolvedValue({ id: 'v9', patientId: 'p2' });
+      await expect(
+        service.create({ ...dto, visitId: 'v9' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('create — tashrif topilmasa 404', async () => {
+      repo.findVisitOwner.mockResolvedValue(null);
+      await expect(service.create({ ...dto, visitId: 'nope' })).rejects.toThrow(
+        new NotFoundException('Tashrif topilmadi'),
+      );
+    });
+
+    it('create — visitId siz tekshirilmaydi', async () => {
+      await service.create(dto);
+      expect(repo.findVisitOwner).not.toHaveBeenCalled();
+    });
+
+    it('update — patientId o‘zgarsa mavjud tashrif bilan tekshiriladi', async () => {
+      repo.findById.mockResolvedValue(payment({ visitId: 'v1' }));
+      repo.findVisitOwner.mockResolvedValue({ id: 'v1', patientId: 'p1' });
+      await expect(
+        service.update('pay1', { patientId: 'p2' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.findVisitOwner).toHaveBeenCalledWith('v1');
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('update — faqat status o‘zgarsa tashrif tekshirilmaydi', async () => {
+      repo.findById.mockResolvedValue(payment({ visitId: 'v1' }));
+      await service.update('pay1', { status: 'partial' });
+      expect(repo.findVisitOwner).not.toHaveBeenCalled();
     });
   });
 
@@ -311,50 +382,66 @@ describe('PaymentsService', () => {
   });
 
   describe('getStats', () => {
-    it('uchta summa va to‘g‘ri filtrlar', async () => {
+    it('daromad faqat INCOME (paid|partial), xarajat alohida, qarz — balansdan', async () => {
+      // 2026-06-17 20:00Z = 2026-06-18 01:00 Toshkent
       jest.useFakeTimers({ now: new Date('2026-06-17T20:00:00.000Z') });
       repo.sumAmount
-        .mockResolvedValueOnce(5_000_000)
-        .mockResolvedValueOnce(700_000)
-        .mockResolvedValueOnce(300_000);
+        .mockResolvedValueOnce(5_000_000) // totalRevenue
+        .mockResolvedValueOnce(300_000) // todayRevenue
+        .mockResolvedValueOnce(900_000) // totalExpenses
+        .mockResolvedValueOnce(50_000); // todayExpenses
+      repo.getDebtSummary.mockResolvedValue({ total: 700_000, count: 3 });
       await expect(service.getStats()).resolves.toEqual({
         totalRevenue: 5_000_000,
         pendingAmount: 700_000,
         todayRevenue: 300_000,
+        totalExpenses: 900_000,
+        todayExpenses: 50_000,
       });
-      expect(repo.sumAmount).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({ status: 'paid' }),
-      );
-      expect(repo.sumAmount).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({ status: { in: ['partial', 'unpaid'] } }),
-      );
-      expect(repo.sumAmount).toHaveBeenNthCalledWith(
-        3,
-        expect.objectContaining({
-          status: 'paid',
-          date: {
-            gte: new Date('2026-06-17T00:00:00.000Z'),
-            lt: new Date('2026-06-18T00:00:00.000Z'),
-          },
-        }),
-      );
+      const collected = { in: ['paid', 'partial'] };
+      const today = new Date('2026-06-18T00:00:00.000Z');
+      expect(repo.sumAmount).toHaveBeenNthCalledWith(1, {
+        type: 'INCOME',
+        status: collected,
+      });
+      expect(repo.sumAmount).toHaveBeenNthCalledWith(2, {
+        type: 'INCOME',
+        status: collected,
+        date: today,
+      });
+      expect(repo.sumAmount).toHaveBeenNthCalledWith(3, {
+        type: 'EXPENSE',
+        status: collected,
+      });
+      expect(repo.sumAmount).toHaveBeenNthCalledWith(4, {
+        type: 'EXPENSE',
+        status: collected,
+        date: today,
+      });
     });
 
     it('falsy summalar 0 ga', async () => {
       repo.sumAmount.mockResolvedValue(null as any);
+      repo.getDebtSummary.mockResolvedValue({ total: 0, count: 0 });
       await expect(service.getStats()).resolves.toEqual({
         totalRevenue: 0,
         pendingAmount: 0,
         todayRevenue: 0,
+        totalExpenses: 0,
+        todayExpenses: 0,
       });
     });
 
-    // BUG (payments.service.ts:169-176): revenue sums filter only by status,
-    // not by type — EXPENSE ("Chiqim") payments are added to totalRevenue,
-    // todayRevenue (and pendingAmount) instead of being excluded/subtracted.
-    it.todo('getStats — EXPENSE to‘lovlar daromadga qo‘shilmasligi kerak');
+    // Fixed: revenue sums filtered only by status, so EXPENSE ("Chiqim")
+    // payments were counted as revenue.
+    it('getStats — EXPENSE to‘lovlar daromadga qo‘shilmaydi', async () => {
+      await service.getStats();
+      const revenueCalls = repo.sumAmount.mock.calls
+        .map((c) => c[0] as any)
+        .filter((w) => w.type !== 'EXPENSE');
+      expect(revenueCalls).toHaveLength(2);
+      for (const w of revenueCalls) expect(w.type).toBe('INCOME');
+    });
   });
 
   it('getDoctorStats — repo ga delegatsiya', async () => {

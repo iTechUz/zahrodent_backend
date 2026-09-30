@@ -1,53 +1,34 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { JwtStrategy } from './jwt.strategy';
+import { AuthService, AuthUserView } from '../auth.service';
 
 describe('JwtStrategy.validate', () => {
-  const strategy = new JwtStrategy();
-  const valid = {
-    sub: 'u1',
-    role: 'doctor',
-    phone: '+998901234567',
+  const view: AuthUserView = {
+    id: 'u1',
     name: 'Dr',
-    specialty: 'Terapevt',
-    avatar: 'a.png',
+    phone: '+998901234567',
+    role: 'doctor',
     doctorId: 'd1',
   };
+  let authService: { resolveTokenUser: jest.Mock };
+  let strategy: JwtStrategy;
 
-  it('to‘g‘ri payload — AuthUserView', () => {
-    expect(strategy.validate(valid)).toEqual({
-      id: 'u1',
-      name: 'Dr',
-      phone: '+998901234567',
-      role: 'doctor',
-      specialty: 'Terapevt',
-      avatar: 'a.png',
-      doctorId: 'd1',
-    });
+  beforeEach(() => {
+    authService = { resolveTokenUser: jest.fn() };
+    strategy = new JwtStrategy(authService as unknown as AuthService);
   });
 
-  it('ixtiyoriy maydonlarsiz ham qabul qilinadi', () => {
-    const out = strategy.validate({
-      sub: 'u2',
-      role: 'admin',
-      phone: '+998',
-      name: 'A',
-    });
-    expect(out).toMatchObject({ id: 'u2', role: 'admin' });
-    expect(out.doctorId).toBeUndefined();
+  it('har so‘rovda user DB dan qayta o‘qiladi', async () => {
+    authService.resolveTokenUser.mockResolvedValue(view);
+    const payload = { sub: 'u1', role: 'doctor', phone: 'p', name: 'Dr' };
+    await expect(strategy.validate(payload)).resolves.toEqual(view);
+    expect(authService.resolveTokenUser).toHaveBeenCalledWith(payload);
   });
 
-  it.each([
-    ['null', null],
-    ['string', 'token'],
-    ['sub yo‘q', { ...valid, sub: undefined }],
-    ['phone yo‘q', { ...valid, phone: undefined }],
-    ['name raqam', { ...valid, name: 1 }],
-    ['noma’lum rol', { ...valid, role: 'superadmin' }],
-    ['role yo‘q', { ...valid, role: undefined }],
-  ])('eski/noto‘g‘ri payload (%s) — 401', (_label, payload) => {
-    expect(() => strategy.validate(payload)).toThrow(UnauthorizedException);
-    expect(() => strategy.validate(payload)).toThrow(
-      'Token yangilanishi kerak — qayta kiring',
+  it('eski/noto‘g‘ri payload yoki o‘chirilgan user — 401 Uzbek xabar', async () => {
+    authService.resolveTokenUser.mockResolvedValue(null);
+    await expect(strategy.validate({ sub: 'gone' })).rejects.toThrow(
+      new UnauthorizedException('Token yangilanishi kerak — qayta kiring'),
     );
   });
 });

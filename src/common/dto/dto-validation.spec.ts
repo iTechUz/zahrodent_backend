@@ -58,17 +58,17 @@ describe('DTO validation', () => {
       expect(q).toMatchObject({ page: 2, limit: 50 });
     });
 
-    it('chegaralar: page<0, limit<1, limit>100000, kasr', () => {
+    it('chegaralar: page<0, limit<1, limit>100, kasr', () => {
       expect(Object.keys(errorsOf(PaginationQueryDto, { page: -1 }))).toEqual([
         'page',
       ]);
       expect(errorsOf(PaginationQueryDto, { limit: 0 })).toHaveProperty(
         'limit',
       );
-      expect(errorsOf(PaginationQueryDto, { limit: 100001 })).toHaveProperty(
+      expect(errorsOf(PaginationQueryDto, { limit: 101 })).toHaveProperty(
         'limit',
       );
-      expect(errorsOf(PaginationQueryDto, { limit: 100000 })).toEqual({});
+      expect(errorsOf(PaginationQueryDto, { limit: 100 })).toEqual({});
       expect(errorsOf(PaginationQueryDto, { page: 1.5 })).toHaveProperty(
         'page',
       );
@@ -148,12 +148,21 @@ describe('DTO validation', () => {
       );
     });
 
-    // `time` is only validated as non-empty string; "25:99" or "abc" pass and
-    // BookingsService.timeToMinutes() then yields NaN, which silently disables
-    // the overlap check (NaN comparisons are always false).
-    it.todo(
-      'time HH:MM formatida validatsiya qilinishi kerak (bookings create-booking.dto.ts:34-36)',
+    // Fixed: `time` used to be any non-empty string ("25:99", "abc"), which
+    // made timeToMinutes() return NaN and silently disabled the overlap check.
+    it.each(['25:00', '10:60', '9:00', '10:0', 'abc', '10:00:00', ' 10:00'])(
+      'time HH:mm bo‘lishi shart — %p rad etiladi',
+      (time) => {
+        expect(errorsOf(CreateBookingDto, { ...ok, time }).time).toEqual([
+          'time HH:mm formatida bo‘lishi kerak (00:00–23:59)',
+        ]);
+        expect(errorsOf(UpdateBookingDto, { time })).toHaveProperty('time');
+      },
     );
+
+    it.each(['00:00', '09:30', '23:59'])('time %p — to‘g‘ri', (time) => {
+      expect(errorsOf(CreateBookingDto, { ...ok, time })).toEqual({});
+    });
   });
 
   describe('CreateDoctorDto / UpdateDoctorDto', () => {
@@ -416,13 +425,23 @@ describe('DTO validation', () => {
       expect(errorsOf(UpdateUserDto, {})).toEqual({});
     });
 
-    // BUG (users/dto/create-user.dto.ts:25-26): `role` is only @IsString(),
-    // not @IsIn(['admin','doctor','receptionist']). An admin can create a user
-    // with role "superadmin"/"Admin"; such a user gets a JWT that JwtStrategy
-    // then rejects on every request (jwt.strategy.ts:17), i.e. an unusable
-    // account instead of a 400.
-    it.todo(
-      'CreateUserDto.role faqat admin/doctor/receptionist bo‘lishi kerak',
+    // Fixed: `role` used to be any string ("superadmin"), creating accounts
+    // whose tokens were then rejected on every request.
+    it.each(['superadmin', 'Admin', '', 'patient'])(
+      'CreateUserDto.role %p — 400',
+      (role) => {
+        expect(errorsOf(CreateUserDto, { ...ok, role }).role).toEqual([
+          "role faqat admin, doctor yoki receptionist bo'lishi mumkin",
+        ]);
+        expect(errorsOf(UpdateUserDto, { role })).toHaveProperty('role');
+      },
+    );
+
+    it.each(['admin', 'doctor', 'receptionist'])(
+      'CreateUserDto.role %p — ok',
+      (role) => {
+        expect(errorsOf(CreateUserDto, { ...ok, role })).toEqual({});
+      },
     );
   });
 

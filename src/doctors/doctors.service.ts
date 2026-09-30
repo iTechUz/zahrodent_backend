@@ -1,11 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Doctor, Prisma } from '@prisma/client';
-import { DoctorsRepository } from './doctors.repository';
-import { UsersService } from '../users/users.service';
 import {
-  PaginationQueryDto,
-  PaginatedResponse,
-} from '../common/dto/pagination.dto';
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { DoctorsRepository, DoctorWithUser } from './doctors.repository';
+import { UsersService } from '../users/users.service';
+import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
+import { DoctorsQueryDto } from './dto/doctors-query.dto';
+
+export const DOCTOR_NOT_FOUND = 'Shifokor topilmadi';
+export const DOCTOR_HAS_HISTORY =
+  "Shifokorni o'chirib bo'lmaydi: unga bog'langan qabullar yoki tashriflar mavjud";
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
 
@@ -17,8 +23,8 @@ export class DoctorsService {
   ) {}
 
   async findAll(
-    query: PaginationQueryDto & { specialty?: string },
-  ): Promise<PaginatedResponse<any>> {
+    query: DoctorsQueryDto,
+  ): Promise<PaginatedResponse<ReturnType<DoctorsService['toResponse']>>> {
     const { search, specialty } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
@@ -40,108 +46,128 @@ export class DoctorsService {
     const { data, total } = await this.doctorsRepository.findAll(where, {
       skip,
       take: limitNum,
+      ...orderByOption<Prisma.DoctorOrderByWithRelationInput[]>(
+        query,
+        'firstName',
+      ),
     });
-    return { data: data.map((d) => this.toResponse(d as any)), total };
+    return { data: data.map((d) => this.toResponse(d)), total };
   }
 
   async findOne(id: string) {
     const d = await this.doctorsRepository.findById(id);
-    if (!d) throw new NotFoundException('Doctor not found');
+    if (!d) throw new NotFoundException(DOCTOR_NOT_FOUND);
     return this.toResponse(d);
   }
 
   async create(dto: CreateDoctorDto) {
-    let userId: string | undefined;
+    const user = dto.password
+      ? await this.usersService.buildCreateData({
+          name: `${dto.firstName} ${dto.lastName}`,
+          phone: dto.phone,
+          password: dto.password,
+          role: 'doctor',
+          specialty: dto.specialty,
+          avatar: dto.avatar,
+        })
+      : null;
 
-    if (dto.password) {
-      const user = await this.usersService.create({
-        name: `${dto.firstName} ${dto.lastName}`,
-        phone: dto.phone,
-        password: dto.password,
-        role: 'doctor',
+    const d = await this.doctorsRepository.createWithUser(
+      {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
         specialty: dto.specialty,
+        phone: dto.phone,
         avatar: dto.avatar,
-      });
-      userId = user.id;
-    }
-
-    const d = await this.doctorsRepository.create({
-      firstName: dto.firstName,
-      lastName: dto.lastName,
-      specialty: dto.specialty,
-      phone: dto.phone,
-      avatar: dto.avatar,
-      user: userId ? { connect: { id: userId } } : undefined,
-      schedule: dto.schedule as any,
-      daysOff: dto.daysOff as any,
-    });
+        schedule: dto.schedule as unknown as Prisma.InputJsonValue,
+        daysOff: dto.daysOff as unknown as Prisma.InputJsonValue,
+      },
+      user,
+    );
     return this.toResponse(d);
   }
 
   async update(id: string, dto: UpdateDoctorDto) {
     const existingDoctor = await this.doctorsRepository.findById(id);
-    if (!existingDoctor) throw new NotFoundException('Doctor not found');
+    if (!existingDoctor) throw new NotFoundException(DOCTOR_NOT_FOUND);
 
-    let userId = existingDoctor.userId;
+    let userOp: Parameters<DoctorsRepository['updateWithUser']>[2] = null;
 
-    // Handle user account updates or creation
+    // Login credentials are (re)written only when a password is given.
     if (dto.password) {
-      if (userId) {
-        // Update existing user
-        await this.usersService.update(userId, {
-          name:
-            dto.firstName && dto.lastName
-              ? `${dto.firstName} ${dto.lastName}`
-              : existingDoctor.firstName + ' ' + existingDoctor.lastName,
-          phone: dto.phone || existingDoctor.phone,
-          password: dto.password,
-          specialty: dto.specialty,
-          avatar: dto.avatar,
-        });
+      if (existingDoctor.userId) {
+        userOp = {
+          update: {
+            id: existingDoctor.userId,
+            data: await this.usersService.buildUpdateData(
+              existingDoctor.userId,
+              {
+                name:
+                  dto.firstName && dto.lastName
+                    ? `${dto.firstName} ${dto.lastName}`
+                    : existingDoctor.firstName + ' ' + existingDoctor.lastName,
+                phone: dto.phone || existingDoctor.phone,
+                password: dto.password,
+                specialty: dto.specialty,
+                avatar: dto.avatar,
+              },
+            ),
+          },
+        };
       } else {
-        // Create new user if not exists but credentials provided
-        const user = await this.usersService.create({
-          name: `${dto.firstName || existingDoctor.firstName} ${
-            dto.lastName || existingDoctor.lastName
-          }`,
-          phone: dto.phone || existingDoctor.phone,
-          password: dto.password,
-          role: 'doctor',
-          specialty: dto.specialty || existingDoctor.specialty,
-          avatar: dto.avatar || existingDoctor.avatar || undefined,
-        });
-        userId = user.id;
+        userOp = {
+          create: await this.usersService.buildCreateData({
+            name: `${dto.firstName || existingDoctor.firstName} ${
+              dto.lastName || existingDoctor.lastName
+            }`,
+            phone: dto.phone || existingDoctor.phone,
+            password: dto.password,
+            role: 'doctor',
+            specialty: dto.specialty || existingDoctor.specialty,
+            avatar: dto.avatar || existingDoctor.avatar || undefined,
+          }),
+        };
       }
     }
 
-    const d = await this.doctorsRepository.update(id, {
-      firstName: dto.firstName,
-      lastName: dto.lastName,
-      specialty: dto.specialty,
-      phone: dto.phone,
-      avatar: dto.avatar,
-      user: userId ? { connect: { id: userId } } : undefined,
-      schedule: dto.schedule as any,
-      daysOff: dto.daysOff as any,
-    });
+    const d = await this.doctorsRepository.updateWithUser(
+      id,
+      {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        specialty: dto.specialty,
+        phone: dto.phone,
+        avatar: dto.avatar,
+        schedule: dto.schedule as unknown as Prisma.InputJsonValue,
+        daysOff: dto.daysOff as unknown as Prisma.InputJsonValue,
+      },
+      userOp,
+    );
     return this.toResponse(d);
   }
 
   async remove(id: string) {
     const d = await this.doctorsRepository.findById(id);
-    if (!d) throw new NotFoundException('Doctor not found');
+    if (!d) throw new NotFoundException(DOCTOR_NOT_FOUND);
 
-    if (d.userId) {
-      await this.usersService.remove(d.userId);
+    const history = await this.doctorsRepository.countHistory(id);
+    if (history.bookings > 0 || history.visits > 0) {
+      throw new ConflictException(DOCTOR_HAS_HISTORY);
     }
 
-    await this.doctorsRepository.delete(id);
+    try {
+      await this.doctorsRepository.deleteWithUser(id, d.userId ?? null);
+    } catch (e) {
+      // A booking/visit created between the check and the delete.
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === 'P2003'
+      ) {
+        throw new ConflictException(DOCTOR_HAS_HISTORY);
+      }
+      throw e;
+    }
     return { id };
-  }
-
-  private async ensureExists(id: string) {
-    const d = await this.doctorsRepository.findById(id);
-    if (!d) throw new NotFoundException('Doctor not found');
   }
 
   async getStats() {
@@ -184,7 +210,7 @@ export class DoctorsService {
       .sort((a, b) => b.totalRevenue - a.totalRevenue); // Sort by revenue by default
   }
 
-  private toResponse(d: Doctor & { user?: { phone: string } | null }) {
+  private toResponse(d: DoctorWithUser) {
     return {
       id: d.id,
       firstName: d.firstName,

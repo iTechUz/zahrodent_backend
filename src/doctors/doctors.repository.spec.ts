@@ -154,4 +154,93 @@ describe('DoctorsRepository', () => {
     expect(s.totalRevenue).toBe(0);
     expect(s.totalVisits).toBe(1);
   });
+
+  describe('tranzaksiyali yozuvlar', () => {
+    let tx: any;
+    beforeEach(() => {
+      tx = {
+        user: {
+          create: jest.fn().mockResolvedValue({ id: 'u1' }),
+          update: jest.fn(),
+          delete: jest.fn(),
+        },
+        doctor: {
+          create: jest.fn().mockResolvedValue({ id: 'd1' }),
+          update: jest.fn().mockResolvedValue({ id: 'd1' }),
+          delete: jest.fn(),
+        },
+      };
+      prisma.$transaction = jest.fn(async (cb: any) => cb(tx));
+    });
+
+    it('createWithUser — user va doctor bitta tranzaksiyada, connect bilan', async () => {
+      await repo.createWithUser(
+        { firstName: 'A' } as any,
+        {
+          name: 'A',
+        } as any,
+      );
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.user.create).toHaveBeenCalledWith({
+        data: { name: 'A' },
+        select: { id: true },
+      });
+      expect(tx.doctor.create).toHaveBeenCalledWith({
+        data: { firstName: 'A', user: { connect: { id: 'u1' } } },
+        include: { user: { select: { phone: true } } },
+      });
+      expect(prisma.doctor.create).not.toHaveBeenCalled();
+    });
+
+    it('createWithUser — doctor xatosi tranzaksiyani yiqitadi (user rollback)', async () => {
+      tx.doctor.create.mockRejectedValue(new Error('boom'));
+      await expect(
+        repo.createWithUser({} as any, { name: 'A' } as any),
+      ).rejects.toThrow('boom');
+    });
+
+    it('createWithUser — user siz', async () => {
+      await repo.createWithUser({ firstName: 'A' } as any, null);
+      expect(tx.user.create).not.toHaveBeenCalled();
+    });
+
+    it('updateWithUser — mavjud user yangilanadi / yangi user yaratiladi', async () => {
+      await repo.updateWithUser(
+        'd1',
+        { lastName: 'B' },
+        {
+          update: { id: 'u5', data: { name: 'X' } },
+        },
+      );
+      expect(tx.user.update).toHaveBeenCalledWith({
+        where: { id: 'u5' },
+        data: { name: 'X' },
+      });
+      await repo.updateWithUser('d1', {}, { create: { name: 'N' } as any });
+      expect(tx.doctor.update).toHaveBeenLastCalledWith({
+        where: { id: 'd1' },
+        data: { user: { connect: { id: 'u1' } } },
+        include: { user: { select: { phone: true } } },
+      });
+    });
+
+    it('deleteWithUser — avval doctor, keyin user, bitta tranzaksiyada', async () => {
+      const order: string[] = [];
+      tx.doctor.delete.mockImplementation(async () => order.push('doctor'));
+      tx.user.delete.mockImplementation(async () => order.push('user'));
+      await repo.deleteWithUser('d1', 'u5');
+      expect(order).toEqual(['doctor', 'user']);
+      await repo.deleteWithUser('d2', null);
+      expect(tx.user.delete).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('countHistory — bookings va visits', async () => {
+    prisma.booking.count = jest.fn().mockResolvedValue(2);
+    prisma.visit.count.mockResolvedValue(1);
+    await expect(repo.countHistory('d1')).resolves.toEqual({
+      bookings: 2,
+      visits: 1,
+    });
+  });
 });

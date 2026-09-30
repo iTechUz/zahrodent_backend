@@ -1,16 +1,19 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Visit } from '@prisma/client';
 import { VisitsRepository } from './visits.repository';
-import {
-  PaginationQueryDto,
-  PaginatedResponse,
-} from '../common/dto/pagination.dto';
+import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
+import { VisitsQueryDto } from './dto/visits-query.dto';
+import { doctorScopeId } from '../common/auth/doctor-scope';
 import { CreateVisitDto } from './dto/create-visit.dto';
 import { UpdateVisitDto } from './dto/update-visit.dto';
 import {
+  dateOnlyColumnRange,
   parseDateOnlyToUTC,
   toDateOnlyString,
+  todayInTashkent,
 } from '../common/utils/date.util';
+
+export const VISIT_NOT_FOUND = 'Tashrif topilmadi';
 import { AuthUserView } from '../auth/auth.service';
 
 @Injectable()
@@ -18,10 +21,10 @@ export class VisitsService {
   constructor(private readonly visitsRepository: VisitsRepository) {}
 
   async findAll(
-    query: PaginationQueryDto & { patientId?: string; doctorId?: string },
+    query: VisitsQueryDto,
     user: AuthUserView,
-  ): Promise<PaginatedResponse<any>> {
-    const { search, patientId, doctorId } = query;
+  ): Promise<PaginatedResponse<ReturnType<VisitsService['toResponse']>>> {
+    const { search, patientId, doctorId, status, startDate, endDate } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
@@ -30,10 +33,16 @@ export class VisitsService {
 
     if (patientId) where.patientId = patientId;
 
-    if (user.role === 'doctor') {
-      where.doctorId = user.doctorId;
+    const scopedDoctorId = doctorScopeId(user);
+    if (scopedDoctorId) {
+      where.doctorId = scopedDoctorId;
     } else if (doctorId) {
       where.doctorId = doctorId;
+    }
+
+    if (status && status !== 'all') where.status = status;
+    if (startDate || endDate) {
+      where.date = dateOnlyColumnRange(startDate, endDate);
     }
 
     if (search?.trim()) {
@@ -47,24 +56,24 @@ export class VisitsService {
     const { data, total } = await this.visitsRepository.findAll(where, {
       skip,
       take: limitNum,
+      ...orderByOption<Prisma.VisitOrderByWithRelationInput[]>(query, 'date'),
     });
     return { data: data.map((v) => this.toResponse(v)), total };
   }
 
   async findOne(id: string, user: AuthUserView) {
-    const v = await this.visitsRepository.findById(id);
-    if (!v) throw new NotFoundException('Visit not found');
-    if (user.role === 'doctor' && v.doctorId !== user.doctorId) {
-      throw new NotFoundException('Visit not found (access restricted)');
-    }
+    const v = await this.getAccessible(id, user);
     return this.toResponse(v);
   }
 
-  async create(dto: CreateVisitDto) {
-    const dateStr = dto.date ?? toDateOnlyString(new Date());
+  /** A doctor always records visits under their own Doctor id. */
+  async create(dto: CreateVisitDto, user: AuthUserView) {
+    const scopedDoctorId = doctorScopeId(user);
+    const doctorId = scopedDoctorId ?? dto.doctorId;
+    const dateStr = dto.date ?? todayInTashkent();
     const v = await this.visitsRepository.create({
       patient: { connect: { id: dto.patientId } },
-      doctor: { connect: { id: dto.doctorId } },
+      doctor: { connect: { id: doctorId } },
       booking: dto.bookingId ? { connect: { id: dto.bookingId } } : undefined,
       date: parseDateOnlyToUTC(dateStr),
       status: dto.status,
@@ -77,7 +86,9 @@ export class VisitsService {
   }
 
   async update(id: string, dto: UpdateVisitDto, user: AuthUserView) {
-    await this.ensureExists(id, user);
+    await this.getAccessible(id, user);
+    // A doctor can't hand a visit over to another doctor.
+    const doctorId = doctorScopeId(user) ? undefined : dto.doctorId;
     const v = await this.visitsRepository.update(id, {
       date: dto.date === undefined ? undefined : parseDateOnlyToUTC(dto.date),
       status: dto.status,
@@ -90,9 +101,7 @@ export class VisitsService {
           ? undefined
           : { connect: { id: dto.patientId } },
       doctor:
-        dto.doctorId === undefined
-          ? undefined
-          : { connect: { id: dto.doctorId } },
+        doctorId === undefined ? undefined : { connect: { id: doctorId } },
       booking:
         dto.bookingId === undefined
           ? undefined
@@ -103,12 +112,14 @@ export class VisitsService {
     return this.toResponse(v);
   }
 
-  private async ensureExists(id: string, user: AuthUserView) {
+  private async getAccessible(id: string, user: AuthUserView) {
+    const scopedDoctorId = doctorScopeId(user);
     const v = await this.visitsRepository.findById(id);
-    if (!v) throw new NotFoundException('Visit not found');
-    if (user.role === 'doctor' && v.doctorId !== user.doctorId) {
-      throw new NotFoundException('Visit not found (access restricted)');
+    if (!v) throw new NotFoundException(VISIT_NOT_FOUND);
+    if (scopedDoctorId && v.doctorId !== scopedDoctorId) {
+      throw new NotFoundException(VISIT_NOT_FOUND);
     }
+    return v;
   }
 
   private toResponse(v: Visit) {

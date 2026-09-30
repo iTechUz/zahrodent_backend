@@ -50,6 +50,7 @@ model Patient {
   @@index([createdAt])
   @@index([phone])
   @@index([lastName, firstName])
+  @@index([assignedDoctorId])
   @@map("patients")
 }
 
@@ -112,6 +113,7 @@ model Booking {
   @@index([date])
   @@index([status])
   @@index([date, status])
+  @@index([doctorId, date])
   @@map("bookings")
 }
 
@@ -132,6 +134,10 @@ model Visit {
   booking  Booking?  @relation(fields: [bookingId], references: [id], onDelete: SetNull)
   payments Payment[]
 
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([date])
+  @@index([bookingId])
   @@map("visits")
 }
 
@@ -156,6 +162,7 @@ model Payment {
   @@index([status])
   @@index([date])
   @@index([type])
+  @@index([visitId])
   @@map("payments")
 }
 
@@ -169,6 +176,7 @@ model PatientComment {
   patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
   author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
+  @@index([patientId])
   @@map("patient_comments")
 }
 
@@ -184,6 +192,9 @@ model Notification {
   patient Patient? @relation(fields: [patientId], references: [id], onDelete: Cascade)
   doctor  Doctor?  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
 
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([sentAt])
   @@map("notifications")
 }
 

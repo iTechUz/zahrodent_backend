@@ -10,15 +10,16 @@ export class LeadsRepository {
     skip?: number;
     take?: number;
     where?: Prisma.LeadWhereInput;
+    orderBy?: Prisma.LeadOrderByWithRelationInput[];
   }): Promise<{ data: Lead[]; total: number }> {
-    const { skip, take, where } = params;
-    
+    const { skip, take, where, orderBy } = params;
+
     const [data, total] = await this.prisma.$transaction([
       this.prisma.lead.findMany({
         skip,
         take,
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: orderBy ?? { createdAt: 'desc' },
       }),
       this.prisma.lead.count({ where }),
     ]);

@@ -9,8 +9,8 @@ RUN apk add --no-cache openssl
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Reproducible install from the lockfile
+RUN npm ci --no-audit --no-fund
 
 # Copy Prisma schema first for caching
 COPY prisma ./prisma/
@@ -33,30 +33,34 @@ WORKDIR /app
 RUN apk add --no-cache openssl curl
 
 # Create non-root user
-RUN addgroup -S nodegroup && adduser -S nodeuser -G nodegroup && \
-    chown -R nodeuser:nodegroup /app
+RUN addgroup -S nodegroup && adduser -S nodeuser -G nodegroup
 
-# Copy production dependencies only
+# Production dependencies only. `prisma` (CLI) is a regular dependency pinned
+# to the @prisma/client version, so `migrate deploy` below never downloads
+# a different (incompatible) Prisma at container start.
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
 # Copy built files and Prisma
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
+# Files stay root-owned (read-only for the app user); nothing is written at runtime.
 # Set production environment
 ENV NODE_ENV=production
 ENV TZ=Asia/Tashkent
+ENV PORT=7878
 
 # Expose port
 EXPOSE 7878
 
 USER nodeuser
 
-# Health check
+# Health check (GET /health — no DB access, no auth)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:7878/health || exit 1
+  CMD curl -fsS "http://localhost:${PORT:-7878}/health" || exit 1
 
-# Migratsiyalarni yuborish va keyin serverni ishga tushirish (Best Practice)
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start:prod"]
+# Apply pending migrations, then start. `exec` makes node PID 1 so SIGTERM
+# triggers Nest shutdown hooks (Prisma disconnect, Telegram bot stop).
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec node dist/src/main.js"]

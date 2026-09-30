@@ -23,7 +23,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { AuthUserView } from '../auth/auth.service';
-import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { VisitsQueryDto } from './dto/visits-query.dto';
 
 @ApiTags('visits')
 @ApiBearerAuth('JWT')
@@ -35,11 +35,7 @@ export class VisitsController {
 
   @Get()
   @ApiOperation({ summary: 'Tashriflar' })
-  findAll(
-    @Query()
-    query: PaginationQueryDto & { patientId?: string; doctorId?: string },
-    @GetUser() user: AuthUserView,
-  ) {
+  findAll(@Query() query: VisitsQueryDto, @GetUser() user: AuthUserView) {
     return this.visitsService.findAll(query, user);
   }
 
@@ -52,9 +48,13 @@ export class VisitsController {
 
   @Post()
   @Roles('admin', 'doctor')
-  @ApiOperation({ summary: 'Yangi tashrif' })
-  create(@Body() dto: CreateVisitDto) {
-    return this.visitsService.create(dto);
+  @ApiOperation({
+    summary: 'Yangi tashrif',
+    description:
+      'doctor roli uchun doctorId doim o‘zining Doctor id si bo‘ladi',
+  })
+  create(@Body() dto: CreateVisitDto, @GetUser() user: AuthUserView) {
+    return this.visitsService.create(dto, user);
   }
 
   @Patch(':id')

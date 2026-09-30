@@ -251,13 +251,57 @@ describe('EskizService', () => {
       });
     });
 
-    // BUG (eskiz.service.ts:103-118): the SMS-send fetch is outside any
-    // try/catch. A network error or timeout abort there makes sendSms()
-    // reject instead of resolving { ok: false, error }, contradicting its
-    // return type; callers (NotificationsService.create/sendReminders/
-    // bulkSend) don't catch it, so one flaky request fails the whole batch.
-    it.todo(
-      'sendSms — SMS so‘rovida tarmoq xatosi bo‘lsa { ok: false } qaytarishi kerak',
-    );
+    // Fixed: the SMS-send fetch was outside any try/catch, so a network
+    // error or timeout made sendSms() reject and aborted whole batches.
+    it('sendSms — SMS so‘rovida tarmoq xatosi bo‘lsa { ok: false } qaytaradi', async () => {
+      configure();
+      fetchMock
+        .mockResolvedValueOnce(res(200, { data: { token: 'T' } }))
+        .mockRejectedValueOnce(new TypeError('fetch failed'));
+      const s = new EskizService();
+      await expect(s.sendSms('998901112233', 'x')).resolves.toEqual({
+        ok: false,
+        error: 'fetch failed',
+      });
+    });
+
+    it('sendSms — SMS so‘rovi timeout (AbortError) → { ok: false, timeout }', async () => {
+      configure();
+      process.env.ESKIZ_HTTP_TIMEOUT_MS = '10';
+      fetchMock
+        .mockResolvedValueOnce(res(200, { data: { token: 'T' } }))
+        .mockImplementationOnce(
+          (_url: string, init: RequestInit) =>
+            new Promise((_resolve, reject) => {
+              init.signal!.addEventListener('abort', () => {
+                const e = new Error('This operation was aborted');
+                e.name = 'AbortError';
+                reject(e);
+              });
+            }),
+        );
+      const s = new EskizService();
+      await expect(s.sendSms('998901112233', 'x')).resolves.toEqual({
+        ok: false,
+        error: 'timeout (10 ms)',
+      });
+    });
+
+    it('sendSms — 2xx dan keyin tanani o‘qish xatosi — baribir ok (qayta yuborilmaydi)', async () => {
+      configure();
+      fetchMock
+        .mockResolvedValueOnce(res(200, { data: { token: 'T' } }))
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          text: async () => {
+            throw new Error('socket closed');
+          },
+        });
+      const s = new EskizService();
+      await expect(s.sendSms('998901112233', 'x')).resolves.toEqual({
+        ok: true,
+      });
+    });
   });
 });

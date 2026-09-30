@@ -16,6 +16,7 @@ describe('UsersService', () => {
       create: jest.Mock;
       update: jest.Mock;
       delete: jest.Mock;
+      count: jest.Mock;
     };
   };
 
@@ -37,6 +38,7 @@ describe('UsersService', () => {
         create: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
+        count: jest.fn().mockResolvedValue(2),
       },
     };
     service = new UsersService(prisma as unknown as PrismaService);
@@ -75,7 +77,7 @@ describe('UsersService', () => {
       name: 'Ali',
       phone: '+998901112233',
       password: 'secret1',
-      role: 'receptionist',
+      role: 'receptionist' as const,
     };
 
     it('telefon band — 409', async () => {
@@ -148,12 +150,41 @@ describe('UsersService', () => {
       });
     });
 
-    // BUG (users.service.ts:74-93): update() does not check phone uniqueness
-    // like create() does, so changing a user's phone to one that already
-    // exists surfaces Prisma P2002 as a 500 instead of a 409 ConflictException.
-    it.todo(
-      'update — boshqa userga tegishli telefon bo‘lsa 409 qaytarishi kerak',
-    );
+    // Fixed: update() didn't check phone uniqueness, so a duplicate phone
+    // surfaced as Prisma P2002 → 500 instead of 409.
+    it('update — boshqa userga tegishli telefon bo‘lsa 409', async () => {
+      prisma.user.findUnique
+        .mockResolvedValueOnce({ id: 'u1', role: 'receptionist' }) // target
+        .mockResolvedValueOnce({ id: 'u2' }); // phone owner
+      await expect(
+        service.update('u1', { phone: '+998909999999' }),
+      ).rejects.toThrow(
+        new ConflictException(
+          'Ushbu telefon raqami bilan foydalanuvchi allaqachon mavjud',
+        ),
+      );
+      expect(prisma.user.findUnique).toHaveBeenLastCalledWith({
+        where: { phone: '+998909999999' },
+      });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('update — o‘z telefonini qayta yuborsa 409 emas', async () => {
+      prisma.user.findUnique
+        .mockResolvedValueOnce({ id: 'u1', role: 'receptionist' })
+        .mockResolvedValueOnce({ id: 'u1' });
+      await service.update('u1', { phone: '+998901112233' });
+      expect(prisma.user.update).toHaveBeenCalled();
+    });
+
+    it('update — yagona adminning rolini o‘zgartirib bo‘lmaydi (409)', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', role: 'admin' });
+      prisma.user.count.mockResolvedValue(1);
+      await expect(
+        service.update('u1', { role: 'receptionist' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('remove', () => {
@@ -167,8 +198,46 @@ describe('UsersService', () => {
 
     it('o‘chiradi va id qaytaradi', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'u1' });
-      await expect(service.remove('u1')).resolves.toEqual({ id: 'u1' });
+      await expect(service.remove('u1', 'admin1')).resolves.toEqual({
+        id: 'u1',
+      });
       expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'u1' } });
+    });
+
+    it('o‘zini o‘chira olmaydi — 409', async () => {
+      await expect(service.remove('u1', 'u1')).rejects.toThrow(
+        new ConflictException("O'zingizning hisobingizni o'chira olmaysiz"),
+      );
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('yagona adminni o‘chira olmaydi — 409', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'a2', role: 'admin' });
+      prisma.user.count.mockResolvedValue(1);
+      await expect(service.remove('a2', 'a1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(prisma.user.count).toHaveBeenCalledWith({
+        where: { role: 'admin' },
+      });
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+    });
+
+    it('adminlar ko‘p bo‘lsa adminni o‘chirish mumkin', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'a2', role: 'admin' });
+      prisma.user.count.mockResolvedValue(2);
+      await expect(service.remove('a2', 'a1')).resolves.toEqual({ id: 'a2' });
+    });
+  });
+
+  describe('findAll — sortBy/order', () => {
+    it('sortBy + order, id tie-breaker', async () => {
+      prisma.user.findMany.mockResolvedValue([]);
+      await service.findAll({ sortBy: 'name', order: 'asc' });
+      expect(prisma.user.findMany).toHaveBeenCalledWith({
+        select: publicSelect,
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      });
     });
   });
 });

@@ -100,27 +100,43 @@ export class EskizService {
         const msg = e instanceof Error ? e.message : String(e);
         return { ok: false, error: msg };
       }
-      const res = await this.fetchWithTimeout(
-        `${this.baseUrl}/api/message/sms/send`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            Authorization: `Bearer ${token}`,
+      let res: Response;
+      let raw: string;
+      try {
+        res = await this.fetchWithTimeout(
+          `${this.baseUrl}/api/message/sms/send`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              mobile_phone: mobilePhone,
+              message,
+              from: this.senderFrom,
+            }),
           },
-          body: JSON.stringify({
-            mobile_phone: mobilePhone,
-            message,
-            from: this.senderFrom,
-          }),
-        },
-      );
-      if (res.status === 401 && retryOn401) {
-        this.accessToken = null;
-        return attempt(false);
+        );
+        if (res.status === 401 && retryOn401) {
+          this.accessToken = null;
+          return attempt(false);
+        }
+        // The body only matters for error details; a failed read after a 2xx
+        // must not turn a delivered SMS into a "failed" one (→ re-send).
+        raw = await res.text().catch(() => '');
+      } catch (e) {
+        // Network error or timeout (AbortError) — never throw to callers.
+        const msg =
+          e instanceof Error && e.name === 'AbortError'
+            ? `timeout (${this.timeoutMs} ms)`
+            : e instanceof Error
+              ? e.message
+              : String(e);
+        this.logger.warn(`Eskiz SMS so'rovi muvaffaqiyatsiz: ${msg}`);
+        return { ok: false, error: msg };
       }
-      const raw = await res.text();
       if (!res.ok) {
         this.logger.warn(`Eskiz SMS xato: ${res.status} ${raw.slice(0, 300)}`);
         return { ok: false, error: `HTTP ${res.status}: ${raw.slice(0, 200)}` };

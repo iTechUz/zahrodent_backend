@@ -7,6 +7,7 @@ import {
   Param,
   Delete,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
@@ -15,6 +16,9 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
+import { UsersQueryDto } from './dto/users-query.dto';
 
 @ApiTags('users')
 @ApiBearerAuth('JWT')
@@ -26,8 +30,8 @@ export class UsersController {
 
   @Get()
   @ApiOperation({ summary: 'Barcha xodimlarni olish (Faqat Admin)' })
-  findAll() {
-    return this.usersService.findAll();
+  findAll(@Query() query: UsersQueryDto) {
+    return this.usersService.findAll(query);
   }
 
   @Get(':id')
@@ -49,8 +53,11 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: "Xodimni o'chirish" })
-  remove(@Param('id') id: string) {
-    return this.usersService.remove(id);
+  @ApiOperation({
+    summary: "Xodimni o'chirish",
+    description: "O'zini yoki yagona adminni o'chirib bo'lmaydi (409)",
+  })
+  remove(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.usersService.remove(id, user.id);
   }
 }

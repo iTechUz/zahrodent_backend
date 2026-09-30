@@ -1,4 +1,5 @@
-import { IsString, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsIn } from 'class-validator';
+import { LEAD_STATUSES } from './create-lead.dto';
 
 export class UpdateLeadDto {
   @IsOptional()
@@ -22,6 +23,6 @@ export class UpdateLeadDto {
   notes?: string;
 
   @IsOptional()
-  @IsEnum(['new', 'contacted', 'consultation', 'proposal', 'converted', 'cancelled'])
+  @IsIn(LEAD_STATUSES)
   status?: string;
 }

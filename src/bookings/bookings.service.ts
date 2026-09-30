@@ -1,48 +1,68 @@
 import {
+  BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
-  ConflictException,
 } from '@nestjs/common';
 import { Booking, Prisma } from '@prisma/client';
 import { BookingsRepository } from './bookings.repository';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
+import { BookingsQueryDto } from './dto/bookings-query.dto';
 import {
-  endOfUTCDayInclusive,
+  dateOnlyColumnRange,
   parseDateOnlyToUTC,
-  startOfUTCDay,
+  relativeDateRange,
+  scheduleWeekday,
   toDateOnlyString,
+  todayInTashkent,
 } from '../common/utils/date.util';
-import {
-  PaginationQueryDto,
-  PaginatedResponse,
-} from '../common/dto/pagination.dto';
+import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
 import { AuthUserView } from '../auth/auth.service';
+import { doctorScopeId } from '../common/auth/doctor-scope';
+
+/** Statuses that occupy the doctor's time slot. */
+export const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed'];
+const DEFAULT_DURATION_MIN = 30;
+
+export const BOOKING_NOT_FOUND = 'Qabul topilmadi';
+
+type ScheduleSlot = {
+  day: number;
+  startTime: string;
+  endTime: string;
+  isWorking: boolean;
+};
 
 @Injectable()
 export class BookingsService {
   constructor(private readonly bookingsRepository: BookingsRepository) {}
 
   async findAll(
-    query: PaginationQueryDto & {
-      status?: string;
-      source?: string;
-      patientId?: string;
-      dateRange?: 'today' | 'week' | 'month' | 'all';
-      startDate?: string;
-      endDate?: string;
-    },
+    query: BookingsQueryDto,
     user: AuthUserView,
-  ): Promise<PaginatedResponse<any>> {
-    const { search, status, source, patientId, dateRange = 'all', startDate, endDate } = query;
+  ): Promise<PaginatedResponse<ReturnType<BookingsService['toResponse']>>> {
+    const {
+      search,
+      status,
+      source,
+      patientId,
+      doctorId,
+      dateRange = 'all',
+      startDate,
+      endDate,
+    } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
 
     const where: Prisma.BookingWhereInput = {};
 
-    if (user.role === 'doctor') {
-      where.doctorId = user.doctorId;
+    const scopedDoctorId = doctorScopeId(user);
+    if (scopedDoctorId) {
+      where.doctorId = scopedDoctorId;
+    } else if (doctorId) {
+      where.doctorId = doctorId;
     }
 
     if (patientId) where.patientId = patientId;
@@ -59,81 +79,91 @@ export class BookingsService {
     }
 
     if (startDate || endDate) {
-      where.date = {};
-      if (startDate) where.date.gte = parseDateOnlyToUTC(startDate);
-      if (endDate) where.date.lte = parseDateOnlyToUTC(endDate);
+      where.date = dateOnlyColumnRange(startDate, endDate);
     } else if (dateRange !== 'all') {
-      const now = new Date();
-      const start = startOfUTCDay(now);
-      let end = endOfUTCDayInclusive(now);
-
-      if (dateRange === 'week') {
-        // Start of week (Monday) in UTC
-        const day = start.getUTCDay() || 7; // 1=Mon ... 0=Sun => 7
-        if (day !== 1) start.setUTCDate(start.getUTCDate() - (day - 1));
-        end = new Date(start);
-        end.setUTCDate(start.getUTCDate() + 6);
-        end = endOfUTCDayInclusive(end);
-      } else if (dateRange === 'month') {
-        const year = now.getUTCFullYear();
-        const month = now.getUTCMonth();
-        const monthStart = new Date(Date.UTC(year, month, 1));
-        const monthEndDate = new Date(Date.UTC(year, month + 1, 0));
-        // Ensure full-day boundaries in UTC
-        start.setTime(monthStart.getTime());
-        end = endOfUTCDayInclusive(monthEndDate);
-      }
-
-      where.date = { gte: start, lte: end };
+      const { start, end } = relativeDateRange(dateRange);
+      where.date = dateOnlyColumnRange(start, end);
     }
 
     const { data, total } = await this.bookingsRepository.findAll(where, {
       skip,
       take: limitNum,
+      ...orderByOption<Prisma.BookingOrderByWithRelationInput[]>(query, 'date'),
     });
     return { data: data.map((b) => this.toResponse(b)), total };
   }
 
   async findOne(id: string, user: AuthUserView) {
-    const b = await this.bookingsRepository.findById(id);
-    if (!b) throw new NotFoundException('Booking not found');
-    if (user.role === 'doctor' && b.doctorId !== user.doctorId) {
-      throw new NotFoundException('Booking not found (access restricted)');
-    }
+    const b = await this.getAccessible(id, user);
     return this.toResponse(b);
   }
 
   async create(dto: CreateBookingDto) {
-    await this.checkConflicts(dto.doctorId, dto.date, dto.time, dto.serviceId);
+    if (dto.date < todayInTashkent()) {
+      throw new BadRequestException("O'tgan sanaga qabul yaratib bo'lmaydi");
+    }
+    const duration = await this.getDuration(dto.serviceId);
+    await this.checkDoctorSchedule(dto.doctorId, dto.date, dto.time, duration);
 
-    const b = await this.bookingsRepository.create({
-      patient: { connect: { id: dto.patientId } },
-      doctor: { connect: { id: dto.doctorId } },
-      date: parseDateOnlyToUTC(dto.date),
-      time: dto.time,
-      source: dto.source,
-      status: dto.status,
-      notes: dto.notes ?? '',
-      service: dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
-    });
+    const b = await this.bookingsRepository.withDoctorDayLock(
+      dto.doctorId,
+      dto.date,
+      async (tx) => {
+        if (ACTIVE_BOOKING_STATUSES.includes(dto.status)) {
+          await this.checkConflicts(tx, {
+            doctorId: dto.doctorId,
+            date: dto.date,
+            time: dto.time,
+            duration,
+          });
+        }
+        return this.bookingsRepository.create(
+          {
+            patient: { connect: { id: dto.patientId } },
+            doctor: { connect: { id: dto.doctorId } },
+            date: parseDateOnlyToUTC(dto.date),
+            time: dto.time,
+            source: dto.source,
+            status: dto.status,
+            notes: dto.notes ?? '',
+            service: dto.serviceId
+              ? { connect: { id: dto.serviceId } }
+              : undefined,
+            // DATE column: clinic calendar day, not the DB server's TZ.
+            createdAt: parseDateOnlyToUTC(todayInTashkent()),
+          },
+          tx,
+        );
+      },
+    );
     return this.toResponse(b);
   }
 
   async update(id: string, dto: UpdateBookingDto, user: AuthUserView) {
-    await this.ensureExists(id, user);
+    const current = await this.getAccessible(id, user);
 
-    if (dto.date || dto.time || dto.doctorId || dto.serviceId) {
-      const current = await this.bookingsRepository.findById(id);
-      await this.checkConflicts(
-        dto.doctorId ?? current!.doctorId,
-        dto.date ?? current!.date,
-        dto.time ?? current!.time,
-        dto.serviceId === undefined ? current!.serviceId : dto.serviceId,
-        id,
-      );
-    }
+    const next = {
+      doctorId: dto.doctorId ?? current.doctorId,
+      date: dto.date ?? toDateOnlyString(current.date),
+      time: dto.time ?? current.time,
+      serviceId:
+        dto.serviceId === undefined ? current.serviceId : dto.serviceId || null,
+      status: dto.status ?? current.status,
+    };
+    const slotChanged =
+      next.doctorId !== current.doctorId ||
+      next.date !== toDateOnlyString(current.date) ||
+      next.time !== current.time ||
+      next.serviceId !== current.serviceId;
+    // e.g. cancelled → pending: the slot may have been taken meanwhile.
+    const reactivated =
+      !ACTIVE_BOOKING_STATUSES.includes(current.status) &&
+      ACTIVE_BOOKING_STATUSES.includes(next.status);
+    const mustCheck =
+      ACTIVE_BOOKING_STATUSES.includes(next.status) &&
+      (slotChanged || reactivated);
 
-    const b = await this.bookingsRepository.update(id, {
+    const data: Prisma.BookingUpdateInput = {
       date: dto.date === undefined ? undefined : parseDateOnlyToUTC(dto.date),
       time: dto.time,
       source: dto.source,
@@ -153,48 +183,69 @@ export class BookingsService {
           : dto.serviceId
             ? { connect: { id: dto.serviceId } }
             : { disconnect: true },
-    });
+    };
+
+    if (!mustCheck) {
+      const b = await this.bookingsRepository.update(id, data);
+      return this.toResponse(b);
+    }
+
+    const duration = await this.getDuration(next.serviceId);
+    if (slotChanged) {
+      await this.checkDoctorSchedule(
+        next.doctorId,
+        next.date,
+        next.time,
+        duration,
+      );
+    }
+    const b = await this.bookingsRepository.withDoctorDayLock(
+      next.doctorId,
+      next.date,
+      async (tx) => {
+        await this.checkConflicts(tx, {
+          doctorId: next.doctorId,
+          date: next.date,
+          time: next.time,
+          duration,
+          excludeId: id,
+        });
+        return this.bookingsRepository.update(id, data, tx);
+      },
+    );
     return this.toResponse(b);
   }
 
   async remove(id: string, user: AuthUserView) {
-    await this.ensureExists(id, user);
+    await this.getAccessible(id, user);
     await this.bookingsRepository.delete(id);
     return { id };
   }
 
-  private async ensureExists(id: string, user: AuthUserView) {
+  private async getAccessible(id: string, user: AuthUserView) {
+    const scopedDoctorId = doctorScopeId(user);
     const b = await this.bookingsRepository.findById(id);
-    if (!b) throw new NotFoundException('Booking not found');
-    if (user.role === 'doctor' && b.doctorId !== user.doctorId) {
-      throw new NotFoundException('Booking not found (access restricted)');
+    if (!b) throw new NotFoundException(BOOKING_NOT_FOUND);
+    if (scopedDoctorId && b.doctorId !== scopedDoctorId) {
+      throw new NotFoundException(BOOKING_NOT_FOUND);
     }
+    return b;
   }
 
   async getStats(user: AuthUserView) {
-    const now = new Date();
-    const today = startOfUTCDay(now);
-    const tomorrow = new Date(today);
-    tomorrow.setUTCDate(today.getUTCDate() + 1);
+    const today = parseDateOnlyToUTC(todayInTashkent());
 
     const baseWhere: Prisma.BookingWhereInput = {};
-    if (user.role === 'doctor') {
-      baseWhere.doctorId = user.doctorId;
-    }
+    const scopedDoctorId = doctorScopeId(user);
+    if (scopedDoctorId) baseWhere.doctorId = scopedDoctorId;
 
     const [todayCount, pendingCount, completedToday] = await Promise.all([
-      this.bookingsRepository.count({
-        ...baseWhere,
-        date: { gte: today, lt: tomorrow },
-      }),
-      this.bookingsRepository.count({
-        ...baseWhere,
-        status: 'pending',
-      }),
+      this.bookingsRepository.count({ ...baseWhere, date: today }),
+      this.bookingsRepository.count({ ...baseWhere, status: 'pending' }),
       this.bookingsRepository.count({
         ...baseWhere,
         status: 'completed',
-        date: { gte: today, lt: tomorrow },
+        date: today,
       }),
     ]);
 
@@ -205,45 +256,91 @@ export class BookingsService {
     };
   }
 
-  private async checkConflicts(
-    doctorId: string,
-    date: Date | string,
-    time: string,
-    serviceId: string | null | undefined,
-    excludeId?: string,
-  ) {
-    const bookingDate =
-      typeof date === 'string' ? parseDateOnlyToUTC(date) : date;
-    bookingDate.setUTCHours(0, 0, 0, 0);
+  private async getDuration(serviceId: string | null | undefined) {
+    if (!serviceId) return DEFAULT_DURATION_MIN;
+    const service = await this.bookingsRepository.findServiceById(serviceId);
+    return service?.duration || DEFAULT_DURATION_MIN;
+  }
 
-    // Get new booking duration
-    let duration = 30; // Default
-    if (serviceId) {
-      const service = await this.bookingsRepository.findServiceById(serviceId);
-      if (service) duration = service.duration;
+  /**
+   * Rejects bookings on the doctor's days off or outside working hours.
+   * Only enforced when the schedule is actually configured (at least one
+   * working day) — an all-"not working" default schedule is ignored.
+   */
+  private async checkDoctorSchedule(
+    doctorId: string,
+    dateOnly: string,
+    time: string,
+    duration: number,
+  ) {
+    const doctor =
+      await this.bookingsRepository.findDoctorAvailability(doctorId);
+    if (!doctor) throw new NotFoundException('Shifokor topilmadi');
+
+    const daysOff = Array.isArray(doctor.daysOff)
+      ? (doctor.daysOff as unknown[]).map((d) => String(d).trim())
+      : [];
+    if (daysOff.includes(dateOnly)) {
+      throw new BadRequestException(
+        `Shifokor ${dateOnly} kuni dam oladi — boshqa sanani tanlang`,
+      );
     }
 
-    const newStart = this.timeToMinutes(time);
-    const newEnd = newStart + duration;
+    const schedule = Array.isArray(doctor.schedule)
+      ? (doctor.schedule as unknown as ScheduleSlot[])
+      : [];
+    if (!schedule.some((s) => s?.isWorking)) return;
 
-    // Get all bookings for that doctor on that day
-    // We need to fetch services too to know their durations
-    const dayBookings = await this.bookingsRepository.findManyWithService({
-      doctorId,
-      date: bookingDate,
-      id: excludeId ? { not: excludeId } : undefined,
-      status: { in: ['pending', 'confirmed'] }, // Only check active ones
-    });
+    const slot = schedule.find(
+      (s) => Number(s?.day) === scheduleWeekday(dateOnly),
+    );
+    if (!slot) return;
+    if (!slot.isWorking) {
+      throw new BadRequestException('Shifokor bu hafta kunida ishlamaydi');
+    }
+    const start = this.timeToMinutes(String(slot.startTime).slice(0, 5));
+    const end = this.timeToMinutes(String(slot.endTime).slice(0, 5));
+    const bookingStart = this.timeToMinutes(time);
+    if (Number.isNaN(start) || Number.isNaN(end)) return;
+    if (bookingStart < start || bookingStart + duration > end) {
+      throw new BadRequestException(
+        `Qabul vaqti shifokorning ish vaqtidan tashqarida (${this.minutesToTime(start)}–${this.minutesToTime(end)})`,
+      );
+    }
+  }
+
+  private async checkConflicts(
+    db: Prisma.TransactionClient | undefined,
+    args: {
+      doctorId: string;
+      date: string;
+      time: string;
+      duration: number;
+      excludeId?: string;
+    },
+  ) {
+    const newStart = this.timeToMinutes(args.time);
+    const newEnd = newStart + args.duration;
+
+    const dayBookings = await this.bookingsRepository.findManyWithService(
+      {
+        doctorId: args.doctorId,
+        date: parseDateOnlyToUTC(args.date),
+        id: args.excludeId ? { not: args.excludeId } : undefined,
+        status: { in: ACTIVE_BOOKING_STATUSES },
+      },
+      db,
+    );
 
     for (const b of dayBookings) {
       const bStart = this.timeToMinutes(b.time);
-      const bDuration = (b as any).service?.duration || 30;
+      const bDuration = b.service?.duration || DEFAULT_DURATION_MIN;
       const bEnd = bStart + bDuration;
 
       // Overlap? (Start1 < End2) && (End1 > Start2)
       if (newStart < bEnd && newEnd > bStart) {
         throw new ConflictException(
-          `Vaqtlar to'qnashuvi: Shifokor bu vaqtda band (${b.time}${bDuration > 30 ? ' - ' + this.minutesToTime(bEnd) : ''})`,
+          `Vaqtlar to'qnashuvi: Shifokor bu vaqtda band (${b.time}${bDuration > DEFAULT_DURATION_MIN ? ' - ' + this.minutesToTime(bEnd) : ''})`,
         );
       }
     }

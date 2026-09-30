@@ -1,34 +1,32 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Payment, Prisma } from '@prisma/client';
 import { PaymentsRepository } from './payments.repository';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import {
-  endOfUTCDayInclusive,
+  dateOnlyColumnRange,
   parseDateOnlyToUTC,
-  startOfUTCDay,
+  relativeDateRange,
   toDateOnlyString,
+  todayInTashkent,
 } from '../common/utils/date.util';
-import {
-  PaginationQueryDto,
-  PaginatedResponse,
-} from '../common/dto/pagination.dto';
+import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
+import { PaymentsQueryDto } from './dto/payments-query.dto';
+import { COLLECTED_PAYMENT_STATUSES } from '../patients/patient-balance';
+
+export const PAYMENT_NOT_FOUND = "To'lov topilmadi";
 
 @Injectable()
 export class PaymentsService {
   constructor(private readonly paymentsRepository: PaymentsRepository) {}
 
   async findAll(
-    query: PaginationQueryDto & {
-      status?: string;
-      patientId?: string;
-      method?: string;
-      type?: string;
-      dateRange?: 'today' | 'week' | 'month' | 'all';
-      startDate?: string;
-      endDate?: string;
-    },
-  ): Promise<PaginatedResponse<any>> {
+    query: PaymentsQueryDto,
+  ): Promise<PaginatedResponse<ReturnType<PaymentsService['toResponse']>>> {
     const {
       search,
       status,
@@ -66,48 +64,28 @@ export class PaymentsService {
     }
 
     if (startDate || endDate) {
-      where.date = {};
-      if (startDate) where.date.gte = parseDateOnlyToUTC(startDate);
-      if (endDate) where.date.lte = parseDateOnlyToUTC(endDate);
+      where.date = dateOnlyColumnRange(startDate, endDate);
     } else if (dateRange !== 'all') {
-      const now = new Date();
-      const start = startOfUTCDay(now);
-      let end = endOfUTCDayInclusive(now);
-
-      if (dateRange === 'week') {
-        // Start of week (Monday) in UTC
-        const day = start.getUTCDay() || 7; // 1=Mon ... 0=Sun => 7
-        if (day !== 1) start.setUTCDate(start.getUTCDate() - (day - 1));
-        end = new Date(start);
-        end.setUTCDate(start.getUTCDate() + 6);
-        end = endOfUTCDayInclusive(end);
-      } else if (dateRange === 'month') {
-        const year = now.getUTCFullYear();
-        const month = now.getUTCMonth();
-        const monthStart = new Date(Date.UTC(year, month, 1));
-        const monthEndDate = new Date(Date.UTC(year, month + 1, 0));
-        start.setTime(monthStart.getTime());
-        end = endOfUTCDayInclusive(monthEndDate);
-      }
-
-      where.date = { gte: start, lte: end };
+      const { start, end } = relativeDateRange(dateRange);
+      where.date = dateOnlyColumnRange(start, end);
     }
 
     const { data, total } = await this.paymentsRepository.findAll(where, {
       skip,
       take: limitNum,
+      ...orderByOption<Prisma.PaymentOrderByWithRelationInput[]>(query, 'date'),
     });
     return { data: data.map((p) => this.toResponse(p)), total };
   }
 
   async findOne(id: string) {
-    const p = await this.paymentsRepository.findById(id);
-    if (!p) throw new NotFoundException('Payment not found');
+    const p = await this.getOrThrow(id);
     return this.toResponse(p);
   }
 
   async create(dto: CreatePaymentDto) {
-    const dateStr = dto.date ?? toDateOnlyString(new Date());
+    if (dto.visitId) await this.assertVisitBelongs(dto.visitId, dto.patientId);
+    const dateStr = dto.date ?? todayInTashkent();
     const p = await this.paymentsRepository.create({
       patient: { connect: { id: dto.patientId } },
       amount: dto.amount,
@@ -124,7 +102,16 @@ export class PaymentsService {
   }
 
   async update(id: string, dto: UpdatePaymentDto) {
-    await this.ensureExists(id);
+    const current = await this.getOrThrow(id);
+    const nextVisitId =
+      dto.visitId === undefined ? current.visitId : dto.visitId || null;
+    const nextPatientId = dto.patientId ?? current.patientId;
+    if (
+      nextVisitId &&
+      (dto.visitId !== undefined || dto.patientId !== undefined)
+    ) {
+      await this.assertVisitBelongs(nextVisitId, nextPatientId);
+    }
     const p = await this.paymentsRepository.update(id, {
       amount: dto.amount,
       method: dto.method,
@@ -154,32 +141,49 @@ export class PaymentsService {
   }
 
   async remove(id: string) {
-    await this.ensureExists(id);
+    await this.getOrThrow(id);
     await this.paymentsRepository.delete(id);
     return { id };
   }
 
+  /**
+   * Revenue = INCOME payments with status paid|partial (money received).
+   * Expenses (EXPENSE, "Chiqim") are reported separately, never mixed in.
+   * pendingAmount = outstanding patient debt (see patient-balance.ts).
+   */
   async getStats() {
-    const now = new Date();
-    const today = startOfUTCDay(now);
-    const tomorrow = new Date(today);
-    tomorrow.setUTCDate(today.getUTCDate() + 1);
+    const today = parseDateOnlyToUTC(todayInTashkent());
+    const collected = { in: [...COLLECTED_PAYMENT_STATUSES] };
 
-    const [totalRevenue, pendingAmount, todayRevenue] = await Promise.all([
-      this.paymentsRepository.sumAmount({ status: 'paid' }),
-      this.paymentsRepository.sumAmount({
-        status: { in: ['partial', 'unpaid'] },
-      }),
-      this.paymentsRepository.sumAmount({
-        status: 'paid',
-        date: { gte: today, lt: tomorrow },
-      }),
-    ]);
+    const [totalRevenue, todayRevenue, totalExpenses, todayExpenses, debt] =
+      await Promise.all([
+        this.paymentsRepository.sumAmount({
+          type: 'INCOME',
+          status: collected,
+        }),
+        this.paymentsRepository.sumAmount({
+          type: 'INCOME',
+          status: collected,
+          date: today,
+        }),
+        this.paymentsRepository.sumAmount({
+          type: 'EXPENSE',
+          status: collected,
+        }),
+        this.paymentsRepository.sumAmount({
+          type: 'EXPENSE',
+          status: collected,
+          date: today,
+        }),
+        this.paymentsRepository.getDebtSummary(),
+      ]);
 
     return {
       totalRevenue: totalRevenue || 0,
-      pendingAmount: pendingAmount || 0,
+      pendingAmount: debt.total || 0,
       todayRevenue: todayRevenue || 0,
+      totalExpenses: totalExpenses || 0,
+      todayExpenses: todayExpenses || 0,
     };
   }
 
@@ -187,9 +191,20 @@ export class PaymentsService {
     return this.paymentsRepository.getDoctorStats();
   }
 
-  private async ensureExists(id: string) {
+  private async getOrThrow(id: string) {
     const p = await this.paymentsRepository.findById(id);
-    if (!p) throw new NotFoundException('Payment not found');
+    if (!p) throw new NotFoundException(PAYMENT_NOT_FOUND);
+    return p;
+  }
+
+  private async assertVisitBelongs(visitId: string, patientId: string) {
+    const visit = await this.paymentsRepository.findVisitOwner(visitId);
+    if (!visit) throw new NotFoundException('Tashrif topilmadi');
+    if (visit.patientId !== patientId) {
+      throw new BadRequestException(
+        "Tashrif boshqa bemorga tegishli — to'lovni shu tashrifga bog'lab bo'lmaydi",
+      );
+    }
   }
 
   private toResponse(p: Payment) {

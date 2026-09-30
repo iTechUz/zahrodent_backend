@@ -1,103 +1,124 @@
 import {
+  ConflictException,
   Injectable,
   NotFoundException,
-  ConflictException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../database/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UsersQueryDto } from './dto/users-query.dto';
+
+export const PHONE_TAKEN_MESSAGE =
+  'Ushbu telefon raqami bilan foydalanuvchi allaqachon mavjud';
+export const USER_NOT_FOUND = 'Foydalanuvchi topilmadi';
+export const CANNOT_DELETE_SELF = "O'zingizning hisobingizni o'chira olmaysiz";
+export const LAST_ADMIN_MESSAGE =
+  "Tizimdagi yagona adminni o'chirib yoki rolini o'zgartirib bo'lmaydi";
+
+const PUBLIC_SELECT = {
+  id: true,
+  name: true,
+  phone: true,
+  role: true,
+  specialty: true,
+  avatar: true,
+  createdAt: true,
+} as const;
 
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll() {
+  async findAll(query: UsersQueryDto = {}) {
+    const orderBy =
+      query.sortBy || query.order
+        ? [
+            { [query.sortBy ?? 'createdAt']: query.order ?? 'asc' },
+            { id: query.order ?? 'asc' },
+          ]
+        : { createdAt: 'desc' as const };
     return this.prisma.user.findMany({
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        role: true,
-        specialty: true,
-        avatar: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: 'desc' },
+      select: PUBLIC_SELECT,
+      orderBy: orderBy as Prisma.UserOrderByWithRelationInput,
     });
   }
 
   async findOne(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        role: true,
-        specialty: true,
-        avatar: true,
-        createdAt: true,
-      },
+      select: PUBLIC_SELECT,
     });
-    if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+    if (!user) throw new NotFoundException(USER_NOT_FOUND);
     return user;
   }
 
+  /** 409 if another user already has this phone. */
+  async assertPhoneAvailable(phone: string, exceptUserId?: string) {
+    const existing = await this.prisma.user.findUnique({ where: { phone } });
+    if (existing && existing.id !== exceptUserId) {
+      throw new ConflictException(PHONE_TAKEN_MESSAGE);
+    }
+  }
+
+  /** Validated create payload (phone free, password hashed). No write. */
+  async buildCreateData(dto: CreateUserDto): Promise<Prisma.UserCreateInput> {
+    await this.assertPhoneAvailable(dto.phone);
+    const { password, ...rest } = dto;
+    return { ...rest, passwordHash: await bcrypt.hash(password, 10) };
+  }
+
+  /** Validated update payload (phone free, password hashed). No write. */
+  async buildUpdateData(
+    id: string,
+    dto: UpdateUserDto,
+  ): Promise<Prisma.UserUpdateInput> {
+    if (dto.phone) await this.assertPhoneAvailable(dto.phone, id);
+    const { password, ...rest } = dto;
+    const data: Prisma.UserUpdateInput = { ...rest };
+    if (password) data.passwordHash = await bcrypt.hash(password, 10);
+    return data;
+  }
+
   async create(dto: CreateUserDto) {
-    const existing = await this.prisma.user.findUnique({
-      where: { phone: dto.phone },
-    });
-    if (existing)
-      throw new ConflictException(
-        'Ushbu telefon raqami bilan foydalanuvchi allaqachon mavjud',
-      );
-
-    const passwordHash = await bcrypt.hash(dto.password, 10);
-    const data: any = { ...dto };
-    delete data.password;
-
+    const data = await this.buildCreateData(dto);
     return this.prisma.user.create({
-      data: {
-        ...data,
-        passwordHash,
-      },
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        role: true,
-      },
+      data,
+      select: { id: true, name: true, phone: true, role: true },
     });
   }
 
   async update(id: string, dto: UpdateUserDto) {
     const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+    if (!user) throw new NotFoundException(USER_NOT_FOUND);
 
-    const data: any = { ...dto };
-    if (dto.password) {
-      data.passwordHash = await bcrypt.hash(dto.password, 10);
-      delete data.password;
+    if (user.role === 'admin' && dto.role && dto.role !== 'admin') {
+      await this.assertNotLastAdmin();
     }
 
+    const data = await this.buildUpdateData(id, dto);
     return this.prisma.user.update({
       where: { id },
       data,
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        role: true,
-      },
+      select: { id: true, name: true, phone: true, role: true },
     });
   }
 
-  async remove(id: string) {
+  async remove(id: string, currentUserId?: string) {
+    if (currentUserId && id === currentUserId) {
+      throw new ConflictException(CANNOT_DELETE_SELF);
+    }
     const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException('Foydalanuvchi topilmadi');
+    if (!user) throw new NotFoundException(USER_NOT_FOUND);
+    if (user.role === 'admin') await this.assertNotLastAdmin();
 
     await this.prisma.user.delete({ where: { id } });
     return { id };
+  }
+
+  private async assertNotLastAdmin() {
+    const admins = await this.prisma.user.count({ where: { role: 'admin' } });
+    if (admins <= 1) throw new ConflictException(LAST_ADMIN_MESSAGE);
   }
 }
