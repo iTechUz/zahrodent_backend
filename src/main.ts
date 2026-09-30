@@ -89,6 +89,7 @@ async function bootstrap() {
       .addTag('analytics', 'Dashboard va hisobotlar')
       .addTag('leads', 'Murojaatlar (lidlar)')
       .addTag('users', 'Xodimlar')
+      .addTag('settings', 'Klinika sozlamalari')
       .addTag('health', 'Holat tekshiruvi')
       .build();
 

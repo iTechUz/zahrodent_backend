@@ -13,6 +13,7 @@ import { UsersModule } from './users/users.module';
 import { LeadsModule } from './leads/leads.module';
 import { TelegramModule } from './telegram/telegram.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { SettingsModule } from './settings/settings.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -32,6 +33,7 @@ import { HealthController } from './health/health.controller';
     UsersModule,
     LeadsModule,
     AnalyticsModule,
+    SettingsModule,
     TelegramModule,
   ],
   controllers: [HealthController],
