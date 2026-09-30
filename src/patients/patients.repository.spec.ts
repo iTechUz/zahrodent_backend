@@ -105,8 +105,61 @@ describe('PatientsRepository', () => {
       data: { firstName: 'B' },
       include,
     });
-    await repo.delete('p1');
-    expect(prisma.patient.delete).toHaveBeenCalledWith({ where: { id: 'p1' } });
+  });
+
+  it('softDelete — tranzaksiyada deletedAt + kelgusi faol qabullar bekor', async () => {
+    const tx = {
+      patient: { update: jest.fn().mockResolvedValue({}) },
+      booking: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
+    };
+    prisma.$transaction = jest.fn(async (fn: any) => fn(tx));
+    const at = new Date('2026-07-01T10:00:00Z');
+    const from = new Date('2026-07-01T00:00:00Z');
+    await expect(
+      repo.softDelete('p1', at, from, ['pending', 'confirmed']),
+    ).resolves.toEqual({ cancelledBookings: 2 });
+    expect(tx.patient.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: { deletedAt: at },
+    });
+    expect(tx.booking.updateMany).toHaveBeenCalledWith({
+      where: {
+        patientId: 'p1',
+        date: { gte: from },
+        status: { in: ['pending', 'confirmed'] },
+      },
+      data: { status: 'cancelled' },
+    });
+  });
+
+  it('restore — deletedAt null', async () => {
+    await repo.restore('p1');
+    expect(prisma.patient.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: { deletedAt: null },
+      include,
+    });
+  });
+
+  it('findActiveIdsByMobile — faqat raqamlar, 12 yoki 9 xonali, o‘chirilmaganlar', async () => {
+    prisma.$queryRaw = jest.fn().mockResolvedValue([{ id: 'p1' }]);
+    await expect(repo.findActiveIdsByMobile('+998901234567')).resolves.toEqual([
+      { id: 'p1' },
+    ]);
+    const sql = prisma.$queryRaw.mock.calls[0];
+    expect(sql[0].join('?')).toContain('deleted_at IS NULL');
+    expect(sql.slice(1)).toEqual(['998901234567', '901234567']);
+  });
+
+  it('setTelegramChatId — bo‘sh ro‘yxat DB ga bormaydi', async () => {
+    prisma.patient.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    await expect(repo.setTelegramChatId([], '1')).resolves.toBe(0);
+    expect(prisma.patient.updateMany).not.toHaveBeenCalled();
+    await expect(repo.setTelegramChatId(['p1'], '12345')).resolves.toBe(1);
+    expect(prisma.patient.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['p1'] }, deletedAt: null },
+      data: { telegramChatId: '12345' },
+    });
   });
 
   it('findAll — orderBy berilsa ishlatiladi', async () => {
@@ -128,18 +181,7 @@ describe('PatientsRepository', () => {
     expect(text).toContain("status IN ('paid', 'partial')");
     expect(text).toContain("WHERE status = 'completed'");
     expect(text).toContain('< 0');
-  });
-
-  it('countHistory — visits va payments soni', async () => {
-    prisma.visit = { count: jest.fn().mockResolvedValue(2) };
-    prisma.payment = { count: jest.fn().mockResolvedValue(0) };
-    await expect(repo.countHistory('p1')).resolves.toEqual({
-      visits: 2,
-      payments: 0,
-    });
-    expect(prisma.visit.count).toHaveBeenCalledWith({
-      where: { patientId: 'p1' },
-    });
+    expect(text).toContain('p.deleted_at IS NULL');
   });
 
   it('comments — author include, yangi birinchi', async () => {

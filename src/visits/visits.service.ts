@@ -1,6 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, Visit } from '@prisma/client';
-import { VisitsRepository } from './visits.repository';
+import { Prisma } from '@prisma/client';
+import { VisitsRepository, VisitWithPatient } from './visits.repository';
+import {
+  connectActivePatient,
+  toPatientSummary,
+} from '../patients/patient-summary';
 import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
 import { VisitsQueryDto } from './dto/visits-query.dto';
 import { doctorScopeId } from '../common/auth/doctor-scope';
@@ -72,7 +76,7 @@ export class VisitsService {
     const doctorId = scopedDoctorId ?? dto.doctorId;
     const dateStr = dto.date ?? todayInTashkent();
     const v = await this.visitsRepository.create({
-      patient: { connect: { id: dto.patientId } },
+      patient: connectActivePatient(dto.patientId),
       doctor: { connect: { id: doctorId } },
       booking: dto.bookingId ? { connect: { id: dto.bookingId } } : undefined,
       date: parseDateOnlyToUTC(dateStr),
@@ -99,7 +103,7 @@ export class VisitsService {
       patient:
         dto.patientId === undefined
           ? undefined
-          : { connect: { id: dto.patientId } },
+          : connectActivePatient(dto.patientId),
       doctor:
         doctorId === undefined ? undefined : { connect: { id: doctorId } },
       booking:
@@ -122,7 +126,7 @@ export class VisitsService {
     return v;
   }
 
-  private toResponse(v: Visit) {
+  private toResponse(v: VisitWithPatient) {
     return {
       id: v.id,
       patientId: v.patientId,
@@ -134,6 +138,7 @@ export class VisitsService {
       treatment: v.treatment,
       notes: v.notes,
       price: v.price || 0,
+      patient: toPatientSummary(v.patient),
     };
   }
 }

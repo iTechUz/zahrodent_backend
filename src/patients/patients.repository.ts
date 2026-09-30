@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Patient, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { debtorBalancesSql, PATIENT_BALANCE_INCLUDE } from './patient-balance';
 
@@ -60,17 +60,6 @@ export class PatientsRepository {
     );
   }
 
-  /** Visits + payments count — a patient with history must not be deleted. */
-  async countHistory(
-    id: string,
-  ): Promise<{ visits: number; payments: number }> {
-    const [visits, payments] = await Promise.all([
-      this.prisma.visit.count({ where: { patientId: id } }),
-      this.prisma.payment.count({ where: { patientId: id } }),
-    ]);
-    return { visits, payments };
-  }
-
   findById(id: string): Promise<PatientWithRelations | null> {
     return this.prisma.patient.findUnique({
       where: { id },
@@ -115,8 +104,60 @@ export class PatientsRepository {
     });
   }
 
-  delete(id: string): Promise<Patient> {
-    return this.prisma.patient.delete({ where: { id } });
+  /**
+   * Soft delete: sets `deleted_at` and cancels the patient's upcoming
+   * active bookings (date ≥ `fromDate`) in one transaction. History
+   * (visits, payments, past bookings) is kept.
+   */
+  softDelete(
+    id: string,
+    at: Date,
+    fromDate: Date,
+    activeStatuses: string[],
+  ): Promise<{ cancelledBookings: number }> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.patient.update({ where: { id }, data: { deletedAt: at } });
+      const r = await tx.booking.updateMany({
+        where: {
+          patientId: id,
+          date: { gte: fromDate },
+          status: { in: activeStatuses },
+        },
+        data: { status: 'cancelled' },
+      });
+      return { cancelledBookings: r.count };
+    });
+  }
+
+  restore(id: string): Promise<PatientWithRelations> {
+    return this.prisma.patient.update({
+      where: { id },
+      data: { deletedAt: null },
+      include: PATIENT_INCLUDE,
+    });
+  }
+
+  /**
+   * Non-deleted patients whose phone (any formatting) is the Uzbek mobile
+   * number `+998XXXXXXXXX` — compared on digits only.
+   */
+  findActiveIdsByMobile(mobile: string): Promise<{ id: string }[]> {
+    const digits = mobile.replace(/\D/g, '');
+    const local = digits.slice(-9);
+    return this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM patients
+      WHERE deleted_at IS NULL
+        AND regexp_replace(phone, '[^0-9]', '', 'g') IN (${digits}, ${local})
+    `;
+  }
+
+  async setTelegramChatId(ids: string[], chatId: string): Promise<number> {
+    if (!ids.length) return 0;
+    const r = await this.prisma.patient.updateMany({
+      where: { id: { in: ids }, deletedAt: null },
+      data: { telegramChatId: chatId },
+    });
+    return r.count;
   }
 
   // Comments

@@ -35,11 +35,18 @@ describe('AnalyticsService', () => {
     role: 'doctor',
     doctorId: 'd1',
   };
+  // Soft-deleted patients are always excluded.
+  const ND = { deletedAt: null };
   const doctorPatients = {
-    OR: [
-      { assignedDoctorId: 'd1' },
-      { bookings: { some: { doctorId: 'd1' } } },
-      { visits: { some: { doctorId: 'd1' } } },
+    AND: [
+      ND,
+      {
+        OR: [
+          { assignedDoctorId: 'd1' },
+          { bookings: { some: { doctorId: 'd1' } } },
+          { visits: { some: { doctorId: 'd1' } } },
+        ],
+      },
     ],
   };
   const d = (s: string) => new Date(`${s}T00:00:00.000Z`);
@@ -93,9 +100,9 @@ describe('AnalyticsService', () => {
 
       const month = { gte: d('2026-09-01'), lte: d('2026-09-30') };
       const collected = { in: ['paid', 'partial'] };
-      expect(repo.countPatients).toHaveBeenNthCalledWith(1, {});
+      expect(repo.countPatients).toHaveBeenNthCalledWith(1, ND);
       expect(repo.countPatients).toHaveBeenNthCalledWith(2, {
-        AND: [{}, { createdAt: month }],
+        AND: [ND, { createdAt: month }],
       });
       expect(repo.countBookings).toHaveBeenNthCalledWith(1, {
         date: d('2026-09-15'),
@@ -136,7 +143,7 @@ describe('AnalyticsService', () => {
       });
       expect(repo.countPatients).toHaveBeenNthCalledWith(2, {
         AND: [
-          {},
+          ND,
           { createdAt: { gte: d('2026-10-01'), lte: d('2026-10-31') } },
         ],
       });
@@ -228,7 +235,7 @@ describe('AnalyticsService', () => {
       ]);
       const range = { gte: d('2026-07-01'), lte: d('2026-09-30') };
       expect(repo.patientsPerDay).toHaveBeenCalledWith({
-        AND: [{}, { createdAt: range }],
+        AND: [ND, { createdAt: range }],
       });
       expect(repo.bookingsPerDayAndStatus).toHaveBeenCalledWith({
         date: range,

@@ -1,6 +1,10 @@
 import { PaymentsRepository } from './payments.repository';
 import { PrismaService } from '../database/prisma.service';
 
+const PS = {
+  patient: { select: { firstName: true, lastName: true, deletedAt: true } },
+};
+
 describe('PaymentsRepository', () => {
   let prisma: any;
   let repo: PaymentsRepository;
@@ -28,6 +32,7 @@ describe('PaymentsRepository', () => {
     await repo.findAll({ status: 'paid' }, { skip: 10, take: 10 });
     expect(prisma.payment.findMany).toHaveBeenCalledWith({
       where: { status: 'paid' },
+      include: PS,
       orderBy: { date: 'desc' },
       skip: 10,
       take: 10,
@@ -38,6 +43,7 @@ describe('PaymentsRepository', () => {
     await repo.findAll();
     expect(prisma.payment.findMany).toHaveBeenLastCalledWith({
       where: undefined,
+      include: PS,
       orderBy: { date: 'desc' },
     });
   });
@@ -91,13 +97,18 @@ describe('PaymentsRepository', () => {
     await repo.findById('x');
     expect(prisma.payment.findUnique).toHaveBeenCalledWith({
       where: { id: 'x' },
+      include: PS,
     });
     await repo.create({ amount: 1 } as any);
-    expect(prisma.payment.create).toHaveBeenCalledWith({ data: { amount: 1 } });
+    expect(prisma.payment.create).toHaveBeenCalledWith({
+      data: { amount: 1 },
+      include: PS,
+    });
     await repo.update('x', { amount: 2 });
     expect(prisma.payment.update).toHaveBeenCalledWith({
       where: { id: 'x' },
       data: { amount: 2 },
+      include: PS,
     });
     await repo.delete('x');
     expect(prisma.payment.delete).toHaveBeenCalledWith({ where: { id: 'x' } });

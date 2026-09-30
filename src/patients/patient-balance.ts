@@ -38,7 +38,7 @@ export function computePatientBalance(p: BalanceSource): number {
   return credit - owed;
 }
 
-/** SQL twin of computePatientBalance: patients with balance < 0. */
+/** SQL twin of computePatientBalance: non-deleted patients with balance < 0. */
 export const debtorBalancesSql = Prisma.sql`
   SELECT p.id AS id,
          (COALESCE(pay.credit, 0) - COALESCE(v.owed, 0))::float8 AS balance
@@ -57,7 +57,8 @@ export const debtorBalancesSql = Prisma.sql`
     WHERE status = 'completed'
     GROUP BY patient_id
   ) v ON v.patient_id = p.id
-  WHERE COALESCE(pay.credit, 0) - COALESCE(v.owed, 0) < 0
+  WHERE p.deleted_at IS NULL
+    AND COALESCE(pay.credit, 0) - COALESCE(v.owed, 0) < 0
 `;
 
 /** Total outstanding debt (Σ −balance of debtors) and number of debtors. */

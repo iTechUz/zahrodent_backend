@@ -3,8 +3,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Payment, Prisma } from '@prisma/client';
-import { PaymentsRepository } from './payments.repository';
+import { Prisma } from '@prisma/client';
+import { PaymentsRepository, PaymentWithPatient } from './payments.repository';
+import {
+  connectActivePatient,
+  toPatientSummary,
+} from '../patients/patient-summary';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import {
@@ -87,7 +91,7 @@ export class PaymentsService {
     if (dto.visitId) await this.assertVisitBelongs(dto.visitId, dto.patientId);
     const dateStr = dto.date ?? todayInTashkent();
     const p = await this.paymentsRepository.create({
-      patient: { connect: { id: dto.patientId } },
+      patient: connectActivePatient(dto.patientId),
       amount: dto.amount,
       method: dto.method,
       status: dto.status,
@@ -123,7 +127,7 @@ export class PaymentsService {
       patient:
         dto.patientId === undefined
           ? undefined
-          : { connect: { id: dto.patientId } },
+          : connectActivePatient(dto.patientId),
       service:
         dto.serviceId === undefined
           ? undefined
@@ -207,7 +211,7 @@ export class PaymentsService {
     }
   }
 
-  private toResponse(p: Payment) {
+  private toResponse(p: PaymentWithPatient) {
     return {
       id: p.id,
       patientId: p.patientId,
@@ -220,6 +224,7 @@ export class PaymentsService {
       discount: p.discount ?? undefined,
       serviceId: p.serviceId ?? undefined,
       visitId: p.visitId ?? undefined,
+      patient: toPatientSummary(p.patient),
     };
   }
 }

@@ -291,6 +291,28 @@ describe('BookingsService', () => {
       expect(out.data[1].notes).toBeUndefined();
       expect(out.data[1].serviceId).toBeUndefined();
     });
+
+    it('o‘chirilgan bemor qabuli — patient nomi va deletedAt saqlanadi', async () => {
+      repo.findAll.mockResolvedValue({
+        data: [
+          {
+            ...booking(),
+            patient: {
+              firstName: 'Ali',
+              lastName: 'Valiyev',
+              deletedAt: new Date('2026-07-01T10:00:00.000Z'),
+            },
+          },
+        ],
+        total: 1,
+      } as any);
+      const out = await service.findAll({}, user);
+      expect(out.data[0].patient).toEqual({
+        firstName: 'Ali',
+        lastName: 'Valiyev',
+        deletedAt: '2026-07-01T10:00:00.000Z',
+      });
+    });
   });
 
   describe('findOne', () => {
@@ -349,7 +371,7 @@ describe('BookingsService', () => {
       );
       expect(repo.create).toHaveBeenCalledWith(
         {
-          patient: { connect: { id: 'p1' } },
+          patient: { connect: { id: 'p1', deletedAt: null } },
           doctor: { connect: { id: 'd1' } },
           date: new Date('2026-06-10T00:00:00.000Z'),
           time: '10:00',
@@ -630,7 +652,7 @@ describe('BookingsService', () => {
         expect.objectContaining({
           date: new Date('2026-07-01T00:00:00.000Z'),
           source: 'website',
-          patient: { connect: { id: 'p2' } },
+          patient: { connect: { id: 'p2', deletedAt: null } },
           doctor: { connect: { id: 'd2' } },
           service: { connect: { id: 's2' } },
         }),

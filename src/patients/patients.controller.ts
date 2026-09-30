@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -11,7 +12,8 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiConflictResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiTags,
@@ -27,6 +29,7 @@ import { ROLES_STAFF } from '../common/constants/role-groups';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { AuthUserView } from '../auth/auth.service';
 import { PatientsQueryDto } from './dto/patients-query.dto';
+import { PatientFindOneQueryDto } from './dto/patient-find-one-query.dto';
 
 @ApiTags('patients')
 @ApiBearerAuth('JWT')
@@ -49,10 +52,21 @@ export class PatientsController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Bitta bemor' })
+  @ApiOperation({
+    summary: 'Bitta bemor',
+    description:
+      "O'chirilgan bemor — 404, faqat admin `?includeDeleted=true` bilan ko'ra oladi (`deletedAt` to'ldirilgan).",
+  })
   @ApiParam({ name: 'id' })
-  findOne(@Param('id') id: string, @GetUser() user: AuthUserView) {
-    return this.patientsService.findOne(id, user);
+  @ApiNotFoundResponse({ description: 'Bemor topilmadi' })
+  findOne(
+    @Param('id') id: string,
+    @Query() query: PatientFindOneQueryDto,
+    @GetUser() user: AuthUserView,
+  ) {
+    return this.patientsService.findOne(id, user, {
+      includeDeleted: query.includeDeleted === 'true',
+    });
   }
 
   @Post()
@@ -76,14 +90,33 @@ export class PatientsController {
   @Delete(':id')
   @Roles('admin')
   @ApiOperation({
-    summary: "Bemorni o'chirish (faqat admin)",
+    summary: "Bemorni o'chirish — soft delete (faqat admin)",
     description:
-      "Tashrif yoki to'lovlari bor bemor o'chirilmaydi — 409 qaytadi.",
+      "`deletedAt` qo'yiladi: bemor barcha ro'yxat/statistika/qidiruvlardan yashiriladi. Tashrif, to'lov va o'tgan qabullar saqlanadi (moliya ro'yxatlarida `patient.deletedAt` bilan). Bugundan keyingi pending/confirmed qabullar `cancelled` qilinadi.",
   })
-  @ApiConflictResponse({ description: "Bemorda tashrif/to'lov tarixi bor" })
+  @ApiOkResponse({
+    schema: { type: 'object', properties: { id: { type: 'string' } } },
+  })
+  @ApiNotFoundResponse({
+    description: "Bemor topilmadi yoki allaqachon o'chirilgan",
+  })
   @ApiParam({ name: 'id' })
   remove(@Param('id') id: string, @GetUser() user: AuthUserView) {
     return this.patientsService.remove(id, user);
+  }
+
+  @Post(':id/restore')
+  @Roles('admin')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: "O'chirilgan bemorni tiklash (faqat admin)",
+    description:
+      "`deletedAt` tozalanadi va bemor qaytariladi. Bekor qilingan qabullar avtomatik tiklanmaydi. O'chirilmagan bemor uchun ham 200 (idempotent).",
+  })
+  @ApiParam({ name: 'id' })
+  @ApiNotFoundResponse({ description: 'Bemor topilmadi' })
+  restore(@Param('id') id: string) {
+    return this.patientsService.restore(id);
   }
 
   @Post(':id/comments')

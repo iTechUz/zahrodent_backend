@@ -4,8 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Booking, Prisma } from '@prisma/client';
-import { BookingsRepository } from './bookings.repository';
+import { Prisma } from '@prisma/client';
+import { BookingsRepository, BookingWithPatient } from './bookings.repository';
+import {
+  connectActivePatient,
+  toPatientSummary,
+} from '../patients/patient-summary';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 import { BookingsQueryDto } from './dto/bookings-query.dto';
@@ -119,7 +123,7 @@ export class BookingsService {
         }
         return this.bookingsRepository.create(
           {
-            patient: { connect: { id: dto.patientId } },
+            patient: connectActivePatient(dto.patientId),
             doctor: { connect: { id: dto.doctorId } },
             date: parseDateOnlyToUTC(dto.date),
             time: dto.time,
@@ -172,7 +176,7 @@ export class BookingsService {
       patient:
         dto.patientId === undefined
           ? undefined
-          : { connect: { id: dto.patientId } },
+          : connectActivePatient(dto.patientId),
       doctor:
         dto.doctorId === undefined
           ? undefined
@@ -357,7 +361,7 @@ export class BookingsService {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
   }
 
-  private toResponse(b: Booking) {
+  private toResponse(b: BookingWithPatient) {
     return {
       id: b.id,
       patientId: b.patientId,
@@ -369,6 +373,7 @@ export class BookingsService {
       notes: b.notes || undefined,
       createdAt: toDateOnlyString(b.createdAt),
       serviceId: b.serviceId ?? undefined,
+      patient: toPatientSummary(b.patient),
     };
   }
 }

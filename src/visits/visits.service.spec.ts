@@ -145,7 +145,7 @@ describe('VisitsService', () => {
         admin,
       );
       expect(repo.create).toHaveBeenCalledWith({
-        patient: { connect: { id: 'p1' } },
+        patient: { connect: { id: 'p1', deletedAt: null } },
         doctor: { connect: { id: 'd1' } },
         booking: undefined,
         date: new Date('2026-06-18T00:00:00.000Z'),
