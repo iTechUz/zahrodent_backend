@@ -9,8 +9,10 @@ Manba: `backend/src` dagi **haqiqiy** controller, DTO va guard kodlari. Base URL
 ### Autentifikatsiya
 
 - **JWT Bearer**: `Authorization: Bearer <access_token>`
-- Token **`POST /auth/login`** javobidagi `access_token` maydoni.
-- Himoyalangan marshrutlarda token yo‘q yoki yaroqsiz bo‘lsa: **`401 Unauthorized`**, xabar: `Invalid or missing token` (JWT guard).
+- Token **`POST /auth/login`** (yoki `/auth/refresh`) javobidagi `access_token`. Muddati `expires_in` soniya
+  (standart 15 daqiqa, `JWT_EXPIRES_IN`). Muddat tugagach — `POST /auth/refresh` (pastda).
+- Himoyalangan marshrutlarda token yo‘q yoki yaroqsiz bo‘lsa: **`401 Unauthorized`**, xabar: `Invalid or missing token` (JWT guard);
+  eski/o‘chirilgan foydalanuvchi tokeni: `Token yangilanishi kerak — qayta kiring`.
 
 ### RBAC (rollar)
 
@@ -19,14 +21,17 @@ Manba: `backend/src` dagi **haqiqiy** controller, DTO va guard kodlari. Base URL
 | Modul | Marshrutlar | Kim kiradi |
 |-------|-------------|------------|
 | `patients`, `bookings`, `visits`, `services` | GET | **staff** (admin, doctor, receptionist) |
-| `patients` | DELETE | **faqat admin** (tashrif/to‘lov tarixi bo‘lsa **409**) |
+| `patients` | DELETE (soft delete), `POST /:id/restore`, `GET /:id?includeDeleted=true` | **faqat admin** |
+| `settings` | GET | **staff** |
+| `settings` | PATCH | **faqat admin** |
 | `doctors` | GET `/doctors`, GET `/doctors/:id` | **staff** (doctor — faqat o‘qish) |
 | `doctors` | POST, PATCH, DELETE, `/stats`, `/efficiency` | **faqat admin** |
 | `services` | `/stats` | **admin, receptionist** |
 | `notifications` | GET | **staff** (doctor — faqat `doctorId` = o‘zi bo‘lgan yozuvlar) |
 | `notifications` | POST, `/send-reminders`, `/recipients`, `/bulk-send` | **admin, receptionist** |
 | `analytics` | `/dashboard`, `/monthly`, `/sources` | **staff** (pul maydonlari faqat admin uchun, boshqalarga `null`) |
-| `payments`, `users` | barcha | **faqat admin** (doctor/receptionist → **403**) |
+| `payments`, `users` | barcha | **faqat admin** (doctor/receptionist → **403** `Bu amal uchun ruxsat yo'q`) |
+| `auth` | `login`, `refresh`, `logout` — ochiq; `me`, `password` — tizimga kirgan har qanday foydalanuvchi | |
 
 **Doctor scope:** `doctor` roli faqat o‘z bemorlari (biriktirilgan / qabul / tashrif orqali), o‘z qabullari va tashriflarini ko‘radi. Doctor hisobiga `Doctor` yozuvi bog‘lanmagan bo‘lsa — **403** (`Shifokor profili topilmadi…`), hech qachon butun klinika ma’lumoti emas. Doctor tashrif yaratsa `doctorId` doim o‘zining id si bo‘ladi.
 
@@ -63,12 +68,17 @@ Barcha HTTP xatolari va filtr orqali:
 
 ```json
 {
+  "success": false,
   "statusCode": 400,
+  "message": "age: age must not be less than 1",
   "path": "/patients",
   "timestamp": "2026-04-14T12:00:00.000Z",
-  "message": "Bad Request"
+  "requestId": "0b6c3f0e-5c1b-4f7e-9d8a-2a9f7f1c1e11"
 }
 ```
+
+`requestId` — `X-Request-Id` javob headeri bilan bir xil (so‘rovda yuborilgan `X-Request-Id` `[A-Za-z0-9_.:-]{1,128}` bo‘lsa o‘sha).
+Xato haqida xabar berishda shu id ni ko‘rsating — server loglarida har qatorda bor.
 
 500 da `message` umumiy Uzbekcha xabar (ichki tafsilot faqat server logida). Prisma xatolari: `P2002` → **409**, `P2025` → **404**, `P2003` → **400** (DELETE da **409**).
 
@@ -76,90 +86,145 @@ Barcha HTTP xatolari va filtr orqali:
 
 ## Modul: Auth
 
-**Controller:** `AuthController` — prefix `/auth`  
-**Guard:** yo‘q
+**Controller:** `AuthController` — prefix `/auth`. Rate limit (IP bo‘yicha): login 25/daqiqa, refresh 30/daqiqa, password 10/daqiqa.
 
-| Method | Marshrut | Tavsif |
-|--------|----------|--------|
-| POST | `/auth/login` | Email/parol, JWT va foydalanuvchi profili |
+| Method | Marshrut | Auth | Tavsif |
+|--------|----------|------|--------|
+| POST | `/auth/login` | ochiq | Telefon + parol → access + refresh token |
+| POST | `/auth/refresh` | ochiq | Refresh token rotation → yangi juftlik |
+| POST | `/auth/logout` | ochiq | Refresh tokenni bekor qilish (idempotent) |
+| GET | `/auth/me` | Bearer | Joriy foydalanuvchi |
+| PATCH | `/auth/password` | Bearer | O‘z parolini almashtirish |
 
-### POST /auth/login
+### POST /auth/login → 201
 
-**Body** (`LoginDto`):
-
-| Maydon | Tur | Qoidalar |
-|--------|-----|----------|
-| `email` | string | `@IsEmail()` |
-| `password` | string | `@IsString()`, `@MinLength(1)` |
-
-**Muvaffaqiyat (200):**
+**Body** (`LoginDto`): `phone` — `+998XXXXXXXXX`; `password` — string, min 1.
 
 ```json
 {
-  "access_token": "<jwt>",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "yhrk0LYe...(64 belgi, base64url)",
+  "expires_in": 900,
   "user": {
     "id": "u1",
-    "name": "Dr. Zahro Admin",
-    "email": "admin@zahro.dental",
+    "name": "Admin",
+    "phone": "+998900000000",
     "role": "admin",
-    "specialty": "...",
-    "avatar": "..."
+    "specialty": "…ixtiyoriy",
+    "avatar": "…ixtiyoriy",
+    "doctorId": "…faqat doctor roli uchun"
   }
 }
 ```
 
-**401:** noto‘g‘ri email yoki parol — xabar: `Email yoki parol noto'g'ri` (`UnauthorizedException`).
+- **401** `Telefon raqami yoki parol noto'g'ri` (noma’lum telefon va noto‘g‘ri parol uchun bir xil).
+- **400** noto‘g‘ri telefon formati / bo‘sh parol.
 
-**400:** bo‘sh yoki noto‘g‘ri DTO.
+### POST /auth/refresh → 200
+
+**Body:** `{ "refresh_token": "<string, 1..512>" }` — javob login bilan **bir xil shakl**
+(`access_token`, `refresh_token`, `expires_in`, `user`).
+
+- Taqdim etilgan refresh token bekor qilinadi, o‘rniga yangisi beriladi (rotation). Har safar yangi `refresh_token` ni saqlang.
+- **Bekor qilingan** token qayta yuborilsa — shu login’dan kelib chiqqan barcha tokenlar (family) bekor qilinadi.
+- Muddati o‘tgan, noma’lum, bekor qilingan yoki foydalanuvchi o‘chirilgan: **401** `Sessiya muddati tugagan, qayta kiring`.
+- Bir vaqtda faqat **bitta** refresh so‘rovi yuboring: bir token bilan parallel ikki so‘rov qayta ishlatish deb hisoblanadi.
+- Refresh token muddati `REFRESH_TOKEN_TTL_DAYS` (standart 30 kun). Bazada faqat sha256 hash saqlanadi.
+
+### POST /auth/logout → 200
+
+**Body:** `{ "refresh_token": "..." }` → `{ "success": true }`. Token allaqachon bekor/noma’lum bo‘lsa ham `success: true`.
+Access token muddati tugaguncha ishlaydi — mijoz uni o‘chirib tashlashi kerak.
+
+### GET /auth/me → 200
+
+```json
+{ "id": "u1", "name": "Admin", "phone": "+998900000000", "role": "admin", "doctorId": null }
+```
+
+`doctorId` — doctor roli uchun Doctor yozuvi id si, boshqalar uchun `null`. Token yo‘q/yaroqsiz — **401**.
+
+### PATCH /auth/password → 200
+
+**Body:** `{ "currentPassword": "string (1..72)", "newPassword": "string (8..72)" }` → `{ "success": true }`.
+
+- **400** `Joriy parol noto'g'ri`; **400** validatsiya (masalan `newPassword: Yangi parol kamida 8 belgidan iborat bo'lishi kerak`).
+- Muvaffaqiyatda foydalanuvchining **barcha** refresh tokenlari bekor qilinadi (joriy sessiya ham — access token muddati
+  tugagach qayta login kerak).
+
+### Sessiyalarni bekor qilish (boshqa hollarda)
+
+Admin `PATCH /users/:id` da parol yoki rolni o‘zgartirsa, `PATCH /doctors/:id` da shifokor login paroli yangilansa —
+o‘sha foydalanuvchining refresh tokenlari bekor qilinadi. `DELETE /users/:id` — tokenlar kaskad bilan o‘chadi.
 
 ---
 
 ## Modul: Patients
 
 **Controller:** `PatientsController` — `/patients`  
-**Guard:** `JwtAuthGuard` + `RolesGuard` — staff rollar
+**Guard:** `JwtAuthGuard` + `RolesGuard` — staff rollar (yaratish: admin, receptionist; o‘chirish/tiklash: admin)
 
 | Method | Marshrut | Query | Tavsif |
 |--------|----------|-------|--------|
-| GET | `/patients` | `search?`, `limit?` | Ro‘yxat, ixtiyoriy qidiruv |
-| GET | `/patients/:id` | — | Bitta bemor |
+| GET | `/patients` | `page, limit, search, sortBy, order, source, startDate, endDate, debtOnly, doctorId` | Ro‘yxat (o‘chirilganlarsiz) |
+| GET | `/patients/stats` | — | `{ total, newThisMonth, topSource }` (o‘chirilganlarsiz) |
+| GET | `/patients/:id` | `includeDeleted=true` (faqat admin) | Bitta bemor |
 | POST | `/patients` | — | Yaratish |
 | PATCH | `/patients/:id` | — | Yangilash (tish xaritasi shu yerda) |
-| DELETE | `/patients/:id` | — | O‘chirish |
+| DELETE | `/patients/:id` | — | **Soft delete** (admin) |
+| POST | `/patients/:id/restore` | — | Tiklash (admin) |
+| POST / GET | `/patients/:id/comments` | — | Izohlar |
 
-### GET /patients
+### Bemor obyekti
 
-- **Query:** `search` (ixtiyoriy) — `firstName`, `lastName`, `phone` bo‘yicha `contains` (case insensitive).
+```json
+{
+  "id": "cmu…",
+  "firstName": "Ali",
+  "lastName": "Valiyev",
+  "age": 30,
+  "phone": "+998901112233",
+  "source": "walk-in",
+  "notes": "",
+  "address": "Toshkent",
+  "workplace": "IT",
+  "avatar": "…ixtiyoriy",
+  "balance": -150000,
+  "createdAt": "2026-06-01",
+  "assignedDoctorId": null,
+  "assignedDoctor": { "firstName": "Aziz", "lastName": "Karimov" },
+  "toothChart": {},
+  "telegramConnected": false,
+  "deletedAt": null
+}
+```
 
-**Javob (200):** `Patient` obyektlari massivi (service `toResponse`: `id`, `firstName`, `lastName`, `age`, `phone`, `source`, `notes`, `avatar?`, `createdAt` (YYYY-MM-DD), `allergies?`, `bloodType?`, `toothChart?`).
+- `telegramConnected` — bemor Telegram botga o‘z raqamini yuborgan (eslatmalar bot orqali boradi).
+- `deletedAt` — ISO vaqt yoki `null`; faqat `includeDeleted=true` bilan olingan o‘chirilgan bemorda to‘ldirilgan.
 
-### GET /patients/:id
+### DELETE /patients/:id — soft delete → 200 `{ "id": "<id>" }`
 
-- **404:** `Patient not found`
+- `deleted_at` qo‘yiladi (409 endi qaytmaydi — tarixli bemor ham o‘chiriladi).
+- Bemor barcha ro‘yxat, statistika, qidiruv, qarzdorlar, analitika, eslatma va SMS qabul qiluvchilar ro‘yxatidan chiqadi.
+- Bugundan boshlab (Asia/Tashkent) `pending`/`confirmed` qabullari `cancelled` qilinadi.
+- Tashriflar, to‘lovlar va o‘tgan qabullar saqlanadi; ularda `patient.deletedAt` to‘ldirilgan holda ism ko‘rinadi.
+- O‘chirilgan bemorga yangi qabul/tashrif/to‘lov bog‘lab bo‘lmaydi — **404** `So'ralgan yoki bog'langan yozuv topilmadi`.
+- O‘chirilgan bemor uchun `GET /:id`, `PATCH`, izohlar, qayta `DELETE` — **404** `Bemor topilmadi`.
+
+### GET /patients/:id?includeDeleted=true
+
+Faqat admin uchun o‘chirilgan bemorni qaytaradi (`deletedAt` bilan). Boshqa rollar uchun parametr e’tiborsiz (404).
+
+### POST /patients/:id/restore → 200
+
+`deletedAt` tozalanadi, bemor obyekti qaytadi. Bekor qilingan qabullar avtomatik tiklanmaydi. O‘chirilmagan bemor uchun
+ham 200 (idempotent). Topilmasa **404**.
 
 ### POST /patients
 
-**Body** (`CreatePatientDto`):
-
-| Maydon | Majburiy | Qoidalar |
-|--------|----------|----------|
-| `firstName` | ha | string, min 1 |
-| `lastName` | ha | string, min 1 |
-| `age` | ha | int ≥ 1 |
-| `phone` | ha | `+?[\d\s-]{10,20}` |
-| `source` | ha | `walk-in` \| `telegram` \| `website` \| `phone` |
-| `notes`, `allergies`, `bloodType`, `avatar` | yo‘q | string |
-| `toothChart` | yo‘q | object |
-
-**200:** yaratilgan bemor (yoki Nest default 201 — kodda `return` service natijasi, status controllerda implicit 200/201).
-
-### PATCH /patients/:id
-
-**Body:** `UpdatePatientDto` — `PartialType(CreatePatientDto)` (barcha maydonlar ixtiyoriy).
-
-### DELETE /patients/:id
-
-**Javob:** `{ "id": "<id>" }`
+**Body** (`CreatePatientDto`): `firstName`, `lastName` (min 1), `age` (int ≥ 1), `phone` (`+?[\d\s-]{10,20}`),
+`source` (`walk-in` | `telegram` | `website` | `phone`), `address` (min 3), `workplace` (min 1); ixtiyoriy `notes`,
+`avatar`, `assignedDoctorId`, `toothChart`.
 
 ---
 
@@ -216,7 +281,11 @@ Barcha HTTP xatolari va filtr orqali:
 - `source` — agar `all` bo‘lmasa, shu manba
 - `search` — bemorni `firstName` / `lastName` bo‘yicha qidiruv
 
-**Javob:** `id`, `patientId`, `doctorId`, `date` (YYYY-MM-DD), `time`, `source`, `status`, `notes?`, `createdAt`, `serviceId?`.
+**Javob:** `id`, `patientId`, `doctorId`, `date` (YYYY-MM-DD), `time`, `source`, `status`, `notes?`, `createdAt`, `serviceId?`,
+`patient: { firstName, lastName, deletedAt }` (o‘chirilgan bemor qabullarida ham ism saqlanadi, `deletedAt` — ISO yoki `null`).
+
+`visits` va `payments` javoblarida ham xuddi shunday `patient: { firstName, lastName, deletedAt }` maydoni bor
+(ro‘yxat, bitta yozuv, yaratish va yangilash javoblari).
 
 ### POST /bookings — Body (`CreateBookingDto`)
 
@@ -315,7 +384,9 @@ Barcha HTTP xatolari va filtr orqali:
 |--------|----------|--------|
 | GET | `/notifications` | Tarix |
 | POST | `/notifications` | Bitta yozuv yaratish |
-| POST | `/notifications/send-reminders` | Pending/confirmed qabullar uchun eslatmalar (bulk) |
+| POST | `/notifications/send-reminders` | Pending/confirmed qabullar uchun eslatmalar (Telegram yoki SMS) |
+| GET | `/notifications/recipients` | Eslatma/SMS qabul qiluvchilar |
+| POST | `/notifications/bulk-send` | Ommaviy xabar |
 
 ### POST /notifications — Body (`CreateNotificationDto`)
 
@@ -329,11 +400,70 @@ Barcha HTTP xatolari va filtr orqali:
 
 ### POST /notifications/send-reminders
 
-**Body:** bo‘sh JSON `{}` yoki content-type bilan mos body.
+**Body:** bo‘sh JSON `{}`.
 
-**Javob:** `{ "created", "smsSent", "smsFailed", "skipped" }`. Faqat **bugungi va ertangi** (Asia/Tashkent) `pending` / `confirmed` va **`reminderSentAt: null`** qabullar olinadi. **`reminderSentAt`** faqat haqiqatan yuborilgan SMS lar uchun yoziladi — ular qayta yuborilmaydi; xato bo‘lganlari keyingi safar qayta urinadi. Bitta SMS xatosi (tarmoq/timeout) butun partiyani to‘xtatmaydi.
+**Javob:**
 
-**Eskiz.uz SMS:** `ESKIZ_EMAIL` va `ESKIZ_PASSWORD` sozlangan bo‘lsa SMS `notify.eskiz.uz` orqali yuboriladi. Sozlanmagan bo‘lsa yoki bemor manbasi `telegram` bo‘lsa (Telegram kanal hali yo‘q) — yozuv `failed` sifatida saqlanadi (`skipped`), qabul belgilanmaydi. `bulk-send` da ham xuddi shunday; shifokorga yuborilgan SMS bemor qabulini belgilamaydi.
+```json
+{ "created": 4, "smsSent": 1, "smsFailed": 1, "telegramSent": 1, "telegramFailed": 0, "skipped": 1 }
+```
+
+- Oyna: bugundan `bugun + reminderDaysAhead` gacha (Asia/Tashkent, `/settings`, standart 1 — bugun va ertaga),
+  `pending` / `confirmed`, `reminderSentAt: null`, bemor o‘chirilmagan.
+- Kanal: bemorda `telegram_chat_id` bor va bot shu jarayonda ishlayapti → Telegram (`telegramReminderTemplate`);
+  aks holda Eskiz SMS (`smsReminderTemplate`). Telegram xatosi SMS ga o‘tkazilmaydi.
+- `reminderSentAt` faqat haqiqatan yuborilganlar uchun yoziladi; xatolar `failed` yozuv bo‘lib qoladi va keyingi
+  safar qayta uriniladi. Bitta xato butun partiyani to‘xtatmaydi.
+- `skipped` — Eskiz sozlanmagan, yuborishga urinilmagan (`failed` yozuv).
+
+### Bulk send / recipients
+
+- `GET /notifications/recipients?targetType=patient|doctor&startDate&endDate` — o‘chirilgan bemorlar qabullari kirmaydi.
+- `POST /notifications/bulk-send { targetIds, targetType, message }` → `{ sent, failed, total }`. `[bemor]`, `[sana]`,
+  `[vaqt]` almashtiriladi. Telegram’ga ulangan bemorlarga (bot ishlayotgan bo‘lsa) Telegram orqali, qolganlarga SMS.
+  O‘chirilgan bemorlar o‘tkazib yuboriladi. Shifokorga yuborilgan SMS bemor qabulini belgilamaydi.
+
+---
+
+## Modul: Settings
+
+**Controller:** `SettingsController` — `/settings`. Bitta qatorli `clinic_settings` jadvali.
+
+| Method | Marshrut | Rollar |
+|--------|----------|--------|
+| GET | `/settings` | admin, doctor, receptionist |
+| PATCH | `/settings` | faqat admin |
+
+### GET /settings → 200
+
+```json
+{
+  "clinicName": "Zahro Dental",
+  "address": "",
+  "phone": "",
+  "workingHours": "",
+  "smsReminderTemplate": "Hurmatli {name}, {date} kuni soat {time} da {doctor} qabuliga yozilgansiz. Zahro Dental",
+  "telegramReminderTemplate": "Hurmatli {name}, {date} kuni soat {time} da {doctor} qabuliga yozilgansiz. Zahro Dental",
+  "reminderDaysAhead": 1
+}
+```
+
+### PATCH /settings → 200 (yangilangan obyekt)
+
+Qisman — faqat yuborilgan maydonlar o‘zgaradi:
+
+| Maydon | Qoidalar |
+|--------|----------|
+| `clinicName` | string, 1..100 |
+| `address` | string, ≤ 300 |
+| `phone` | string, ≤ 50 |
+| `workingHours` | string, ≤ 200 |
+| `smsReminderTemplate`, `telegramReminderTemplate` | string, 1..500 |
+| `reminderDaysAhead` | int, 0..7 (0 — faqat bugun) |
+
+Placeholderlar: `{name}` — bemor ism familiyasi, `{date}` — `DD.MM.YYYY`, `{time}` — `HH:mm`, `{doctor}` — shifokor
+ism familiyasi, `{clinic}` — `clinicName`. Noma’lum `{...}` o‘zgarishsiz qoladi.
+Noto‘g‘ri qiymat — **400**; admin bo‘lmasa — **403** `Bu amal uchun ruxsat yo'q`.
 
 ---
 
@@ -354,16 +484,11 @@ Ulanishda JWT majburiy: `io(url, { auth: { token } })` (yoki `Authorization: Bea
 
 ## Seed foydalanuvchilar (lokal test)
 
-`prisma/seed.ts` (ishlab chiqish uchun):
-
-| Email | Rol |
-|-------|-----|
-| `admin@zahro.dental` | admin |
-| `kamila@zahro.dental`, `farrukh@zahro.dental` | doctor |
-| `gulnora@zahro.dental`, `madina@zahro.dental` | receptionist |
-
-Parollar seed faylida; productionda **hech qachon** seed parollarini ishlatmang.
+`npm run prisma:seed` (`prisma/seed.ts`, faqat development — **barcha jadvallarni tozalaydi**, `NODE_ENV=production` da
+ishlamaydi) admin foydalanuvchini `.env` dagi `INITIAL_ADMIN_PHONE` / `INITIAL_ADMIN_PASSWORD` / `INITIAL_ADMIN_NAME`
+bilan qayta yaratadi (boshqa ma'lumot qo'shmaydi). Productionda seed ishlatilmaydi — birinchi admin server startida
+`INITIAL_ADMIN_*` dan yaratiladi.
 
 ---
 
-*Hujjat versiyasi: koddan avtomatik moslashtirilgan. Swagger `/swagger` da JWT **Authorize** bilan sinab ko‘rish mumkin.*
+*Hujjat koddagi controller/DTO/guard'lar bilan moslashtirilgan (2026-09-30). Swagger `/swagger` da JWT **Authorize** bilan sinab ko‘rish mumkin.*
