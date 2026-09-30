@@ -53,6 +53,22 @@ describe('AllExceptionsFilter', () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
+  it('requestId javobga qo‘shiladi (req.requestId)', () => {
+    (req as any).requestId = 'rid-1';
+    filter.catch(new NotFoundException('Topilmadi'), host);
+    expect(body()).toMatchObject({ requestId: 'rid-1', statusCode: 404 });
+  });
+
+  it('500 da ham requestId bor', () => {
+    (req as any).requestId = 'rid-2';
+    filter.catch(new Error('boom'), host);
+    expect(body()).toMatchObject({
+      requestId: 'rid-2',
+      statusCode: 500,
+      message: INTERNAL_ERROR_MESSAGE,
+    });
+  });
+
   it('validation xatolari massivi "; " bilan birlashtiriladi', () => {
     filter.catch(new BadRequestException(['phone: xato', 'age: xato']), host);
     expect(res.status).toHaveBeenCalledWith(400);

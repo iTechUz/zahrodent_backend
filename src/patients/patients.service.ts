@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   PatientsRepository,
@@ -25,10 +21,12 @@ import {
   doctorScopeId,
 } from '../common/auth/doctor-scope';
 import { computePatientBalance } from './patient-balance';
+import { ACTIVE_BOOKING_STATUSES } from '../bookings/bookings.service';
 
 export const PATIENT_NOT_FOUND = 'Bemor topilmadi';
-export const PATIENT_HAS_HISTORY =
-  "Bemorni o'chirib bo'lmaydi: unga bog'langan tashriflar yoki to'lovlar mavjud";
+
+/** Soft-deleted patients are hidden from every list, stat and lookup. */
+export const NOT_DELETED: Prisma.PatientWhereInput = { deletedAt: null };
 
 @Injectable()
 export class PatientsService {
@@ -49,7 +47,7 @@ export class PatientsService {
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
 
-    const and: Prisma.PatientWhereInput[] = [];
+    const and: Prisma.PatientWhereInput[] = [NOT_DELETED];
 
     const scope = this.scopeWhere(user);
     if (scope) and.push(scope);
@@ -79,7 +77,7 @@ export class PatientsService {
       and.push({ id: { in: debtors.map((d) => d.id) } });
     }
 
-    const where: Prisma.PatientWhereInput = and.length ? { AND: and } : {};
+    const where: Prisma.PatientWhereInput = { AND: and };
 
     const { data, total } = await this.patientsRepository.findAll(where, {
       skip,
@@ -92,10 +90,21 @@ export class PatientsService {
     return { data: data.map((p) => this.toResponse(p)), total };
   }
 
-  async findOne(id: string, user: AuthUserView) {
+  /**
+   * A soft-deleted patient is 404 unless an admin asks for it explicitly
+   * (`includeDeleted`).
+   */
+  async findOne(
+    id: string,
+    user: AuthUserView,
+    opts: { includeDeleted?: boolean } = {},
+  ) {
     const scope = this.scopeWhere(user);
     const p = await this.patientsRepository.findById(id);
     if (!p) throw new NotFoundException(PATIENT_NOT_FOUND);
+    if (p.deletedAt && !(opts.includeDeleted && user.role === 'admin')) {
+      throw new NotFoundException(PATIENT_NOT_FOUND);
+    }
 
     if (scope) {
       const hasAccess = await this.patientsRepository.count({
@@ -153,15 +162,27 @@ export class PatientsService {
     return this.toResponse(p);
   }
 
+  /**
+   * Soft delete (admin). History stays; upcoming pending/confirmed bookings
+   * (today onwards, Asia/Tashkent) are cancelled. Already deleted → 404.
+   */
   async remove(id: string, user: AuthUserView) {
     await this.ensureExists(id, user);
-    // visits/payments cascade on delete — refuse instead of wiping history.
-    const history = await this.patientsRepository.countHistory(id);
-    if (history.visits > 0 || history.payments > 0) {
-      throw new ConflictException(PATIENT_HAS_HISTORY);
-    }
-    await this.patientsRepository.delete(id);
+    await this.patientsRepository.softDelete(
+      id,
+      new Date(),
+      parseDateOnlyToUTC(todayInTashkent()),
+      ACTIVE_BOOKING_STATUSES,
+    );
     return { id };
+  }
+
+  /** Undo a soft delete (admin). Cancelled bookings stay cancelled. */
+  async restore(id: string) {
+    const p = await this.patientsRepository.findById(id);
+    if (!p) throw new NotFoundException(PATIENT_NOT_FOUND);
+    if (!p.deletedAt) return this.toResponse(p);
+    return this.toResponse(await this.patientsRepository.restore(id));
   }
 
   private async ensureExists(id: string, user: AuthUserView) {
@@ -170,7 +191,9 @@ export class PatientsService {
 
   async getStats(user: AuthUserView) {
     const scope = this.scopeWhere(user);
-    const where: Prisma.PatientWhereInput = scope ?? {};
+    const where: Prisma.PatientWhereInput = scope
+      ? { AND: [NOT_DELETED, scope] }
+      : NOT_DELETED;
 
     const month = monthBoundsOf(todayInTashkent());
 
@@ -229,6 +252,8 @@ export class PatientsService {
           }
         : undefined,
       toothChart: (p.toothChart as Record<number, unknown> | null) ?? undefined,
+      telegramConnected: Boolean(p.telegramChatId),
+      deletedAt: p.deletedAt ? p.deletedAt.toISOString() : null,
     };
   }
 }

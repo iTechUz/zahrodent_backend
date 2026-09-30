@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { User } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { revokeAllUserRefreshTokens } from './refresh-tokens.repository';
 
 @Injectable()
 export class UsersRepository {
@@ -34,6 +35,17 @@ export class UsersRepository {
     return this.prisma.doctor.findUnique({
       where: { userId },
       select: { id: true },
+    });
+  }
+
+  /** New password hash + every refresh token revoked, atomically. */
+  async updatePasswordAndRevokeSessions(
+    id: string,
+    passwordHash: string,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id }, data: { passwordHash } });
+      await revokeAllUserRefreshTokens(tx, id);
     });
   }
 }

@@ -1,30 +1,39 @@
 import { ForbiddenException, Logger } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { NotificationsRepository } from './notifications.repository';
-import { BookingsRepository } from '../bookings/bookings.repository';
 import { PatientsRepository } from '../patients/patients.repository';
 import { EskizService } from './eskiz.service';
 import { PrismaService } from '../database/prisma.service';
+import { SettingsService, SettingsView } from '../settings/settings.service';
+import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
+import { DEFAULT_REMINDER_TEMPLATE } from '../settings/reminder-template';
 
 type Mocks = {
   service: NotificationsService;
   notificationsRepo: jest.Mocked<
-    Pick<NotificationsRepository, 'createMany' | 'findAll' | 'create'>
-  >;
-  bookingsRepo: jest.Mocked<
-    Pick<BookingsRepository, 'findAll' | 'markReminderSent'>
-  >;
-  patientsRepo: jest.Mocked<
     Pick<
-      PatientsRepository,
-      'findSourcesByPatientIds' | 'findPhonesByPatientIds' | 'findById'
+      NotificationsRepository,
+      'createMany' | 'findAll' | 'create' | 'findReminderCandidates'
     >
   >;
+  patientsRepo: jest.Mocked<Pick<PatientsRepository, 'findById'>>;
   eskiz: jest.Mocked<
     Pick<EskizService, 'isConfigured' | 'normalizeMobile' | 'sendSms'>
   >;
+  settings: { get: jest.Mock };
+  telegram: { isAvailable: jest.Mock; sendMessage: jest.Mock };
   prisma: any;
   txMock: any;
+};
+
+const SETTINGS: SettingsView = {
+  clinicName: 'Zahro Dental',
+  address: '',
+  phone: '',
+  workingHours: '',
+  smsReminderTemplate: DEFAULT_REMINDER_TEMPLATE,
+  telegramReminderTemplate: 'TG: {name} {date} {time} {doctor} {clinic}',
+  reminderDaysAhead: 1,
 };
 
 function setup(): Mocks {
@@ -32,20 +41,20 @@ function setup(): Mocks {
     createMany: jest.fn().mockResolvedValue(undefined),
     findAll: jest.fn(),
     create: jest.fn(),
-  };
-  const bookingsRepo = {
-    findAll: jest.fn(),
-    markReminderSent: jest.fn().mockResolvedValue(undefined),
+    findReminderCandidates: jest.fn().mockResolvedValue([]),
   };
   const patientsRepo = {
-    findSourcesByPatientIds: jest.fn(),
-    findPhonesByPatientIds: jest.fn().mockResolvedValue([]),
     findById: jest.fn(),
   };
   const eskiz = {
     isConfigured: jest.fn().mockReturnValue(false),
     normalizeMobile: jest.fn(),
     sendSms: jest.fn(),
+  };
+  const settings = { get: jest.fn().mockResolvedValue({ ...SETTINGS }) };
+  const telegram = {
+    isAvailable: jest.fn().mockReturnValue(false),
+    sendMessage: jest.fn().mockResolvedValue({ ok: true }),
   };
   const txMock = {
     notification: { createMany: jest.fn().mockResolvedValue(undefined) },
@@ -59,17 +68,19 @@ function setup(): Mocks {
   };
   const service = new NotificationsService(
     notificationsRepo as unknown as NotificationsRepository,
-    bookingsRepo as unknown as BookingsRepository,
     patientsRepo as unknown as PatientsRepository,
     eskiz as unknown as EskizService,
     prisma as unknown as PrismaService,
+    settings as unknown as SettingsService,
+    telegram as unknown as TelegramBotRegistry,
   );
   return {
     service,
     notificationsRepo,
-    bookingsRepo,
     patientsRepo,
     eskiz,
+    settings,
+    telegram,
     prisma,
     txMock,
   } as unknown as Mocks;
@@ -79,350 +90,197 @@ const realNormalize = (phone: string) =>
   new EskizService().normalizeMobile(phone);
 
 describe('NotificationsService.sendReminders', () => {
-  let service: NotificationsService;
-  let notificationsRepo: Mocks['notificationsRepo'];
-  let bookingsRepo: Mocks['bookingsRepo'];
-  let patientsRepo: Mocks['patientsRepo'];
-  let eskiz: Mocks['eskiz'];
-  let prisma: PrismaService;
-  let txMock: any;
+  let m: Mocks;
 
   beforeEach(() => {
-    ({
-      service,
-      notificationsRepo,
-      bookingsRepo,
-      patientsRepo,
-      eskiz,
-      prisma,
-      txMock,
-    } = setup());
-    void notificationsRepo;
+    m = setup();
+    m.eskiz.normalizeMobile.mockImplementation(realNormalize);
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
   });
 
-  const b = (id: string, patientId: string, time = '10:00') => ({
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  const cand = (
+    id: string,
+    over: {
+      phone?: string;
+      chat?: string | null;
+      time?: string;
+      patientId?: string;
+    } = {},
+  ) => ({
     id,
-    patientId,
-    doctorId: 'd1',
-    date: new Date('2026-06-01'),
-    time,
-    source: 'phone',
-    status: 'pending',
-    notes: '',
-    createdAt: new Date('2026-06-01'),
-    serviceId: null,
-    reminderSentAt: null,
+    patientId: over.patientId ?? `p-${id}`,
+    date: new Date('2026-07-01T00:00:00.000Z'),
+    time: over.time ?? '10:30',
+    patient: {
+      firstName: 'Ali',
+      lastName: 'Valiyev',
+      phone: over.phone ?? '+998901112233',
+      telegramChatId: over.chat ?? null,
+    },
+    doctor: { firstName: 'Aziz', lastName: 'Karimov' },
   });
 
-  it('booking bo‘lmasa created: 0', async () => {
-    bookingsRepo.findAll.mockResolvedValue({ data: [], total: 0 } as any);
-    const out = await service.sendReminders();
-    expect(out).toEqual(expect.objectContaining({ created: 0 }));
-    expect((prisma as any).$transaction).not.toHaveBeenCalled();
-  });
+  const rows = () => m.txMock.notification.createMany.mock.calls[0][0].data;
 
-  it('bir marta patients batch, createMany bitta chaqiruv', async () => {
-    const d = new Date('2026-06-01');
-    bookingsRepo.findAll.mockResolvedValue({
-      data: [
-        {
-          id: 'b1',
-          patientId: 'p1',
-          doctorId: 'd1',
-          date: d,
-          time: '10:00',
-          source: 'phone',
-          status: 'pending',
-          notes: '',
-          createdAt: d,
-          serviceId: null,
-          reminderSentAt: null,
-        },
-      ],
-      total: 1,
-    } as any);
-    patientsRepo.findSourcesByPatientIds.mockResolvedValue([
-      { id: 'p1', source: 'phone' },
-    ]);
-    patientsRepo.findPhonesByPatientIds.mockResolvedValue([
-      { id: 'p1', phone: '+998901112233' },
-    ]);
-    eskiz.isConfigured.mockReturnValue(true);
-    eskiz.normalizeMobile.mockImplementation(realNormalize);
-    eskiz.sendSms.mockResolvedValue({ ok: true });
-
-    const out = await service.sendReminders();
-    expect(out.created).toBe(1);
-    expect(patientsRepo.findSourcesByPatientIds).toHaveBeenCalledTimes(1);
-    expect(patientsRepo.findPhonesByPatientIds).toHaveBeenCalledWith(['p1']);
-    expect(patientsRepo.findSourcesByPatientIds).toHaveBeenCalledWith(['p1']);
-    expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
-    expect(txMock.notification.createMany).toHaveBeenCalledWith({
-      data: expect.arrayContaining([
-        expect.objectContaining({
-          patientId: 'p1',
-          type: 'sms',
-          status: 'sent',
-        }),
-      ]),
+  it('booking bo‘lmasa — tranzaksiya yo‘q, hammasi 0', async () => {
+    await expect(m.service.sendReminders()).resolves.toEqual({
+      created: 0,
+      smsSent: 0,
+      smsFailed: 0,
+      telegramSent: 0,
+      telegramFailed: 0,
+      skipped: 0,
     });
-    expect(txMock.booking.updateMany).toHaveBeenCalledWith({
+    expect(m.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('oyna — bugun..bugun+reminderDaysAhead (Toshkent), faol statuslar', async () => {
+    // 2026-06-30 20:00Z = 2026-07-01 01:00 Toshkent
+    jest.useFakeTimers({ now: new Date('2026-06-30T20:00:00.000Z') });
+    m.settings.get.mockResolvedValue({ ...SETTINGS, reminderDaysAhead: 3 });
+    await m.service.sendReminders();
+    expect(m.notificationsRepo.findReminderCandidates).toHaveBeenCalledWith(
+      new Date('2026-07-01T00:00:00.000Z'),
+      new Date('2026-07-04T00:00:00.000Z'),
+      ['pending', 'confirmed'],
+    );
+  });
+
+  it('reminderDaysAhead = 0 — faqat bugun', async () => {
+    jest.useFakeTimers({ now: new Date('2026-07-01T06:00:00.000Z') });
+    m.settings.get.mockResolvedValue({ ...SETTINGS, reminderDaysAhead: 0 });
+    await m.service.sendReminders();
+    const [from, to] = m.notificationsRepo.findReminderCandidates.mock.calls[0];
+    expect(from).toEqual(to);
+  });
+
+  it('Telegram bog‘langan + bot ishlayapti — bot orqali, shablon bilan, belgilanadi', async () => {
+    m.telegram.isAvailable.mockReturnValue(true);
+    m.eskiz.isConfigured.mockReturnValue(true);
+    m.notificationsRepo.findReminderCandidates.mockResolvedValue([
+      cand('b1', { chat: '777' }),
+    ] as any);
+
+    const out = await m.service.sendReminders();
+
+    expect(m.telegram.sendMessage).toHaveBeenCalledWith(
+      '777',
+      'TG: Ali Valiyev 01.07.2026 10:30 Aziz Karimov Zahro Dental',
+    );
+    expect(m.eskiz.sendSms).not.toHaveBeenCalled();
+    expect(out).toMatchObject({ created: 1, telegramSent: 1, smsSent: 0 });
+    expect(rows()[0]).toMatchObject({
+      patientId: 'p-b1',
+      type: 'telegram',
+      status: 'sent',
+    });
+    expect(m.txMock.booking.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ['b1'] }, reminderSentAt: null },
       data: { reminderSentAt: expect.any(Date) },
     });
   });
 
-  it('faqat pending/confirmed, hali eslatilmagan, bugun..ertaga (Toshkent)', async () => {
-    bookingsRepo.findAll.mockResolvedValue({ data: [], total: 0 } as any);
-    // 2026-06-01 20:00Z = 2026-06-02 01:00 Toshkent
-    await service.sendReminders(new Date('2026-06-01T20:00:00.000Z'));
-    expect(bookingsRepo.findAll).toHaveBeenCalledWith({
-      status: { in: ['confirmed', 'pending'] },
-      reminderSentAt: null,
-      date: {
-        gte: new Date('2026-06-02T00:00:00.000Z'),
-        lte: new Date('2026-06-03T00:00:00.000Z'),
-      },
+  it('Telegram xatosi — failed, belgilanmaydi, SMS ga o‘tmaydi', async () => {
+    m.telegram.isAvailable.mockReturnValue(true);
+    m.eskiz.isConfigured.mockReturnValue(true);
+    m.telegram.sendMessage.mockResolvedValue({
+      ok: false,
+      error: 'Forbidden: bot was blocked by the user',
     });
+    m.notificationsRepo.findReminderCandidates.mockResolvedValue([
+      cand('b1', { chat: '777' }),
+    ] as any);
+
+    const out = await m.service.sendReminders();
+
+    expect(out).toMatchObject({ telegramFailed: 1, telegramSent: 0 });
+    expect(rows()[0]).toMatchObject({ type: 'telegram', status: 'failed' });
+    expect(m.eskiz.sendSms).not.toHaveBeenCalled();
+    expect(m.txMock.booking.updateMany).not.toHaveBeenCalled();
   });
 
-  it('xabar matni sana va vaqt bilan', async () => {
-    bookingsRepo.findAll.mockResolvedValue({
-      data: [b('b1', 'p1', '14:30')],
-      total: 1,
-    } as any);
-    patientsRepo.findSourcesByPatientIds.mockResolvedValue([
-      { id: 'p1', source: 'telegram' },
-    ]);
-    await service.sendReminders();
-    expect(
-      txMock.notification.createMany.mock.calls[0][0].data[0].message,
-    ).toBe('Eslatma: Sizning qabulingiz 2026-06-01 kuni soat 14:30 da');
+  it('chatId bor, lekin bot ishlamayapti — SMS (SMS shabloni)', async () => {
+    m.eskiz.isConfigured.mockReturnValue(true);
+    m.eskiz.sendSms.mockResolvedValue({ ok: true } as any);
+    m.notificationsRepo.findReminderCandidates.mockResolvedValue([
+      cand('b1', { chat: '777' }),
+    ] as any);
+
+    const out = await m.service.sendReminders();
+
+    expect(m.telegram.sendMessage).not.toHaveBeenCalled();
+    expect(m.eskiz.sendSms).toHaveBeenCalledWith(
+      '998901112233',
+      'Hurmatli Ali Valiyev, 01.07.2026 kuni soat 10:30 da Aziz Karimov qabuliga yozilgansiz. Zahro Dental',
+    );
+    expect(out).toMatchObject({ smsSent: 1 });
+    expect(rows()[0]).toMatchObject({ type: 'sms', status: 'sent' });
   });
 
-  it('bemor topilmasa (source yo‘q) — o‘tkazib yuboriladi, tranzaksiya yo‘q', async () => {
-    bookingsRepo.findAll.mockResolvedValue({
-      data: [b('b1', 'ghost')],
-      total: 1,
-    } as any);
-    patientsRepo.findSourcesByPatientIds.mockResolvedValue([]);
-    await expect(service.sendReminders()).resolves.toEqual({
-      created: 0,
-      smsSent: 0,
-      smsFailed: 0,
+  it('Eskiz o‘chiq — SMS yozuvi failed (skipped), belgilanmaydi', async () => {
+    m.notificationsRepo.findReminderCandidates.mockResolvedValue([
+      cand('b1'),
+    ] as any);
+    const out = await m.service.sendReminders();
+    expect(out).toMatchObject({ created: 1, skipped: 1, smsFailed: 0 });
+    expect(m.eskiz.sendSms).not.toHaveBeenCalled();
+    expect(rows()[0]).toMatchObject({ type: 'sms', status: 'failed' });
+    expect(m.txMock.booking.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('aralash: SMS ok, SMS xato, telefon noto‘g‘ri, reject, Telegram ok', async () => {
+    m.eskiz.isConfigured.mockReturnValue(true);
+    m.telegram.isAvailable.mockReturnValue(true);
+    m.eskiz.sendSms.mockImplementation(async (mobile: string) => {
+      if (mobile === '998900000002') return { ok: false, error: 'x' } as any;
+      if (mobile === '998900000004') throw new Error('timeout');
+      return { ok: true } as any;
+    });
+    m.notificationsRepo.findReminderCandidates.mockResolvedValue([
+      cand('b1', { phone: '+998900000001' }),
+      cand('b2', { phone: '+998900000002' }),
+      cand('b3', { phone: 'bad' }),
+      cand('b4', { phone: '+998900000004' }),
+      cand('b5', { chat: '55' }),
+    ] as any);
+
+    const out = await m.service.sendReminders();
+
+    expect(out).toEqual({
+      created: 5,
+      smsSent: 1,
+      smsFailed: 3,
+      telegramSent: 1,
+      telegramFailed: 0,
       skipped: 0,
     });
-    expect((prisma as any).$transaction).not.toHaveBeenCalled();
-  });
-
-  // Fixed: with Eskiz not configured, reminders were recorded as "sent" and
-  // bookings marked, so the patient never got a real reminder later.
-  it('Eskiz o‘chiq — SMS yozuvi "failed", booking belgilanmaydi', async () => {
-    bookingsRepo.findAll.mockResolvedValue({
-      data: [b('b1', 'p1')],
-      total: 1,
-    } as any);
-    patientsRepo.findSourcesByPatientIds.mockResolvedValue([
-      { id: 'p1', source: 'walk-in' },
+    expect(rows().map((r: any) => [r.type, r.status])).toEqual([
+      ['sms', 'sent'],
+      ['sms', 'failed'],
+      ['sms', 'failed'],
+      ['sms', 'failed'],
+      ['telegram', 'sent'],
     ]);
-    const out = await service.sendReminders();
-    expect(out).toEqual({ created: 1, smsSent: 0, smsFailed: 0, skipped: 1 });
-    expect(eskiz.sendSms).not.toHaveBeenCalled();
-    expect(
-      txMock.notification.createMany.mock.calls[0][0].data[0],
-    ).toMatchObject({ type: 'sms', status: 'failed' });
-    expect(txMock.booking.updateMany).not.toHaveBeenCalled();
-  });
-
-  it('telegram manbali bemor — kanal yo‘q: "failed", booking belgilanmaydi', async () => {
-    bookingsRepo.findAll.mockResolvedValue({
-      data: [b('b1', 'p1')],
-      total: 1,
-    } as any);
-    patientsRepo.findSourcesByPatientIds.mockResolvedValue([
-      { id: 'p1', source: 'telegram' },
-    ]);
-    eskiz.isConfigured.mockReturnValue(true);
-    const out = await service.sendReminders();
-    expect(out).toEqual({ created: 1, smsSent: 0, smsFailed: 0, skipped: 1 });
-    expect(
-      txMock.notification.createMany.mock.calls[0][0].data[0],
-    ).toMatchObject({ type: 'telegram', status: 'failed' });
-    expect(txMock.booking.updateMany).not.toHaveBeenCalled();
-  });
-
-  describe('Eskiz yoqiq', () => {
-    beforeEach(() => {
-      eskiz.isConfigured.mockReturnValue(true);
-      eskiz.normalizeMobile.mockImplementation(realNormalize);
-    });
-
-    it('muvaffaqiyatli, xato va telefonsiz holatlar aralash', async () => {
-      bookingsRepo.findAll.mockResolvedValue({
-        data: [
-          b('b1', 'p1'),
-          b('b2', 'p2'),
-          b('b3', 'p3'),
-          b('b4', 'p4'),
-          b('b5', 'p5'),
-        ],
-        total: 5,
-      } as any);
-      patientsRepo.findSourcesByPatientIds.mockResolvedValue([
-        { id: 'p1', source: 'phone' },
-        { id: 'p2', source: 'phone' },
-        { id: 'p3', source: 'phone' },
-        { id: 'p4', source: 'telegram' },
-        { id: 'p5', source: 'website' },
-      ]);
-      patientsRepo.findPhonesByPatientIds.mockResolvedValue([
-        { id: 'p1', phone: '+998 90 111 22 33' },
-        { id: 'p2', phone: '+998901112244' },
-        { id: 'p3', phone: '12345' },
-      ]);
-      eskiz.sendSms.mockImplementation(async (mobile: string) =>
-        mobile === '998901112233'
-          ? { ok: true as const }
-          : { ok: false as const, error: 'HTTP 500' },
-      );
-
-      const out = await service.sendReminders();
-      expect(out).toEqual({
-        created: 5,
-        smsSent: 1,
-        smsFailed: 3,
-        skipped: 1,
-      });
-      expect(eskiz.sendSms).toHaveBeenCalledTimes(2);
-      expect(eskiz.sendSms).toHaveBeenCalledWith(
-        '998901112233',
-        expect.stringContaining('Eslatma'),
-      );
-
-      const rows = txMock.notification.createMany.mock.calls[0][0].data;
-      expect(rows.map((r: any) => [r.patientId, r.type, r.status])).toEqual([
-        ['p1', 'sms', 'sent'],
-        ['p2', 'sms', 'failed'],
-        ['p3', 'sms', 'failed'],
-        ['p4', 'telegram', 'failed'],
-        ['p5', 'sms', 'failed'],
-      ]);
-      // Faqat muvaffaqiyatli yuborilganlar belgilanadi (qayta urinish uchun).
-      expect(txMock.booking.updateMany.mock.calls[0][0].where.id.in).toEqual([
-        'b1',
-      ]);
-    });
-
-    it('hammasi xato — updateMany chaqirilmaydi, lekin yozuvlar saqlanadi', async () => {
-      bookingsRepo.findAll.mockResolvedValue({
-        data: [b('b1', 'p1')],
-        total: 1,
-      } as any);
-      patientsRepo.findSourcesByPatientIds.mockResolvedValue([
-        { id: 'p1', source: 'phone' },
-      ]);
-      patientsRepo.findPhonesByPatientIds.mockResolvedValue([]);
-      const out = await service.sendReminders();
-      expect(out).toEqual({
-        created: 1,
-        smsSent: 0,
-        smsFailed: 1,
-        skipped: 0,
-      });
-      expect(txMock.notification.createMany).toHaveBeenCalled();
-      expect(txMock.booking.updateMany).not.toHaveBeenCalled();
-    });
-
-    it('ko‘p booking (concurrency > 5) — tartib saqlanadi', async () => {
-      const ids = Array.from({ length: 12 }, (_, i) => i);
-      bookingsRepo.findAll.mockResolvedValue({
-        data: ids.map((i) => b(`b${i}`, `p${i}`)),
-        total: 12,
-      } as any);
-      patientsRepo.findSourcesByPatientIds.mockResolvedValue(
-        ids.map((i) => ({ id: `p${i}`, source: 'phone' })),
-      );
-      patientsRepo.findPhonesByPatientIds.mockResolvedValue(
-        ids.map((i) => ({
-          id: `p${i}`,
-          phone: `+9989011122${String(i).padStart(2, '0')}`,
-        })),
-      );
-      let inFlight = 0;
-      let maxInFlight = 0;
-      eskiz.sendSms.mockImplementation(async () => {
-        inFlight++;
-        maxInFlight = Math.max(maxInFlight, inFlight);
-        await new Promise((r) => setImmediate(r));
-        inFlight--;
-        return { ok: true as const };
-      });
-      const out = await service.sendReminders();
-      expect(out).toEqual({
-        created: 12,
-        smsSent: 12,
-        smsFailed: 0,
-        skipped: 0,
-      });
-      expect(maxInFlight).toBeLessThanOrEqual(5);
-      expect(maxInFlight).toBeGreaterThan(1);
-      const rows = txMock.notification.createMany.mock.calls[0][0].data;
-      expect(rows.map((r: any) => r.patientId)).toEqual(
-        ids.map((i) => `p${i}`),
-      );
+    expect(m.txMock.booking.updateMany.mock.calls[0][0].where.id).toEqual({
+      in: ['b1', 'b5'],
     });
   });
 
-  // Fixed: the query had no date window, so reminders went out for every
-  // pending/confirmed booking ever (stale past ones and months ahead).
-  it('sendReminders — faqat bugungi va ertangi qabullar so‘raladi', async () => {
-    bookingsRepo.findAll.mockResolvedValue({ data: [], total: 0 } as any);
-    await service.sendReminders(new Date('2026-12-31T10:00:00.000Z'));
-    const where = bookingsRepo.findAll.mock.calls[0][0] as any;
-    expect(where.date).toEqual({
-      gte: new Date('2026-12-31T00:00:00.000Z'),
-      lte: new Date('2027-01-01T00:00:00.000Z'),
-    });
-    // still only not-yet-reminded bookings → a sent reminder is never re-sent
-    expect(where.reminderSentAt).toBeNull();
-  });
-
-  // Fixed: one rejected sendSms (network error / timeout) rejected the whole
-  // run — nothing recorded or marked although other SMS were delivered, so
-  // they were re-sent next time.
-  it('sendReminders — bitta SMS xatosi (reject) butun partiyani yiqitmaydi', async () => {
-    eskiz.isConfigured.mockReturnValue(true);
-    eskiz.normalizeMobile.mockImplementation(realNormalize);
-    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
-    bookingsRepo.findAll.mockResolvedValue({
-      data: [b('b1', 'p1'), b('b2', 'p2'), b('b3', 'p3')],
-      total: 3,
-    } as any);
-    patientsRepo.findSourcesByPatientIds.mockResolvedValue([
-      { id: 'p1', source: 'phone' },
-      { id: 'p2', source: 'phone' },
-      { id: 'p3', source: 'phone' },
-    ]);
-    patientsRepo.findPhonesByPatientIds.mockResolvedValue([
-      { id: 'p1', phone: '+998901112201' },
-      { id: 'p2', phone: '+998901112202' },
-      { id: 'p3', phone: '+998901112203' },
-    ]);
-    eskiz.sendSms.mockImplementation(async (mobile: string) => {
-      if (mobile === '998901112202') throw new Error('socket hang up');
-      return { ok: true as const };
-    });
-
-    const out = await service.sendReminders();
-    expect(out).toEqual({ created: 3, smsSent: 2, smsFailed: 1, skipped: 0 });
-    const rows = txMock.notification.createMany.mock.calls[0][0].data;
-    expect(rows.map((r: any) => r.status)).toEqual(['sent', 'failed', 'sent']);
-    // delivered ones are marked (never re-sent), the failed one is retried
-    expect(txMock.booking.updateMany.mock.calls[0][0].where.id.in).toEqual([
-      'b1',
-      'b3',
-    ]);
-    jest.restoreAllMocks();
+  it('shifokor ismi bo‘sh — "shifokor"', async () => {
+    m.eskiz.isConfigured.mockReturnValue(true);
+    m.eskiz.sendSms.mockResolvedValue({ ok: true } as any);
+    const c = cand('b1');
+    c.doctor = { firstName: '', lastName: '' };
+    m.notificationsRepo.findReminderCandidates.mockResolvedValue([c] as any);
+    await m.service.sendReminders();
+    expect(m.eskiz.sendSms.mock.calls[0][1]).toContain(
+      'soat 10:30 da shifokor',
+    );
   });
 });
 
@@ -660,6 +518,7 @@ describe('NotificationsService (boshqa metodlar)', () => {
               lte: new Date('2026-06-18T00:00:00.000Z'),
             },
             status: { in: ['confirmed', 'pending'] },
+            patient: { deletedAt: null },
             reminderSentAt: null,
           },
           orderBy: { date: 'asc' },
@@ -778,7 +637,9 @@ describe('NotificationsService (boshqa metodlar)', () => {
 
       expect(out).toEqual({ sent: 1, failed: 2, total: 3 });
       expect(m.prisma.patient.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: { in: ['p1', 'p2', 'p3'] } } }),
+        expect.objectContaining({
+          where: { id: { in: ['p1', 'p2', 'p3'] }, deletedAt: null },
+        }),
       );
       expect(m.eskiz.sendSms).toHaveBeenCalledWith(
         '998901112233',
@@ -802,6 +663,40 @@ describe('NotificationsService (boshqa metodlar)', () => {
       expect(m.txMock.booking.updateMany).toHaveBeenCalledWith({
         where: { id: { in: ['b1'] }, reminderSentAt: null },
         data: { reminderSentAt: expect.any(Date) },
+      });
+    });
+
+    it('Telegram bog‘langan bemor + bot ishlayapti — bot orqali, SMS emas', async () => {
+      m.eskiz.isConfigured.mockReturnValue(true);
+      m.telegram.isAvailable.mockReturnValue(true);
+      m.telegram.sendMessage
+        .mockResolvedValueOnce({ ok: true })
+        .mockResolvedValueOnce({ ok: false, error: 'blocked' });
+      m.prisma.patient.findMany.mockResolvedValue([
+        { ...target('p1', '+998901112233', upcoming), telegramChatId: '11' },
+        {
+          ...target('p2', '+998901112244', { ...upcoming, id: 'b2' }),
+          telegramChatId: '22',
+        },
+      ]);
+      const out = await m.service.bulkSend({
+        targetIds: ['p1', 'p2'],
+        targetType: 'patient',
+        message: 'Salom [bemor]',
+      });
+      expect(out).toEqual({ sent: 1, failed: 1, total: 2 });
+      expect(m.eskiz.sendSms).not.toHaveBeenCalled();
+      expect(m.telegram.sendMessage).toHaveBeenCalledWith(
+        '11',
+        'Salom Ali Valiyev',
+      );
+      const rows = m.txMock.notification.createMany.mock.calls[0][0].data;
+      expect(rows.map((r: any) => [r.type, r.status])).toEqual([
+        ['telegram', 'sent'],
+        ['telegram', 'failed'],
+      ]);
+      expect(m.txMock.booking.updateMany.mock.calls[0][0].where.id).toEqual({
+        in: ['b1'],
       });
     });
 

@@ -2,6 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { Payment, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { debtSummarySql } from '../patients/patient-balance';
+import {
+  PatientSummaryRow,
+  WITH_PATIENT_SUMMARY,
+} from '../patients/patient-summary';
+
+export type PaymentWithPatient = Payment & {
+  patient?: PatientSummaryRow | null;
+};
 
 @Injectable()
 export class PaymentsRepository {
@@ -14,10 +22,11 @@ export class PaymentsRepository {
       take?: number;
       orderBy?: Prisma.PaymentOrderByWithRelationInput[];
     },
-  ): Promise<{ data: Payment[]; total: number }> {
+  ): Promise<{ data: PaymentWithPatient[]; total: number }> {
     const [data, total] = await Promise.all([
       this.prisma.payment.findMany({
         where,
+        include: WITH_PATIENT_SUMMARY,
         orderBy: opts?.orderBy ?? { date: 'desc' },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
@@ -92,16 +101,26 @@ export class PaymentsRepository {
     }));
   }
 
-  findById(id: string): Promise<Payment | null> {
-    return this.prisma.payment.findUnique({ where: { id } });
+  findById(id: string): Promise<PaymentWithPatient | null> {
+    return this.prisma.payment.findUnique({
+      where: { id },
+      include: WITH_PATIENT_SUMMARY,
+    });
   }
 
-  create(data: Prisma.PaymentCreateInput): Promise<Payment> {
-    return this.prisma.payment.create({ data });
+  create(data: Prisma.PaymentCreateInput): Promise<PaymentWithPatient> {
+    return this.prisma.payment.create({ data, include: WITH_PATIENT_SUMMARY });
   }
 
-  update(id: string, data: Prisma.PaymentUpdateInput): Promise<Payment> {
-    return this.prisma.payment.update({ where: { id }, data });
+  update(
+    id: string,
+    data: Prisma.PaymentUpdateInput,
+  ): Promise<PaymentWithPatient> {
+    return this.prisma.payment.update({
+      where: { id },
+      data,
+      include: WITH_PATIENT_SUMMARY,
+    });
   }
 
   delete(id: string): Promise<Payment> {

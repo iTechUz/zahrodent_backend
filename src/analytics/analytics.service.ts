@@ -35,9 +35,10 @@ export class AnalyticsService {
   private scopes(user: AuthUserView) {
     const doctorId = doctorScopeId(user);
     return {
+      // Soft-deleted patients never count.
       patients: (doctorId
-        ? doctorPatientsWhere(doctorId)
-        : {}) as Prisma.PatientWhereInput,
+        ? { AND: [{ deletedAt: null }, doctorPatientsWhere(doctorId)] }
+        : { deletedAt: null }) as Prisma.PatientWhereInput,
       bookings: (doctorId ? { doctorId } : {}) as Prisma.BookingWhereInput,
       canSeeMoney: user.role === 'admin',
     };

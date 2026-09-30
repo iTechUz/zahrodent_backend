@@ -55,7 +55,7 @@ describe('RolesGuard', () => {
   it('user yo‘q — 403', () => {
     reflector.getAllAndOverride.mockReturnValue(['admin']);
     expect(() => guard.canActivate(ctx(undefined))).toThrow(
-      'Insufficient role',
+      "Bu amal uchun ruxsat yo'q",
     );
   });
 });

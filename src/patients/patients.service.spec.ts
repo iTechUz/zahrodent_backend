@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { DOCTOR_PROFILE_MISSING_MESSAGE } from '../common/auth/doctor-scope';
 import { PatientsService } from './patients.service';
 import { PatientsRepository } from './patients.repository';
@@ -18,12 +14,12 @@ describe('PatientsService', () => {
       | 'count'
       | 'create'
       | 'update'
-      | 'delete'
+      | 'softDelete'
+      | 'restore'
       | 'groupBySource'
       | 'createComment'
       | 'findCommentsByPatientId'
       | 'findDebtors'
-      | 'countHistory'
     >
   >;
 
@@ -40,6 +36,7 @@ describe('PatientsService', () => {
     role: 'doctor',
     doctorId: 'd1',
   };
+  const ND = { deletedAt: null };
   const doctorScope = {
     OR: [
       { assignedDoctorId: 'd1' },
@@ -75,12 +72,12 @@ describe('PatientsService', () => {
       count: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
-      delete: jest.fn(),
+      softDelete: jest.fn().mockResolvedValue({ cancelledBookings: 0 }),
+      restore: jest.fn(),
       groupBySource: jest.fn(),
       createComment: jest.fn(),
       findCommentsByPatientId: jest.fn(),
       findDebtors: jest.fn().mockResolvedValue([]),
-      countHistory: jest.fn().mockResolvedValue({ visits: 0, payments: 0 }),
     };
     service = new PatientsService(repo as unknown as PatientsRepository);
   });
@@ -97,20 +94,26 @@ describe('PatientsService', () => {
 
     it('default pagination va bo‘sh where', async () => {
       await service.findAll({}, admin);
-      expect(repo.findAll).toHaveBeenCalledWith({}, { skip: 0, take: 10 });
+      expect(repo.findAll).toHaveBeenCalledWith(
+        { AND: [ND] },
+        { skip: 0, take: 10 },
+      );
     });
 
     it('page*limit skip ga aylanadi', async () => {
       await service.findAll({ page: 3, limit: 20 }, admin);
-      expect(repo.findAll).toHaveBeenCalledWith({}, { skip: 60, take: 20 });
+      expect(repo.findAll).toHaveBeenCalledWith(
+        { AND: [ND] },
+        { skip: 60, take: 20 },
+      );
     });
 
     it('source "all" bo‘lsa filtr yo‘q, aks holda bor', async () => {
       await service.findAll({ source: 'all' }, admin);
-      expect(repo.findAll.mock.calls[0][0]).toEqual({});
+      expect(repo.findAll.mock.calls[0][0]).toEqual({ AND: [ND] });
       await service.findAll({ source: 'telegram' }, admin);
       expect(repo.findAll.mock.calls[1][0]).toEqual({
-        AND: [{ source: 'telegram' }],
+        AND: [ND, { source: 'telegram' }],
       });
     });
 
@@ -123,6 +126,7 @@ describe('PatientsService', () => {
       );
       expect(where()).toEqual({
         AND: [
+          ND,
           {
             createdAt: {
               gte: new Date('2026-06-01T00:00:00.000Z'),
@@ -135,35 +139,35 @@ describe('PatientsService', () => {
 
     it('faqat endDate', async () => {
       await service.findAll({ endDate: '2026-06-30' }, admin);
-      expect(where().AND[0].createdAt).toEqual({
+      expect(where().AND[1].createdAt).toEqual({
         lte: new Date('2026-06-30T00:00:00.000Z'),
       });
     });
 
     it('search — ism/familiya/telefon bo‘yicha OR (trim)', async () => {
       await service.findAll({ search: ' ali ' }, admin);
-      expect(where()).toEqual({ AND: [search('ali')] });
+      expect(where()).toEqual({ AND: [ND, search('ali')] });
     });
 
     it('bo‘sh joyli search e’tiborsiz', async () => {
       await service.findAll({ search: '   ' }, admin);
-      expect(where()).toEqual({});
+      expect(where()).toEqual({ AND: [ND] });
     });
 
     it('doctorId — biriktirilgan shifokor bo‘yicha', async () => {
       await service.findAll({ doctorId: 'd9' }, admin);
-      expect(where()).toEqual({ AND: [{ assignedDoctorId: 'd9' }] });
+      expect(where()).toEqual({ AND: [ND, { assignedDoctorId: 'd9' }] });
     });
 
     it('doctor — faqat o‘z bemorlari (biriktirilgan, booking yoki visit)', async () => {
       await service.findAll({}, doctor);
-      expect(where()).toEqual({ AND: [doctorScope] });
+      expect(where()).toEqual({ AND: [ND, doctorScope] });
     });
 
     it('doctor + search + source — hammasi AND bilan', async () => {
       await service.findAll({ search: 'ali', source: 'phone' }, doctor);
       expect(where()).toEqual({
-        AND: [doctorScope, { source: 'phone' }, search('ali')],
+        AND: [ND, doctorScope, { source: 'phone' }, search('ali')],
       });
     });
 
@@ -183,7 +187,7 @@ describe('PatientsService', () => {
       ]);
       await service.findAll({ debtOnly: 'true', source: 'phone' }, admin);
       expect(where()).toEqual({
-        AND: [{ source: 'phone' }, { id: { in: ['p1', 'p7'] } }],
+        AND: [ND, { source: 'phone' }, { id: { in: ['p1', 'p7'] } }],
       });
     });
 
@@ -198,7 +202,7 @@ describe('PatientsService', () => {
     it('debtOnly=false — filtr yo‘q', async () => {
       await service.findAll({ debtOnly: 'false' }, admin);
       expect(repo.findDebtors).not.toHaveBeenCalled();
-      expect(where()).toEqual({});
+      expect(where()).toEqual({ AND: [ND] });
     });
 
     it('natija response formatiga o‘giriladi va total saqlanadi', async () => {
@@ -213,6 +217,8 @@ describe('PatientsService', () => {
         assignedDoctorId: null,
         assignedDoctor: undefined,
         toothChart: undefined,
+        telegramConnected: false,
+        deletedAt: null,
       });
     });
 
@@ -241,6 +247,35 @@ describe('PatientsService', () => {
   });
 
   describe('findOne', () => {
+    it('o‘chirilgan bemor — 404; admin includeDeleted bilan ko‘radi', async () => {
+      const deletedAt = new Date('2026-07-01T10:00:00.000Z');
+      repo.findById.mockResolvedValue(row({ deletedAt }) as any);
+      await expect(service.findOne('p1', admin)).rejects.toThrow(
+        new NotFoundException('Bemor topilmadi'),
+      );
+      await expect(
+        service.findOne('p1', admin, { includeDeleted: true }),
+      ).resolves.toMatchObject({
+        id: 'p1',
+        deletedAt: '2026-07-01T10:00:00.000Z',
+      });
+      const receptionist: AuthUserView = { ...admin, role: 'receptionist' };
+      await expect(
+        service.findOne('p1', receptionist, { includeDeleted: true }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('o‘chirilgan bemorni yangilash / izoh — 404', async () => {
+      repo.findById.mockResolvedValue(row({ deletedAt: new Date() }) as any);
+      await expect(
+        service.update('p1', { firstName: 'X' }, admin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(
+        service.addComment({ content: 'x', patientId: 'p1' }, admin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
     it('topilmasa 404', async () => {
       repo.findById.mockResolvedValue(null);
       await expect(service.findOne('x', admin)).rejects.toThrow(
@@ -425,35 +460,62 @@ describe('PatientsService', () => {
     });
   });
 
-  describe('remove', () => {
+  describe('remove (soft delete)', () => {
+    afterEach(() => jest.useRealTimers());
+
     it('404 bo‘lsa o‘chirmaydi', async () => {
       repo.findById.mockResolvedValue(null);
       await expect(service.remove('x', admin)).rejects.toBeInstanceOf(
         NotFoundException,
       );
-      expect(repo.delete).not.toHaveBeenCalled();
+      expect(repo.softDelete).not.toHaveBeenCalled();
     });
 
-    it('o‘chiradi va id qaytaradi', async () => {
+    it('allaqachon o‘chirilgan — 404', async () => {
+      repo.findById.mockResolvedValue(row({ deletedAt: new Date() }) as any);
+      await expect(service.remove('p1', admin)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('tarixi bo‘lsa ham 409 emas — deletedAt qo‘yiladi, bugundan keyingi faol qabullar bekor', async () => {
+      // 2026-06-30 20:00Z = 2026-07-01 Toshkent
+      jest.useFakeTimers({ now: new Date('2026-06-30T20:00:00.000Z') });
       repo.findById.mockResolvedValue(row() as any);
       await expect(service.remove('p1', admin)).resolves.toEqual({ id: 'p1' });
-      expect(repo.countHistory).toHaveBeenCalledWith('p1');
-      expect(repo.delete).toHaveBeenCalledWith('p1');
+      expect(repo.softDelete).toHaveBeenCalledWith(
+        'p1',
+        new Date('2026-06-30T20:00:00.000Z'),
+        new Date('2026-07-01T00:00:00.000Z'),
+        ['pending', 'confirmed'],
+      );
+    });
+  });
+
+  describe('restore', () => {
+    it('topilmasa 404', async () => {
+      repo.findById.mockResolvedValue(null);
+      await expect(service.restore('x')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
 
-    it.each([[{ visits: 2, payments: 0 }], [{ visits: 0, payments: 1 }]])(
-      'tarixi bor bemor (%p) — 409, o‘chirilmaydi',
-      async (history) => {
-        repo.findById.mockResolvedValue(row() as any);
-        repo.countHistory.mockResolvedValue(history);
-        await expect(service.remove('p1', admin)).rejects.toThrow(
-          new ConflictException(
-            "Bemorni o'chirib bo'lmaydi: unga bog'langan tashriflar yoki to'lovlar mavjud",
-          ),
-        );
-        expect(repo.delete).not.toHaveBeenCalled();
-      },
-    );
+    it('o‘chirilgan bemor tiklanadi', async () => {
+      repo.findById.mockResolvedValue(row({ deletedAt: new Date() }) as any);
+      repo.restore.mockResolvedValue(row() as any);
+      const out = await service.restore('p1');
+      expect(repo.restore).toHaveBeenCalledWith('p1');
+      expect(out).toMatchObject({ id: 'p1', deletedAt: null });
+    });
+
+    it('o‘chirilmagan bemor — idempotent, yozuv yo‘q', async () => {
+      repo.findById.mockResolvedValue(row() as any);
+      await expect(service.restore('p1')).resolves.toMatchObject({
+        id: 'p1',
+      });
+      expect(repo.restore).not.toHaveBeenCalled();
+    });
   });
 
   describe('getStats', () => {
@@ -472,11 +534,11 @@ describe('PatientsService', () => {
         newThisMonth: 12,
         topSource: 'telegram',
       });
-      expect(repo.count).toHaveBeenNthCalledWith(1, {});
+      expect(repo.count).toHaveBeenNthCalledWith(1, ND);
       expect(repo.count).toHaveBeenNthCalledWith(2, {
-        AND: [{}, { createdAt: { gte: new Date('2026-07-01T00:00:00.000Z') } }],
+        AND: [ND, { createdAt: { gte: new Date('2026-07-01T00:00:00.000Z') } }],
       });
-      expect(repo.groupBySource).toHaveBeenCalledWith({});
+      expect(repo.groupBySource).toHaveBeenCalledWith(ND);
     });
 
     it('source yo‘q bo‘lsa N/A', async () => {
@@ -489,9 +551,12 @@ describe('PatientsService', () => {
       repo.count.mockResolvedValue(3);
       repo.groupBySource.mockResolvedValue([] as any);
       await service.getStats(doctor);
-      expect(repo.count).toHaveBeenNthCalledWith(1, doctorScope);
+      expect(repo.count).toHaveBeenNthCalledWith(1, { AND: [ND, doctorScope] });
       expect(repo.count).toHaveBeenNthCalledWith(2, {
-        AND: [doctorScope, { createdAt: { gte: expect.any(Date) } }],
+        AND: [
+          { AND: [ND, doctorScope] },
+          { createdAt: { gte: expect.any(Date) } },
+        ],
       });
     });
 
@@ -505,7 +570,9 @@ describe('PatientsService', () => {
       await expect(service.getStats(doctor)).resolves.toMatchObject({
         topSource: 'website',
       });
-      expect(repo.groupBySource).toHaveBeenCalledWith(doctorScope);
+      expect(repo.groupBySource).toHaveBeenCalledWith({
+        AND: [ND, doctorScope],
+      });
     });
   });
 

@@ -1,6 +1,10 @@
 import { BookingsRepository } from './bookings.repository';
 import { PrismaService } from '../database/prisma.service';
 
+const PS = {
+  patient: { select: { firstName: true, lastName: true, deletedAt: true } },
+};
+
 describe('BookingsRepository', () => {
   let prisma: any;
   let repo: BookingsRepository;
@@ -25,6 +29,7 @@ describe('BookingsRepository', () => {
     await repo.findAll({ doctorId: 'd1' }, { skip: 0, take: 10 });
     expect(prisma.booking.findMany).toHaveBeenCalledWith({
       where: { doctorId: 'd1' },
+      include: PS,
       orderBy: [{ date: 'desc' }, { time: 'desc' }],
       skip: 0,
       take: 10,
@@ -32,6 +37,7 @@ describe('BookingsRepository', () => {
     await repo.findAll();
     expect(prisma.booking.findMany).toHaveBeenLastCalledWith({
       where: undefined,
+      include: PS,
       orderBy: [{ date: 'desc' }, { time: 'desc' }],
     });
   });
@@ -68,6 +74,7 @@ describe('BookingsRepository', () => {
     await repo.findById('b1');
     expect(prisma.booking.findUnique).toHaveBeenCalledWith({
       where: { id: 'b1' },
+      include: PS,
     });
     await repo.findServiceById('s1');
     expect(prisma.service.findUnique).toHaveBeenCalledWith({
@@ -76,11 +83,13 @@ describe('BookingsRepository', () => {
     await repo.create({ time: '10:00' } as any);
     expect(prisma.booking.create).toHaveBeenCalledWith({
       data: { time: '10:00' },
+      include: PS,
     });
     await repo.update('b1', { time: '11:00' });
     expect(prisma.booking.update).toHaveBeenCalledWith({
       where: { id: 'b1' },
       data: { time: '11:00' },
+      include: PS,
     });
     await repo.delete('b1');
     expect(prisma.booking.delete).toHaveBeenCalledWith({ where: { id: 'b1' } });

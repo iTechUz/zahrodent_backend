@@ -1,6 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { TelegramService } from './telegram.service';
 import { LeadsService } from '../leads/leads.service';
+import { PatientsRepository } from '../patients/patients.repository';
+import { TelegramBotRegistry } from './telegram-bot.registry';
 
 type Handler = (ctx: any) => unknown;
 
@@ -15,6 +17,7 @@ const ctorArgs: string[] = [];
 
 jest.mock('telegraf', () => {
   class FakeTelegraf {
+    telegram = { sendMessage: jest.fn() };
     constructor(token: string) {
       ctorArgs.push(token);
     }
@@ -55,7 +58,18 @@ jest.mock('telegraf', () => {
 describe('TelegramService', () => {
   const savedToken = process.env.TELEGRAM_BOT_TOKEN;
   let leads: jest.Mocked<Pick<LeadsService, 'create'>>;
+  let patients: {
+    findActiveIdsByMobile: jest.Mock;
+    setTelegramChatId: jest.Mock;
+  };
+  let registry: TelegramBotRegistry;
   let service: TelegramService;
+  const make = () =>
+    new TelegramService(
+      leads as unknown as LeadsService,
+      patients as unknown as PatientsRepository,
+      registry,
+    );
   let warnSpy: jest.SpyInstance;
   let errorSpy: jest.SpyInstance;
 
@@ -74,7 +88,12 @@ describe('TelegramService', () => {
     stop.mockReset();
     delete process.env.TELEGRAM_BOT_ENABLED;
     leads = { create: jest.fn().mockResolvedValue({ id: 'l1' } as any) };
-    service = new TelegramService(leads as unknown as LeadsService);
+    patients = {
+      findActiveIdsByMobile: jest.fn().mockResolvedValue([{ id: 'p1' }]),
+      setTelegramChatId: jest.fn().mockResolvedValue(1),
+    };
+    registry = new TelegramBotRegistry();
+    service = make();
     warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
     errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
     jest.spyOn(Logger.prototype, 'log').mockImplementation();
@@ -166,7 +185,7 @@ describe('TelegramService', () => {
 
     it('launch xatosi log qilinadi (crash yo‘q)', async () => {
       launch.mockRejectedValueOnce(new Error('409 Conflict'));
-      const fresh = new TelegramService(leads as unknown as LeadsService);
+      const fresh = make();
       fresh.onModuleInit();
       await new Promise((r) => setImmediate(r));
       expect(errorSpy).toHaveBeenCalledWith(
@@ -182,6 +201,74 @@ describe('TelegramService', () => {
         expect.stringContaining('xush kelibsiz, Ali!'),
         expect.anything(),
       );
+    });
+
+    it('bot ishga tushganda registry ga yoziladi, destroy da tozalanadi', () => {
+      expect(registry.isAvailable()).toBe(true);
+      service.onModuleDestroy();
+      expect(registry.isAvailable()).toBe(false);
+    });
+
+    it('launch xatosi — registry tozalanadi', async () => {
+      launch.mockRejectedValueOnce(new Error('409 Conflict'));
+      const reg = new TelegramBotRegistry();
+      const fresh = new TelegramService(
+        leads as unknown as LeadsService,
+        patients as unknown as PatientsRepository,
+        reg,
+      );
+      fresh.onModuleInit();
+      expect(reg.isAvailable()).toBe(true);
+      await new Promise((r) => setImmediate(r));
+      expect(reg.isAvailable()).toBe(false);
+    });
+
+    const ownContact = (phone: string, userId = 42) =>
+      ctx({
+        chat: { id: 9001 },
+        message: {
+          contact: { phone_number: phone, first_name: 'Vali', user_id: userId },
+        },
+      });
+
+    it('o‘z kontakti — telefon normallashtiriladi, chatId bemorga yoziladi', async () => {
+      await handlers.on.contact(ownContact('998901112233'));
+      expect(patients.findActiveIdsByMobile).toHaveBeenCalledWith(
+        '+998901112233',
+      );
+      expect(patients.setTelegramChatId).toHaveBeenCalledWith(['p1'], '9001');
+    });
+
+    it('boshqa odamning kontakti yoki user_id yo‘q — bog‘lanmaydi', async () => {
+      await handlers.on.contact(ownContact('+998901112233', 7));
+      await shareContact();
+      expect(patients.findActiveIdsByMobile).not.toHaveBeenCalled();
+      expect(patients.setTelegramChatId).not.toHaveBeenCalled();
+    });
+
+    it('O‘zbek raqami bo‘lmasa — bog‘lanmaydi, lead oqimi davom etadi', async () => {
+      const c = ownContact('+7 999 123 45 67');
+      await handlers.on.contact(c);
+      expect(patients.findActiveIdsByMobile).not.toHaveBeenCalled();
+      expect(c.reply).toHaveBeenCalledWith(
+        "Rahmat! Endi qaysi xizmat bo'yicha murojaat qilmoqchisiz?",
+        expect.anything(),
+      );
+    });
+
+    it('bog‘lashda DB xatosi — warn, lead oqimi buzilmaydi', async () => {
+      patients.findActiveIdsByMobile.mockRejectedValueOnce(new Error('db'));
+      const c = ownContact('+998901112233');
+      await handlers.on.contact(c);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Telegram chatga bog'lashda xato"),
+      );
+      expect(c.reply).toHaveBeenCalledWith(
+        "Rahmat! Endi qaysi xizmat bo'yicha murojaat qilmoqchisiz?",
+        expect.anything(),
+      );
+      await handlers.action!.fn(ctx({ match: ['service_other', 'other'] }));
+      expect(leads.create).toHaveBeenCalledTimes(1);
     });
 
     it('contact — xizmat tanlash tugmalari', async () => {

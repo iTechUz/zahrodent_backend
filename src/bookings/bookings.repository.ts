@@ -1,8 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { Booking, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import {
+  PatientSummaryRow,
+  WITH_PATIENT_SUMMARY,
+} from '../patients/patient-summary';
 
 type Db = PrismaService | Prisma.TransactionClient;
+
+export type BookingWithPatient = Booking & {
+  patient?: PatientSummaryRow | null;
+};
 
 @Injectable()
 export class BookingsRepository {
@@ -15,10 +23,11 @@ export class BookingsRepository {
       take?: number;
       orderBy?: Prisma.BookingOrderByWithRelationInput[];
     },
-  ): Promise<{ data: Booking[]; total: number }> {
+  ): Promise<{ data: BookingWithPatient[]; total: number }> {
     const [data, total] = await Promise.all([
       this.prisma.booking.findMany({
         where,
+        include: WITH_PATIENT_SUMMARY,
         orderBy: opts?.orderBy ?? [{ date: 'desc' }, { time: 'desc' }],
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
@@ -42,8 +51,11 @@ export class BookingsRepository {
       .then(() => undefined);
   }
 
-  findById(id: string): Promise<Booking | null> {
-    return this.prisma.booking.findUnique({ where: { id } });
+  findById(id: string): Promise<BookingWithPatient | null> {
+    return this.prisma.booking.findUnique({
+      where: { id },
+      include: WITH_PATIENT_SUMMARY,
+    });
   }
 
   findServiceById(id: string) {
@@ -84,16 +96,20 @@ export class BookingsRepository {
   create(
     data: Prisma.BookingCreateInput,
     db: Db = this.prisma,
-  ): Promise<Booking> {
-    return db.booking.create({ data });
+  ): Promise<BookingWithPatient> {
+    return db.booking.create({ data, include: WITH_PATIENT_SUMMARY });
   }
 
   update(
     id: string,
     data: Prisma.BookingUpdateInput,
     db: Db = this.prisma,
-  ): Promise<Booking> {
-    return db.booking.update({ where: { id }, data });
+  ): Promise<BookingWithPatient> {
+    return db.booking.update({
+      where: { id },
+      data,
+      include: WITH_PATIENT_SUMMARY,
+    });
   }
 
   delete(id: string): Promise<Booking> {

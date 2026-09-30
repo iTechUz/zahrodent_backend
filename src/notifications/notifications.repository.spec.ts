@@ -13,6 +13,7 @@ describe('NotificationsRepository', () => {
         create: jest.fn(),
         createMany: jest.fn(),
       },
+      booking: { findMany: jest.fn().mockResolvedValue([]) },
     };
     repo = new NotificationsRepository(prisma as PrismaService);
   });
@@ -41,6 +42,28 @@ describe('NotificationsRepository', () => {
     await repo.createMany([{ type: 'sms' } as any]);
     expect(prisma.notification.createMany).toHaveBeenCalledWith({
       data: [{ type: 'sms' }],
+    });
+  });
+
+  it('findReminderCandidates — faol, eslatilmagan, oraliqda, o‘chirilmagan bemor', async () => {
+    const from = new Date('2026-07-01T00:00:00Z');
+    const to = new Date('2026-07-02T00:00:00Z');
+    await repo.findReminderCandidates(from, to, ['pending', 'confirmed']);
+    const arg = prisma.booking.findMany.mock.calls[0][0];
+    expect(arg.where).toEqual({
+      status: { in: ['pending', 'confirmed'] },
+      reminderSentAt: null,
+      date: { gte: from, lte: to },
+      patient: { deletedAt: null },
+    });
+    expect(arg.select.patient.select).toEqual({
+      firstName: true,
+      lastName: true,
+      phone: true,
+      telegramChatId: true,
+    });
+    expect(arg.select.doctor).toEqual({
+      select: { firstName: true, lastName: true },
     });
   });
 });

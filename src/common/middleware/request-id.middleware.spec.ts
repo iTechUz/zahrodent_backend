@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { requestIdMiddleware } from './request-id.middleware';
+import { getRequestId } from '../logging/request-context';
 
 describe('requestIdMiddleware', () => {
   const run = (header?: string) => {
@@ -40,5 +41,25 @@ describe('requestIdMiddleware', () => {
   it('aynan 128 belgi — qabul qilinadi', () => {
     const exact = 'y'.repeat(128);
     expect(run(exact).req.requestId).toBe(exact);
+  });
+
+  it('xavfsiz bo‘lmagan belgilar yoki 128 dan uzun — yangi UUID', () => {
+    expect(run('abc def').req.requestId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(run('a"b').req.requestId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(run('x'.repeat(129)).req.requestId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(run('x'.repeat(128)).req.requestId).toBe('x'.repeat(128));
+  });
+
+  it('next() request context ichida chaqiriladi (loglar uchun)', () => {
+    const req = {
+      header: jest.fn().mockReturnValue('ctx-1'),
+    } as unknown as Request;
+    const res = { setHeader: jest.fn() } as unknown as Response;
+    let seen: string | undefined;
+    requestIdMiddleware(req, res, () => {
+      seen = getRequestId();
+    });
+    expect(seen).toBe('ctx-1');
+    expect(getRequestId()).toBeUndefined();
   });
 });

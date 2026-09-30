@@ -9,6 +9,7 @@ import { PrismaService } from '../database/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersQueryDto } from './dto/users-query.dto';
+import { revokeAllUserRefreshTokens } from '../auth/refresh-tokens.repository';
 
 export const PHONE_TAKEN_MESSAGE =
   'Ushbu telefon raqami bilan foydalanuvchi allaqachon mavjud';
@@ -98,11 +99,21 @@ export class UsersService {
     }
 
     const data = await this.buildUpdateData(id, dto);
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data,
       select: { id: true, name: true, phone: true, role: true },
     });
+    // New password or role → existing sessions must log in again.
+    if (dto.password || (dto.role && dto.role !== user.role)) {
+      await this.revokeSessions(id);
+    }
+    return updated;
+  }
+
+  /** Revokes every refresh token of the user (forces a new login). */
+  revokeSessions(userId: string): Promise<number> {
+    return revokeAllUserRefreshTokens(this.prisma, userId);
   }
 
   async remove(id: string, currentUserId?: string) {
@@ -113,6 +124,7 @@ export class UsersService {
     if (!user) throw new NotFoundException(USER_NOT_FOUND);
     if (user.role === 'admin') await this.assertNotLastAdmin();
 
+    // refresh_tokens.user_id is ON DELETE CASCADE → sessions go with the user.
     await this.prisma.user.delete({ where: { id } });
     return { id };
   }

@@ -2,9 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Notification, Prisma } from '@prisma/client';
 import { NotificationsRepository } from './notifications.repository';
 import { CreateNotificationDto } from './dto/create-notification.dto';
-import { BookingsRepository } from '../bookings/bookings.repository';
 import { PatientsRepository } from '../patients/patients.repository';
 import { EskizService } from './eskiz.service';
+import { ACTIVE_BOOKING_STATUSES } from '../bookings/bookings.service';
+import { SettingsService, SettingsView } from '../settings/settings.service';
+import {
+  formatReminderDate,
+  renderReminderTemplate,
+} from '../settings/reminder-template';
+import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
 import { PrismaService } from '../database/prisma.service';
 import {
   addDaysToDateOnly,
@@ -22,9 +28,16 @@ import { RecipientQueryDto, BulkSendDto } from './dto/bulk-sms.dto';
 
 type ReminderType = 'sms' | 'telegram';
 type ReminderStatus = 'sent' | 'failed';
-
-/** Reminders go out for bookings today and tomorrow (Asia/Tashkent). */
-export const REMINDER_WINDOW_DAYS = 1;
+type ReminderRow = {
+  patientId: string;
+  type: ReminderType;
+  message: string;
+  status: ReminderStatus;
+  sentAt: Date;
+};
+type ReminderCandidate = Awaited<
+  ReturnType<NotificationsRepository['findReminderCandidates']>
+>[number];
 
 @Injectable()
 export class NotificationsService {
@@ -32,10 +45,11 @@ export class NotificationsService {
 
   constructor(
     private readonly notificationsRepository: NotificationsRepository,
-    private readonly bookingsRepository: BookingsRepository,
     private readonly patientsRepository: PatientsRepository,
     private readonly eskiz: EskizService,
     private readonly prisma: PrismaService,
+    private readonly settings: SettingsService,
+    private readonly telegram: TelegramBotRegistry,
   ) {}
 
   /** Doctor → only notifications addressed to their Doctor record. */
@@ -102,175 +116,140 @@ export class NotificationsService {
   }
 
   /**
-   * Sends one reminder per upcoming booking (today..tomorrow, Asia/Tashkent)
-   * that hasn't been reminded yet. Only successfully sent reminders mark
+   * Sends one reminder per upcoming booking (today..today+reminderDaysAhead,
+   * Asia/Tashkent) that hasn't been reminded yet. Patients linked to the
+   * Telegram bot (telegramChatId) get it via the bot when it is running,
+   * everybody else via Eskiz SMS. Only successfully sent reminders mark
    * `reminderSentAt`, so failures are retried next run and successes are
    * never re-sent. A single failure never aborts the batch.
    */
   async sendReminders(now: Date = new Date()) {
+    const settings = await this.settings.get();
     const today = todayInTashkent(now);
-    const { data: bookings } = await this.bookingsRepository.findAll({
-      status: { in: ['confirmed', 'pending'] },
-      reminderSentAt: null,
-      date: {
-        gte: parseDateOnlyToUTC(today),
-        lte: parseDateOnlyToUTC(addDaysToDateOnly(today, REMINDER_WINDOW_DAYS)),
-      },
-    });
-    if (!bookings.length) {
-      return { created: 0, smsSent: 0, smsFailed: 0, skipped: 0 };
-    }
+    const bookings = await this.notificationsRepository.findReminderCandidates(
+      parseDateOnlyToUTC(today),
+      parseDateOnlyToUTC(addDaysToDateOnly(today, settings.reminderDaysAhead)),
+      ACTIVE_BOOKING_STATUSES,
+    );
+    const summary = {
+      created: 0,
+      smsSent: 0,
+      smsFailed: 0,
+      telegramSent: 0,
+      telegramFailed: 0,
+      skipped: 0,
+    };
+    if (!bookings.length) return summary;
 
-    const patientIds = bookings.map((b) => b.patientId);
-    const patientRows =
-      await this.patientsRepository.findSourcesByPatientIds(patientIds);
-    const phoneRows =
-      await this.patientsRepository.findPhonesByPatientIds(patientIds);
-    const sourceByPatientId = new Map(patientRows.map((p) => [p.id, p.source]));
-    const phoneByPatientId = new Map(phoneRows.map((p) => [p.id, p.phone]));
-
-    const rows: {
-      patientId: string;
-      type: ReminderType;
-      message: string;
-      status: ReminderStatus;
-      sentAt: Date;
-    }[] = [];
-    const bookingIdsToMark: string[] = [];
-    let smsSent = 0;
-    let smsFailed = 0;
-    const eskizOn = this.eskiz.isConfigured();
-
-    const concurrency = 5;
-    const results = await mapWithConcurrency(
-      bookings,
-      concurrency,
-      async (b) => {
-        const source = sourceByPatientId.get(b.patientId);
-        if (source === undefined) return null;
-
-        const message = `Eslatma: Sizning qabulingiz ${this.formatBookingDate(b.date)} kuni soat ${b.time} da`;
-        const sentAt = new Date();
-
-        // No Telegram delivery channel for patients exists yet → nothing is
-        // actually sent: record "failed" and leave the booking unmarked.
-        if (source === 'telegram') {
-          return {
-            row: {
-              patientId: b.patientId,
-              type: 'telegram' as const,
-              message,
-              status: 'failed' as const,
-              sentAt,
-            },
-            bookingIdToMark: null,
-            smsSentInc: 0,
-            smsFailedInc: 0,
-          };
-        }
-
-        // SMS path
-        const type: ReminderType = 'sms';
-
-        // Eskiz not configured → nothing sent; don't mark as reminded.
-        if (!eskizOn) {
-          return {
-            row: {
-              patientId: b.patientId,
-              type,
-              message,
-              status: 'failed' as const,
-              sentAt,
-            },
-            bookingIdToMark: null,
-            smsSentInc: 0,
-            smsFailedInc: 0,
-          };
-        }
-
-        const rawPhone = phoneByPatientId.get(b.patientId);
-        const mobile = rawPhone ? this.eskiz.normalizeMobile(rawPhone) : null;
-        if (!mobile) {
-          return {
-            row: {
-              patientId: b.patientId,
-              type,
-              message,
-              status: 'failed' as const,
-              sentAt,
-            },
-            bookingIdToMark: null,
-            smsSentInc: 0,
-            smsFailedInc: 1,
-          };
-        }
-
-        const r = await this.eskiz
-          .sendSms(mobile, message)
-          .catch((e: unknown) => {
-            this.logger.warn(
-              `Eslatma SMS xatosi (booking ${b.id}): ${e instanceof Error ? e.message : String(e)}`,
-            );
-            return { ok: false as const, error: 'send failed' };
-          });
-        if (r.ok) {
-          return {
-            row: {
-              patientId: b.patientId,
-              type,
-              message,
-              status: 'sent' as const,
-              sentAt,
-            },
-            bookingIdToMark: b.id,
-            smsSentInc: 1,
-            smsFailedInc: 0,
-          };
-        }
-
-        return {
-          row: {
-            patientId: b.patientId,
-            type,
-            message,
-            status: 'failed' as const,
-            sentAt,
-          },
-          bookingIdToMark: null,
-          smsSentInc: 0,
-          smsFailedInc: 1,
-        };
-      },
+    const results = await mapWithConcurrency(bookings, 5, (b) =>
+      this.sendBookingReminder(b, settings),
     );
 
-    for (const r of results) {
-      if (!r) continue;
-      rows.push(r.row);
-      if (r.bookingIdToMark) bookingIdsToMark.push(r.bookingIdToMark);
-      smsSent += r.smsSentInc;
-      smsFailed += r.smsFailedInc;
+    const rows = results.map((r) => r.row);
+    const bookingIdsToMark = results
+      .filter((r) => r.row.status === 'sent')
+      .map((r) => r.bookingId);
+    for (const r of results) summary[r.outcome] += 1;
+    summary.created = rows.length;
+
+    const markAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.notification.createMany({ data: rows });
+      if (bookingIdsToMark.length) {
+        await tx.booking.updateMany({
+          where: { id: { in: bookingIdsToMark }, reminderSentAt: null },
+          data: { reminderSentAt: markAt },
+        });
+      }
+    });
+
+    // skipped = recorded as "failed" without any send attempt (Eskiz not
+    // configured) — retried on the next run.
+    return summary;
+  }
+
+  /**
+   * One booking → one delivery attempt (Telegram if linked and the bot is
+   * running, else SMS). Never throws.
+   */
+  private async sendBookingReminder(
+    b: ReminderCandidate,
+    settings: SettingsView,
+  ): Promise<{
+    bookingId: string;
+    row: ReminderRow;
+    outcome:
+      | 'smsSent'
+      | 'smsFailed'
+      | 'telegramSent'
+      | 'telegramFailed'
+      | 'skipped';
+  }> {
+    const vars = {
+      name: `${b.patient.firstName} ${b.patient.lastName}`.trim(),
+      date: formatReminderDate(toDateOnlyString(b.date)),
+      time: b.time,
+      doctor: `${b.doctor.firstName} ${b.doctor.lastName}`.trim() || 'shifokor',
+      clinic: settings.clinicName,
+    };
+    const row = (
+      type: ReminderType,
+      message: string,
+      status: ReminderStatus,
+    ): ReminderRow => ({
+      patientId: b.patientId,
+      type,
+      message,
+      status,
+      sentAt: new Date(),
+    });
+
+    const chatId = b.patient.telegramChatId;
+    if (chatId && this.telegram.isAvailable()) {
+      const message = renderReminderTemplate(
+        settings.telegramReminderTemplate,
+        vars,
+      );
+      const r = await this.telegram.sendMessage(chatId, message);
+      if ('error' in r) {
+        this.logger.warn(
+          `Eslatma Telegram xatosi (booking ${b.id}): ${r.error}`,
+        );
+      }
+      return {
+        bookingId: b.id,
+        row: row('telegram', message, r.ok ? 'sent' : 'failed'),
+        outcome: r.ok ? 'telegramSent' : 'telegramFailed',
+      };
     }
 
-    if (rows.length) {
-      const markAt = new Date();
-      await this.prisma.$transaction(async (tx) => {
-        await tx.notification.createMany({ data: rows });
-        if (bookingIdsToMark.length) {
-          await tx.booking.updateMany({
-            where: { id: { in: bookingIdsToMark }, reminderSentAt: null },
-            data: { reminderSentAt: markAt },
-          });
-        }
-      });
+    const message = renderReminderTemplate(settings.smsReminderTemplate, vars);
+    // Eskiz not configured → nothing sent; don't mark as reminded.
+    if (!this.eskiz.isConfigured()) {
+      return {
+        bookingId: b.id,
+        row: row('sms', message, 'failed'),
+        outcome: 'skipped',
+      };
     }
-
-    // skipped = recorded as "failed" without any send attempt (no Telegram
-    // channel / Eskiz not configured) — retried on the next run.
+    const mobile = this.eskiz.normalizeMobile(b.patient.phone);
+    if (!mobile) {
+      return {
+        bookingId: b.id,
+        row: row('sms', message, 'failed'),
+        outcome: 'smsFailed',
+      };
+    }
+    const r = await this.eskiz.sendSms(mobile, message).catch((e: unknown) => {
+      this.logger.warn(
+        `Eslatma SMS xatosi (booking ${b.id}): ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return { ok: false as const, error: 'send failed' };
+    });
     return {
-      created: rows.length,
-      smsSent,
-      smsFailed,
-      skipped: rows.length - smsSent - smsFailed,
+      bookingId: b.id,
+      row: row('sms', message, r.ok ? 'sent' : 'failed'),
+      outcome: r.ok ? 'smsSent' : 'smsFailed',
     };
   }
 
@@ -289,6 +268,7 @@ export class NotificationsService {
           lte: parseDateOnlyToUTC(dayOf(endDate)),
         },
         status: { in: ['confirmed', 'pending'] },
+        patient: { deletedAt: null },
         // Only filter by reminderSentAt for patients
         ...(targetType === 'patient' ? { reminderSentAt: null } : {}),
       },
@@ -366,10 +346,11 @@ export class NotificationsService {
             },
           })
         : await this.prisma.patient.findMany({
-            where: { id: { in: targetIds } },
+            where: { id: { in: targetIds }, deletedAt: null },
             select: {
               id: true,
               phone: true,
+              telegramChatId: true,
               bookings: {
                 where: {
                   date: { gte: fromToday },
@@ -411,8 +392,24 @@ export class NotificationsService {
         let sentInc = 0;
         let failedInc = 0;
         let bookingIdToMark: string | null = null;
+        let type: ReminderType = 'sms';
 
-        if (eskizOn && mobile) {
+        const chatId: string | null | undefined = target.telegramChatId;
+        if (targetType === 'patient' && chatId && this.telegram.isAvailable()) {
+          // Patient linked to the bot → Telegram instead of SMS.
+          type = 'telegram';
+          const r = await this.telegram.sendMessage(
+            chatId,
+            personalizedMessage,
+          );
+          status = r.ok ? 'sent' : 'failed';
+          if (r.ok) {
+            sentInc = 1;
+            bookingIdToMark = booking?.id ?? null;
+          } else {
+            failedInc = 1;
+          }
+        } else if (eskizOn && mobile) {
           const r = await this.eskiz
             .sendSms(mobile, personalizedMessage)
             .catch(() => ({ ok: false as const, error: 'send failed' }));
@@ -435,7 +432,7 @@ export class NotificationsService {
         const row = {
           patientId: targetType === 'patient' ? target.id : undefined,
           doctorId: targetType === 'doctor' ? target.id : undefined,
-          type: 'sms' as const,
+          type,
           message: personalizedMessage,
           status,
           sentAt: markAt,
@@ -470,10 +467,6 @@ export class NotificationsService {
     }
 
     return { ...results, total: targetIds.length };
-  }
-
-  private formatBookingDate(d: Date) {
-    return toDateOnlyString(d);
   }
 
   private toResponse(n: Notification) {

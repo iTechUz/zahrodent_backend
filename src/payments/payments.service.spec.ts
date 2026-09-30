@@ -233,7 +233,7 @@ describe('PaymentsService', () => {
       jest.useFakeTimers({ now: new Date('2026-06-17T22:00:00.000Z') });
       await service.create(dto);
       expect(repo.create).toHaveBeenCalledWith({
-        patient: { connect: { id: 'p1' } },
+        patient: { connect: { id: 'p1', deletedAt: null } },
         amount: 100_000,
         method: 'cash',
         status: 'paid',
