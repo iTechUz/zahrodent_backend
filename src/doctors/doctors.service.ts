@@ -143,6 +143,10 @@ export class DoctorsService {
       },
       userOp,
     );
+    // Login password rewritten → the doctor's sessions must log in again.
+    if (userOp && 'update' in userOp) {
+      await this.usersService.revokeSessions(userOp.update.id);
+    }
     return this.toResponse(d);
   }
 

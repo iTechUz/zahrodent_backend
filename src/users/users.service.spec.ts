@@ -18,6 +18,7 @@ describe('UsersService', () => {
       delete: jest.Mock;
       count: jest.Mock;
     };
+    refreshToken: { updateMany: jest.Mock };
   };
 
   const publicSelect = {
@@ -40,6 +41,7 @@ describe('UsersService', () => {
         delete: jest.fn(),
         count: jest.fn().mockResolvedValue(2),
       },
+      refreshToken: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
     };
     service = new UsersService(prisma as unknown as PrismaService);
     (bcrypt.hash as jest.Mock).mockClear();
@@ -148,6 +150,27 @@ describe('UsersService', () => {
       expect(prisma.user.update.mock.calls[0][0].data).toEqual({
         passwordHash: 'hashed:newpass',
       });
+    });
+
+    it('parol o‘zgarsa — refresh tokenlar bekor qilinadi', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', role: 'doctor' });
+      await service.update('u1', { password: 'newpass' });
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'u1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('rol o‘zgarsa — refresh tokenlar bekor qilinadi', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', role: 'doctor' });
+      await service.update('u1', { role: 'receptionist' });
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('faqat ism / o‘sha rol — sessiyalar saqlanadi', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'u1', role: 'doctor' });
+      await service.update('u1', { name: 'N', role: 'doctor' });
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
     });
 
     // Fixed: update() didn't check phone uniqueness, so a duplicate phone

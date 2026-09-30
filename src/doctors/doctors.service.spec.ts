@@ -25,7 +25,7 @@ describe('DoctorsService', () => {
     >
   >;
   let users: jest.Mocked<
-    Pick<UsersService, 'buildCreateData' | 'buildUpdateData'>
+    Pick<UsersService, 'buildCreateData' | 'buildUpdateData' | 'revokeSessions'>
   >;
 
   const doc = (partial: Record<string, unknown> = {}) =>
@@ -69,6 +69,7 @@ describe('DoctorsService', () => {
       buildUpdateData: jest.fn(async (_id: string, d: any) => ({
         name: d.name,
       })) as any,
+      revokeSessions: jest.fn().mockResolvedValue(1) as any,
     };
     service = new DoctorsService(
       repo as unknown as DoctorsRepository,
@@ -247,6 +248,7 @@ describe('DoctorsService', () => {
         expect.objectContaining({ specialty: 'Ortoped' }),
         null,
       );
+      expect(users.revokeSessions).not.toHaveBeenCalled();
     });
 
     it('parol + mavjud user — yangi ism bilan update (tranzaksiyada)', async () => {
@@ -267,6 +269,8 @@ describe('DoctorsService', () => {
       expect(repo.updateWithUser.mock.calls[0][2]).toEqual({
         update: { id: 'u5', data: { name: 'Bek Aliyev' } },
       });
+      // New login password → doctor's sessions are revoked.
+      expect(users.revokeSessions).toHaveBeenCalledWith('u5');
     });
 
     it('parol + mavjud user — ism/telefon berilmasa eski qiymatlar', async () => {
