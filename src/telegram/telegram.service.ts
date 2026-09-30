@@ -6,6 +6,9 @@ import {
 } from '@nestjs/common';
 import { Telegraf, Markup } from 'telegraf';
 import { LeadsService } from '../leads/leads.service';
+import { PatientsRepository } from '../patients/patients.repository';
+import { TelegramBotRegistry } from './telegram-bot.registry';
+import { normalizeUzPhone } from '../common/utils/phone.util';
 
 /** Max leads one Telegram user can create per window (spam guard). */
 export const TELEGRAM_LEAD_LIMIT = 3;
@@ -25,7 +28,11 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private userStates = new Map<number, string>(); // simple state management
   private leadTimestamps = new Map<number, number[]>();
 
-  constructor(private readonly leadsService: LeadsService) {}
+  constructor(
+    private readonly leadsService: LeadsService,
+    private readonly patientsRepository: PatientsRepository,
+    private readonly registry: TelegramBotRegistry,
+  ) {}
 
   onModuleInit() {
     if (!isTelegramBotEnabled()) {
@@ -47,16 +54,20 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const bot = new Telegraf(token);
     this.bot = bot;
     this.registerCommands(bot);
+    // Reminders are sent through this bot while it runs.
+    this.registry.register(bot.telegram);
 
     // Webhook o'rniga hozircha long-polling ishlatamiz oson ishlashi uchun
     bot.launch().catch((err) => {
       this.launched = false;
+      this.registry.register(null);
       this.logger.error('Telegram bot launch error:', err);
     });
     this.logger.log('Telegram bot is running...');
   }
 
   onModuleDestroy() {
+    this.registry.register(null);
     if (!this.bot || !this.launched) return;
     try {
       this.bot.stop('shutdown');
@@ -65,6 +76,28 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Telegram bot stop: ${String(err)}`);
     }
     this.launched = false;
+  }
+
+  /**
+   * Stores the chat id on every non-deleted patient with this phone. Never
+   * throws — linking must not break the lead flow.
+   */
+  private async linkPatientChat(rawPhone: string, chatId: number) {
+    const phone = normalizeUzPhone(rawPhone);
+    if (!phone) return;
+    try {
+      const matches =
+        await this.patientsRepository.findActiveIdsByMobile(phone);
+      const n = await this.patientsRepository.setTelegramChatId(
+        matches.map((m) => m.id),
+        String(chatId),
+      );
+      if (n) this.logger.log(`Telegram chat ${n} ta bemor kartasiga bog'landi`);
+    } catch (err) {
+      this.logger.warn(
+        `Bemorni Telegram chatga bog'lashda xato: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /** Sliding-window limit per Telegram user; records the attempt if allowed. */
@@ -101,6 +134,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     bot.on('contact', async (ctx) => {
       const contact = ctx.message.contact;
+
+      // Link the chat to the patient card(s) for reminders — only when the
+      // user shared their OWN contact (not someone else's).
+      if (contact.user_id !== undefined && contact.user_id === ctx.from.id) {
+        await this.linkPatientChat(contact.phone_number, ctx.chat.id);
+      }
 
       // Save contact info to session/state
       this.userStates.set(

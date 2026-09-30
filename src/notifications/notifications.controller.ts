@@ -44,13 +44,24 @@ export class NotificationsController {
   @ApiOperation({
     summary: 'Eslatmalar yuborish',
     description:
-      "Bugungi va ertangi (Asia/Tashkent) pending/confirmed qabullar uchun eslatma. Faqat muvaffaqiyatli yuborilganlari belgilanadi (qayta yuborilmaydi); Eskiz sozlanmagan yoki Telegram kanal bo'lmasa — 'failed' yoziladi.",
+      "Bugundan bugun+reminderDaysAhead gacha (Asia/Tashkent, /settings) pending/confirmed, hali eslatilmagan qabullar uchun. Bemor Telegram botga ulangan (telegramChatId) va bot ishlayotgan bo'lsa — Telegram orqali (telegramReminderTemplate), aks holda Eskiz SMS (smsReminderTemplate). Faqat muvaffaqiyatli yuborilganlari belgilanadi; xatolar 'failed' yoziladi va keyingi safar qayta uriniladi. O'chirilgan bemorlar o'tkazib yuboriladi.",
   })
   @ApiOkResponse({
-    description: 'Yaratilgan yozuvlar soni',
+    description: 'Natija hisobi',
     schema: {
       type: 'object',
-      properties: { created: { type: 'number', example: 5 } },
+      properties: {
+        created: { type: 'number', example: 5 },
+        smsSent: { type: 'number', example: 2 },
+        smsFailed: { type: 'number', example: 0 },
+        telegramSent: { type: 'number', example: 2 },
+        telegramFailed: { type: 'number', example: 1 },
+        skipped: {
+          type: 'number',
+          example: 0,
+          description: 'Eskiz sozlanmagan — yuborishga urinilmagan',
+        },
+      },
     },
   })
   sendReminders() {
@@ -64,7 +75,11 @@ export class NotificationsController {
   }
 
   @Post('bulk-send')
-  @ApiOperation({ summary: 'Tanlangan mijozlarga ommaviy SMS yuborish' })
+  @ApiOperation({
+    summary: 'Tanlangan mijozlarga ommaviy xabar yuborish',
+    description:
+      "Telegram botga ulangan bemorlarga (bot ishlayotgan bo'lsa) Telegram orqali, qolganlarga SMS. [bemor], [sana], [vaqt] almashtiriladi.",
+  })
   bulkSend(@Body() dto: BulkSendDto) {
     return this.notificationsService.bulkSend(dto);
   }

@@ -28,6 +28,37 @@ export class NotificationsRepository {
     return this.prisma.notification.create({ data });
   }
 
+  /**
+   * Bookings due a reminder: active, not reminded yet, date within
+   * [from, to] and the patient not soft-deleted.
+   */
+  findReminderCandidates(from: Date, to: Date, statuses: string[]) {
+    return this.prisma.booking.findMany({
+      where: {
+        status: { in: statuses },
+        reminderSentAt: null,
+        date: { gte: from, lte: to },
+        patient: { deletedAt: null },
+      },
+      select: {
+        id: true,
+        patientId: true,
+        date: true,
+        time: true,
+        patient: {
+          select: {
+            firstName: true,
+            lastName: true,
+            phone: true,
+            telegramChatId: true,
+          },
+        },
+        doctor: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: [{ date: 'asc' }, { time: 'asc' }],
+    });
+  }
+
   createMany(data: Prisma.NotificationCreateManyInput[]) {
     return this.prisma.notification.createMany({ data });
   }
