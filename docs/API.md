@@ -18,16 +18,33 @@ Manba: `backend/src` dagi **haqiqiy** controller, DTO va guard kodlari. Base URL
 
 | Modul | Marshrutlar | Kim kiradi |
 |-------|-------------|------------|
-| `patients`, `bookings`, `visits`, `services`, `notifications` | barcha | **staff** (admin, doctor, receptionist) |
-| `doctors` | GET | **staff** |
-| `doctors` | POST, PATCH, DELETE | **admin, doctor** (receptionist → **403**) |
-| `payments` | barcha | **faqat admin** (doctor/receptionist → **403**) |
+| `patients`, `bookings`, `visits`, `services` | GET | **staff** (admin, doctor, receptionist) |
+| `patients` | DELETE | **faqat admin** (tashrif/to‘lov tarixi bo‘lsa **409**) |
+| `doctors` | GET `/doctors`, GET `/doctors/:id` | **staff** (doctor — faqat o‘qish) |
+| `doctors` | POST, PATCH, DELETE, `/stats`, `/efficiency` | **faqat admin** |
+| `services` | `/stats` | **admin, receptionist** |
+| `notifications` | GET | **staff** (doctor — faqat `doctorId` = o‘zi bo‘lgan yozuvlar) |
+| `notifications` | POST, `/send-reminders`, `/recipients`, `/bulk-send` | **admin, receptionist** |
+| `analytics` | `/dashboard`, `/monthly`, `/sources` | **staff** (pul maydonlari faqat admin uchun, boshqalarga `null`) |
+| `payments`, `users` | barcha | **faqat admin** (doctor/receptionist → **403**) |
 
-Ro‘yxat endpointlarida ixtiyoriy **`limit`** query (butun son, 1–500): `GET /patients`, `GET /bookings`, `GET /payments` — server javobni cheklaydi.
+**Doctor scope:** `doctor` roli faqat o‘z bemorlari (biriktirilgan / qabul / tashrif orqali), o‘z qabullari va tashriflarini ko‘radi. Doctor hisobiga `Doctor` yozuvi bog‘lanmagan bo‘lsa — **403** (`Shifokor profili topilmadi…`), hech qachon butun klinika ma’lumoti emas. Doctor tashrif yaratsa `doctorId` doim o‘zining id si bo‘ladi.
+
+### Ro‘yxat parametrlari (barcha list endpointlar)
+
+- `page` (0 dan, standart 0), `limit` (**1–100**, standart 10), `search` (≤100 belgi).
+- `sortBy` — resursga xos oq ro‘yxat, `order` — `asc` | `desc`. Hech biri berilmasa standart tartib o‘zgarmaydi; faqat `order` — standart maydonga; faqat `sortBy` — `asc`.
+  - patients: `createdAt, firstName, lastName, age, source` · bookings: `date, time, createdAt, status, source` · visits: `date, status, price` · payments: `date, amount, status, method, type` · services: `name, category, price, duration` · leads: `createdAt, updatedAt, name, status, source` · doctors: `firstName, lastName, specialty` · users: `createdAt, name, role, phone` (users — faqat `sortBy`/`order`, javob massiv).
+- Filtrlar: patients `source, startDate, endDate, debtOnly=true|false, doctorId`; bookings `status, source, patientId, doctorId, dateRange=today|week|month|all, startDate, endDate`; visits `patientId, doctorId, status, startDate, endDate`; payments `status, method, type, patientId, dateRange, startDate, endDate`; services `category`; doctors `specialty`; leads `status, source, startDate, endDate`. Sanalar `YYYY-MM-DD`, kunlar **Asia/Tashkent** bo‘yicha.
+- Noma’lum parametr, noto‘g‘ri tur yoki qiymat → **400**.
+
+### Balans / qarz
+
+`balance = Σ INCOME to‘lovlar (paid|partial) + Σ INCOME chegirmalar − Σ yakunlangan tashriflar narxi`. `balance < 0` — qarzdor (`debtOnly=true`, `payments/stats.pendingAmount`, `analytics.unpaidTotal/unpaidCount`). EXPENSE to‘lovlar balansga va daromadga kirmaydi.
 
 ### JWT payload
 
-Access token ichida (strategiya DB ga qayta so‘ramaydi): `sub` (user id), `role`, `email`, `name`, ixtiyoriy `specialty`, `avatar`. Eski tokenlar (faqat `sub`+`role`) **401** — qayta login.
+Access token ichida: `sub` (user id), `role`, `phone`, `name`, ixtiyoriy `specialty`, `avatar`, `doctorId`. Har so‘rovda foydalanuvchi DB dan qayta o‘qiladi — rol va `doctorId` DB dagi qiymat; o‘chirilgan foydalanuvchi tokeni darhol **401**. Eski/noto‘g‘ri tokenlar **401** — qayta login.
 
 ### Validatsiya
 
@@ -53,7 +70,7 @@ Barcha HTTP xatolari va filtr orqali:
 }
 ```
 
-500 da `message` odatda `Internal server error`.
+500 da `message` umumiy Uzbekcha xabar (ichki tafsilot faqat server logida). Prisma xatolari: `P2002` → **409**, `P2025` → **404**, `P2003` → **400** (DELETE da **409**).
 
 ---
 
@@ -314,9 +331,24 @@ Barcha HTTP xatolari va filtr orqali:
 
 **Body:** bo‘sh JSON `{}` yoki content-type bilan mos body.
 
-**Javob (201 yoki 200):** `{ "created": <number> }` — yaratilgan bildirishnoma yozuvlari soni. Faqat **`reminderSentAt: null`** bo‘lgan `pending` / `confirmed` qabullar olinadi. **`reminderSentAt`** faqat muvaffaqiyatli yakunlangan eslatmalar uchun yoziladi (SMS muvaffaqiyatsiz yoki telefon noto‘g‘ri bo‘lsa — qayta urinish mumkin).
+**Javob:** `{ "created", "smsSent", "smsFailed", "skipped" }`. Faqat **bugungi va ertangi** (Asia/Tashkent) `pending` / `confirmed` va **`reminderSentAt: null`** qabullar olinadi. **`reminderSentAt`** faqat haqiqatan yuborilgan SMS lar uchun yoziladi — ular qayta yuborilmaydi; xato bo‘lganlari keyingi safar qayta urinadi. Bitta SMS xatosi (tarmoq/timeout) butun partiyani to‘xtatmaydi.
 
-**Eskiz.uz SMS:** serverda `ESKIZ_EMAIL` va `ESKIZ_PASSWORD` (ixtiyoriy `ESKIZ_FROM`) sozlangan bo‘lsa, manbai `telegram` bo‘lmagan bemorlar uchun SMS **haqiqiy** `notify.eskiz.uz` orqali yuboriladi. Sozlanmagan bo‘lsa, yozuvlar bazada `sent` holatida saqlanadi (simulyatsiya). Muvaffaqiyatli javobda qo‘shimcha: `{ "created", "smsSent", "smsFailed" }`.
+**Eskiz.uz SMS:** `ESKIZ_EMAIL` va `ESKIZ_PASSWORD` sozlangan bo‘lsa SMS `notify.eskiz.uz` orqali yuboriladi. Sozlanmagan bo‘lsa yoki bemor manbasi `telegram` bo‘lsa (Telegram kanal hali yo‘q) — yozuv `failed` sifatida saqlanadi (`skipped`), qabul belgilanmaydi. `bulk-send` da ham xuddi shunday; shifokorga yuborilgan SMS bemor qabulini belgilamaydi.
+
+---
+
+## Modul: Analytics
+
+**Guard:** JWT + staff. Doctor — faqat o‘z bemorlari/qabullari. Pul maydonlari faqat **admin** uchun, qolganlarga `null`.
+
+- `GET /analytics/dashboard?date=YYYY-MM-DD` (standart — bugun, Asia/Tashkent) →
+  `{ totalPatients, newPatientsThisMonth, todayBookings, todayCompleted, pendingBookings, activeDoctors, totalDoctors, todayRevenue, monthRevenue, monthExpenses, unpaidTotal, unpaidCount }`
+- `GET /analytics/monthly?months=6` (1–24) → `[{ month: "YYYY-MM", newPatients, bookings, completedBookings, revenue, expenses }]` — eskidan yangiga, bo‘sh oylar ham.
+- `GET /analytics/sources?type=bookings|patients` (standart `bookings`) → `[{ source, count }]`, ko‘pdan kamga.
+
+## WebSocket (Socket.IO)
+
+Ulanishda JWT majburiy: `io(url, { auth: { token } })` (yoki `Authorization: Bearer` header / `?token=`). Token yo‘q/yaroqsiz yoki foydalanuvchi o‘chirilgan bo‘lsa server `unauthorized` hodisasini yuborib ulanishni uzadi. `newLead` hodisasi faqat admin va receptionist ga yuboriladi.
 
 ---
 
