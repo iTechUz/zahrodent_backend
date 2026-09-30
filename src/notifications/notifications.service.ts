@@ -1,12 +1,19 @@
-import { Injectable } from '@nestjs/common';
-import { Notification } from '@prisma/client';
+import { Injectable, Logger } from '@nestjs/common';
+import { Notification, Prisma } from '@prisma/client';
 import { NotificationsRepository } from './notifications.repository';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { BookingsRepository } from '../bookings/bookings.repository';
 import { PatientsRepository } from '../patients/patients.repository';
 import { EskizService } from './eskiz.service';
 import { PrismaService } from '../database/prisma.service';
-import { startOfUTCDay, toDateOnlyString } from '../common/utils/date.util';
+import {
+  addDaysToDateOnly,
+  parseDateOnlyToUTC,
+  toDateOnlyString,
+  todayInTashkent,
+} from '../common/utils/date.util';
+import { AuthUserView } from '../auth/auth.service';
+import { doctorScopeId } from '../common/auth/doctor-scope';
 import {
   PaginationQueryDto,
   PaginatedResponse,
@@ -16,8 +23,13 @@ import { RecipientQueryDto, BulkSendDto } from './dto/bulk-sms.dto';
 type ReminderType = 'sms' | 'telegram';
 type ReminderStatus = 'sent' | 'failed';
 
+/** Reminders go out for bookings today and tomorrow (Asia/Tashkent). */
+export const REMINDER_WINDOW_DAYS = 1;
+
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     private readonly notificationsRepository: NotificationsRepository,
     private readonly bookingsRepository: BookingsRepository,
@@ -26,14 +38,27 @@ export class NotificationsService {
     private readonly prisma: PrismaService,
   ) {}
 
-  async findAll(query: PaginationQueryDto): Promise<PaginatedResponse<any>> {
+  /** Doctor → only notifications addressed to their Doctor record. */
+  async findAll(
+    query: PaginationQueryDto,
+    user?: AuthUserView,
+  ): Promise<
+    PaginatedResponse<ReturnType<NotificationsService['toResponse']>>
+  > {
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
 
+    const where: Prisma.NotificationWhereInput = {};
+    const scopedDoctorId = user ? doctorScopeId(user) : null;
+    if (scopedDoctorId) where.doctorId = scopedDoctorId;
+    const s = query.search?.trim();
+    if (s) where.message = { contains: s, mode: 'insensitive' };
+
     const { data, total } = await this.notificationsRepository.findAll({
       skip,
       take: limitNum,
+      ...(Object.keys(where).length ? { where } : {}),
     });
     return { data: data.map((n) => this.toResponse(n)), total };
   }
@@ -76,13 +101,24 @@ export class NotificationsService {
     return this.toResponse(n);
   }
 
-  async sendReminders() {
+  /**
+   * Sends one reminder per upcoming booking (today..tomorrow, Asia/Tashkent)
+   * that hasn't been reminded yet. Only successfully sent reminders mark
+   * `reminderSentAt`, so failures are retried next run and successes are
+   * never re-sent. A single failure never aborts the batch.
+   */
+  async sendReminders(now: Date = new Date()) {
+    const today = todayInTashkent(now);
     const { data: bookings } = await this.bookingsRepository.findAll({
-      status: { in: ['confirmed', 'pending'] } as any,
+      status: { in: ['confirmed', 'pending'] },
       reminderSentAt: null,
+      date: {
+        gte: parseDateOnlyToUTC(today),
+        lte: parseDateOnlyToUTC(addDaysToDateOnly(today, REMINDER_WINDOW_DAYS)),
+      },
     });
     if (!bookings.length) {
-      return { created: 0 };
+      return { created: 0, smsSent: 0, smsFailed: 0, skipped: 0 };
     }
 
     const patientIds = bookings.map((b) => b.patientId);
@@ -116,17 +152,18 @@ export class NotificationsService {
         const message = `Eslatma: Sizning qabulingiz ${this.formatBookingDate(b.date)} kuni soat ${b.time} da`;
         const sentAt = new Date();
 
-        // Telegram => immediate "sent" and mark booking.
+        // No Telegram delivery channel for patients exists yet → nothing is
+        // actually sent: record "failed" and leave the booking unmarked.
         if (source === 'telegram') {
           return {
             row: {
               patientId: b.patientId,
               type: 'telegram' as const,
               message,
-              status: 'sent' as const,
+              status: 'failed' as const,
               sentAt,
             },
-            bookingIdToMark: b.id,
+            bookingIdToMark: null,
             smsSentInc: 0,
             smsFailedInc: 0,
           };
@@ -135,16 +172,17 @@ export class NotificationsService {
         // SMS path
         const type: ReminderType = 'sms';
 
+        // Eskiz not configured → nothing sent; don't mark as reminded.
         if (!eskizOn) {
           return {
             row: {
               patientId: b.patientId,
               type,
               message,
-              status: 'sent' as const,
+              status: 'failed' as const,
               sentAt,
             },
-            bookingIdToMark: b.id,
+            bookingIdToMark: null,
             smsSentInc: 0,
             smsFailedInc: 0,
           };
@@ -167,7 +205,14 @@ export class NotificationsService {
           };
         }
 
-        const r = await this.eskiz.sendSms(mobile, message);
+        const r = await this.eskiz
+          .sendSms(mobile, message)
+          .catch((e: unknown) => {
+            this.logger.warn(
+              `Eslatma SMS xatosi (booking ${b.id}): ${e instanceof Error ? e.message : String(e)}`,
+            );
+            return { ok: false as const, error: 'send failed' };
+          });
         if (r.ok) {
           return {
             row: {
@@ -219,22 +264,30 @@ export class NotificationsService {
       });
     }
 
-    return eskizOn
-      ? { created: rows.length, smsSent, smsFailed }
-      : { created: rows.length };
+    // skipped = recorded as "failed" without any send attempt (no Telegram
+    // channel / Eskiz not configured) — retried on the next run.
+    return {
+      created: rows.length,
+      smsSent,
+      smsFailed,
+      skipped: rows.length - smsSent - smsFailed,
+    };
   }
 
   async findRecipients(query: RecipientQueryDto) {
     const { startDate, endDate, targetType } = query;
 
-    const dateStart = new Date(startDate || new Date().toISOString());
-    dateStart.setUTCHours(0, 0, 0, 0);
-    const dateEnd = new Date(endDate || new Date().toISOString());
-    dateEnd.setUTCHours(23, 59, 59, 999);
+    // bookings.date is a DATE column → compare calendar days. Default: today
+    // in Asia/Tashkent.
+    const today = todayInTashkent();
+    const dayOf = (v?: string) => (v ? toDateOnlyString(new Date(v)) : today);
 
     const bookings = await this.prisma.booking.findMany({
       where: {
-        date: { gte: dateStart, lte: dateEnd },
+        date: {
+          gte: parseDateOnlyToUTC(dayOf(startDate)),
+          lte: parseDateOnlyToUTC(dayOf(endDate)),
+        },
         status: { in: ['confirmed', 'pending'] },
         // Only filter by reminderSentAt for patients
         ...(targetType === 'patient' ? { reminderSentAt: null } : {}),
@@ -293,6 +346,7 @@ export class NotificationsService {
     const results = { sent: 0, failed: 0 };
     const markAt = new Date();
 
+    const fromToday = parseDateOnlyToUTC(todayInTashkent());
     const targets =
       targetType === 'doctor'
         ? await this.prisma.doctor.findMany({
@@ -302,7 +356,7 @@ export class NotificationsService {
               phone: true,
               bookings: {
                 where: {
-                  date: { gte: startOfUTCDay(new Date()) },
+                  date: { gte: fromToday },
                   status: { in: ['confirmed', 'pending'] },
                 },
                 include: { patient: true },
@@ -318,7 +372,7 @@ export class NotificationsService {
               phone: true,
               bookings: {
                 where: {
-                  date: { gte: startOfUTCDay(new Date()) },
+                  date: { gte: fromToday },
                   status: { in: ['confirmed', 'pending'] },
                   reminderSentAt: null,
                 },
@@ -359,22 +413,23 @@ export class NotificationsService {
         let bookingIdToMark: string | null = null;
 
         if (eskizOn && mobile) {
-          const r = await this.eskiz.sendSms(mobile, personalizedMessage);
+          const r = await this.eskiz
+            .sendSms(mobile, personalizedMessage)
+            .catch(() => ({ ok: false as const, error: 'send failed' }));
           status = r.ok ? 'sent' : 'failed';
           if (r.ok) {
             sentInc = 1;
-            bookingIdToMark = booking?.id ?? null;
+            // Only a patient's own reminder marks their booking; an SMS to
+            // the doctor must not suppress the patient's reminder.
+            bookingIdToMark =
+              targetType === 'patient' ? (booking?.id ?? null) : null;
           } else {
             failedInc = 1;
           }
         } else {
-          status = mobile ? 'sent' : 'failed';
-          if (status === 'sent') {
-            sentInc = 1;
-            bookingIdToMark = booking?.id ?? null;
-          } else {
-            failedInc = 1;
-          }
+          // Eskiz not configured or invalid phone → nothing was sent.
+          status = 'failed';
+          failedInc = 1;
         }
 
         const row = {

@@ -9,14 +9,17 @@ export class NotificationsRepository {
   async findAll(opts?: {
     skip?: number;
     take?: number;
+    where?: Prisma.NotificationWhereInput;
   }): Promise<{ data: Notification[]; total: number }> {
+    const where = opts?.where;
     const [data, total] = await Promise.all([
       this.prisma.notification.findMany({
+        ...(where ? { where } : {}),
         orderBy: { sentAt: 'desc' },
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
-      this.prisma.notification.count(),
+      this.prisma.notification.count(where ? { where } : undefined),
     ]);
     return { data, total };
   }

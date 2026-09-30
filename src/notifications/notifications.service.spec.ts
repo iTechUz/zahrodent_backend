@@ -1,3 +1,4 @@
+import { ForbiddenException, Logger } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { NotificationsRepository } from './notifications.repository';
 import { BookingsRepository } from '../bookings/bookings.repository';
@@ -141,11 +142,14 @@ describe('NotificationsService.sendReminders', () => {
       total: 1,
     } as any);
     patientsRepo.findSourcesByPatientIds.mockResolvedValue([
-      { id: 'p1', source: 'telegram' },
+      { id: 'p1', source: 'phone' },
     ]);
     patientsRepo.findPhonesByPatientIds.mockResolvedValue([
       { id: 'p1', phone: '+998901112233' },
     ]);
+    eskiz.isConfigured.mockReturnValue(true);
+    eskiz.normalizeMobile.mockImplementation(realNormalize);
+    eskiz.sendSms.mockResolvedValue({ ok: true });
 
     const out = await service.sendReminders();
     expect(out.created).toBe(1);
@@ -157,7 +161,7 @@ describe('NotificationsService.sendReminders', () => {
       data: expect.arrayContaining([
         expect.objectContaining({
           patientId: 'p1',
-          type: 'telegram',
+          type: 'sms',
           status: 'sent',
         }),
       ]),
@@ -168,12 +172,17 @@ describe('NotificationsService.sendReminders', () => {
     });
   });
 
-  it('faqat pending/confirmed va hali eslatilmaganlar so‘raladi', async () => {
+  it('faqat pending/confirmed, hali eslatilmagan, bugun..ertaga (Toshkent)', async () => {
     bookingsRepo.findAll.mockResolvedValue({ data: [], total: 0 } as any);
-    await service.sendReminders();
+    // 2026-06-01 20:00Z = 2026-06-02 01:00 Toshkent
+    await service.sendReminders(new Date('2026-06-01T20:00:00.000Z'));
     expect(bookingsRepo.findAll).toHaveBeenCalledWith({
       status: { in: ['confirmed', 'pending'] },
       reminderSentAt: null,
+      date: {
+        gte: new Date('2026-06-02T00:00:00.000Z'),
+        lte: new Date('2026-06-03T00:00:00.000Z'),
+      },
     });
   });
 
@@ -197,11 +206,18 @@ describe('NotificationsService.sendReminders', () => {
       total: 1,
     } as any);
     patientsRepo.findSourcesByPatientIds.mockResolvedValue([]);
-    await expect(service.sendReminders()).resolves.toEqual({ created: 0 });
+    await expect(service.sendReminders()).resolves.toEqual({
+      created: 0,
+      smsSent: 0,
+      smsFailed: 0,
+      skipped: 0,
+    });
     expect((prisma as any).$transaction).not.toHaveBeenCalled();
   });
 
-  it('Eskiz o‘chiq — SMS yozuvi "sent", booking belgilanadi, smsSent maydonlari yo‘q', async () => {
+  // Fixed: with Eskiz not configured, reminders were recorded as "sent" and
+  // bookings marked, so the patient never got a real reminder later.
+  it('Eskiz o‘chiq — SMS yozuvi "failed", booking belgilanmaydi', async () => {
     bookingsRepo.findAll.mockResolvedValue({
       data: [b('b1', 'p1')],
       total: 1,
@@ -210,12 +226,29 @@ describe('NotificationsService.sendReminders', () => {
       { id: 'p1', source: 'walk-in' },
     ]);
     const out = await service.sendReminders();
-    expect(out).toEqual({ created: 1 });
+    expect(out).toEqual({ created: 1, smsSent: 0, smsFailed: 0, skipped: 1 });
     expect(eskiz.sendSms).not.toHaveBeenCalled();
     expect(
       txMock.notification.createMany.mock.calls[0][0].data[0],
-    ).toMatchObject({ type: 'sms', status: 'sent' });
-    expect(txMock.booking.updateMany).toHaveBeenCalled();
+    ).toMatchObject({ type: 'sms', status: 'failed' });
+    expect(txMock.booking.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('telegram manbali bemor — kanal yo‘q: "failed", booking belgilanmaydi', async () => {
+    bookingsRepo.findAll.mockResolvedValue({
+      data: [b('b1', 'p1')],
+      total: 1,
+    } as any);
+    patientsRepo.findSourcesByPatientIds.mockResolvedValue([
+      { id: 'p1', source: 'telegram' },
+    ]);
+    eskiz.isConfigured.mockReturnValue(true);
+    const out = await service.sendReminders();
+    expect(out).toEqual({ created: 1, smsSent: 0, smsFailed: 0, skipped: 1 });
+    expect(
+      txMock.notification.createMany.mock.calls[0][0].data[0],
+    ).toMatchObject({ type: 'telegram', status: 'failed' });
+    expect(txMock.booking.updateMany).not.toHaveBeenCalled();
   });
 
   describe('Eskiz yoqiq', () => {
@@ -254,7 +287,12 @@ describe('NotificationsService.sendReminders', () => {
       );
 
       const out = await service.sendReminders();
-      expect(out).toEqual({ created: 5, smsSent: 1, smsFailed: 3 });
+      expect(out).toEqual({
+        created: 5,
+        smsSent: 1,
+        smsFailed: 3,
+        skipped: 1,
+      });
       expect(eskiz.sendSms).toHaveBeenCalledTimes(2);
       expect(eskiz.sendSms).toHaveBeenCalledWith(
         '998901112233',
@@ -266,13 +304,12 @@ describe('NotificationsService.sendReminders', () => {
         ['p1', 'sms', 'sent'],
         ['p2', 'sms', 'failed'],
         ['p3', 'sms', 'failed'],
-        ['p4', 'telegram', 'sent'],
+        ['p4', 'telegram', 'failed'],
         ['p5', 'sms', 'failed'],
       ]);
       // Faqat muvaffaqiyatli yuborilganlar belgilanadi (qayta urinish uchun).
       expect(txMock.booking.updateMany.mock.calls[0][0].where.id.in).toEqual([
         'b1',
-        'b4',
       ]);
     });
 
@@ -286,7 +323,12 @@ describe('NotificationsService.sendReminders', () => {
       ]);
       patientsRepo.findPhonesByPatientIds.mockResolvedValue([]);
       const out = await service.sendReminders();
-      expect(out).toEqual({ created: 1, smsSent: 0, smsFailed: 1 });
+      expect(out).toEqual({
+        created: 1,
+        smsSent: 0,
+        smsFailed: 1,
+        skipped: 0,
+      });
       expect(txMock.notification.createMany).toHaveBeenCalled();
       expect(txMock.booking.updateMany).not.toHaveBeenCalled();
     });
@@ -316,7 +358,12 @@ describe('NotificationsService.sendReminders', () => {
         return { ok: true as const };
       });
       const out = await service.sendReminders();
-      expect(out).toEqual({ created: 12, smsSent: 12, smsFailed: 0 });
+      expect(out).toEqual({
+        created: 12,
+        smsSent: 12,
+        smsFailed: 0,
+        skipped: 0,
+      });
       expect(maxInFlight).toBeLessThanOrEqual(5);
       expect(maxInFlight).toBeGreaterThan(1);
       const rows = txMock.notification.createMany.mock.calls[0][0].data;
@@ -326,20 +373,57 @@ describe('NotificationsService.sendReminders', () => {
     });
   });
 
-  // BUG (notifications.service.ts:80-83): the query has no date window, so
-  // reminders are generated for every pending/confirmed booking ever — past
-  // bookings that were never closed and bookings months ahead alike.
-  it.todo(
-    'sendReminders — faqat yaqin (masalan ertangi) qabullar uchun yuborilishi kerak',
-  );
+  // Fixed: the query had no date window, so reminders went out for every
+  // pending/confirmed booking ever (stale past ones and months ahead).
+  it('sendReminders — faqat bugungi va ertangi qabullar so‘raladi', async () => {
+    bookingsRepo.findAll.mockResolvedValue({ data: [], total: 0 } as any);
+    await service.sendReminders(new Date('2026-12-31T10:00:00.000Z'));
+    const where = bookingsRepo.findAll.mock.calls[0][0] as any;
+    expect(where.date).toEqual({
+      gte: new Date('2026-12-31T00:00:00.000Z'),
+      lte: new Date('2027-01-01T00:00:00.000Z'),
+    });
+    // still only not-yet-reminded bookings → a sent reminder is never re-sent
+    expect(where.reminderSentAt).toBeNull();
+  });
 
-  // BUG (notifications.service.ts:170 + eskiz.service.ts:103): if
-  // eskiz.sendSms rejects (network error / timeout abort), mapWithConcurrency
-  // rejects the whole run: nothing is recorded or marked even though some
-  // SMS were already delivered → they are re-sent on the next run.
-  it.todo(
-    'sendReminders — bitta SMS xatosi (reject) butun partiyani yiqitmasligi kerak',
-  );
+  // Fixed: one rejected sendSms (network error / timeout) rejected the whole
+  // run — nothing recorded or marked although other SMS were delivered, so
+  // they were re-sent next time.
+  it('sendReminders — bitta SMS xatosi (reject) butun partiyani yiqitmaydi', async () => {
+    eskiz.isConfigured.mockReturnValue(true);
+    eskiz.normalizeMobile.mockImplementation(realNormalize);
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    bookingsRepo.findAll.mockResolvedValue({
+      data: [b('b1', 'p1'), b('b2', 'p2'), b('b3', 'p3')],
+      total: 3,
+    } as any);
+    patientsRepo.findSourcesByPatientIds.mockResolvedValue([
+      { id: 'p1', source: 'phone' },
+      { id: 'p2', source: 'phone' },
+      { id: 'p3', source: 'phone' },
+    ]);
+    patientsRepo.findPhonesByPatientIds.mockResolvedValue([
+      { id: 'p1', phone: '+998901112201' },
+      { id: 'p2', phone: '+998901112202' },
+      { id: 'p3', phone: '+998901112203' },
+    ]);
+    eskiz.sendSms.mockImplementation(async (mobile: string) => {
+      if (mobile === '998901112202') throw new Error('socket hang up');
+      return { ok: true as const };
+    });
+
+    const out = await service.sendReminders();
+    expect(out).toEqual({ created: 3, smsSent: 2, smsFailed: 1, skipped: 0 });
+    const rows = txMock.notification.createMany.mock.calls[0][0].data;
+    expect(rows.map((r: any) => r.status)).toEqual(['sent', 'failed', 'sent']);
+    // delivered ones are marked (never re-sent), the failed one is retried
+    expect(txMock.booking.updateMany.mock.calls[0][0].where.id.in).toEqual([
+      'b1',
+      'b3',
+    ]);
+    jest.restoreAllMocks();
+  });
 });
 
 describe('NotificationsService (boshqa metodlar)', () => {
@@ -396,6 +480,47 @@ describe('NotificationsService (boshqa metodlar)', () => {
       expect(m.notificationsRepo.findAll).toHaveBeenCalledWith({
         skip: 0,
         take: 10,
+      });
+    });
+
+    const doctorUser = {
+      id: 'u2',
+      name: 'Dr',
+      phone: 'p',
+      role: 'doctor' as const,
+      doctorId: 'd1',
+    };
+
+    it('doctor — faqat o‘ziga yuborilganlar (doctorId)', async () => {
+      m.notificationsRepo.findAll.mockResolvedValue({ data: [], total: 0 });
+      await m.service.findAll({}, doctorUser);
+      expect(m.notificationsRepo.findAll).toHaveBeenCalledWith({
+        skip: 0,
+        take: 10,
+        where: { doctorId: 'd1' },
+      });
+    });
+
+    it('doctor profili yo‘q — 403', async () => {
+      await expect(
+        m.service.findAll({}, { ...doctorUser, doctorId: undefined }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(m.notificationsRepo.findAll).not.toHaveBeenCalled();
+    });
+
+    it('search — xabar matni bo‘yicha', async () => {
+      m.notificationsRepo.findAll.mockResolvedValue({ data: [], total: 0 });
+      await m.service.findAll(
+        { search: ' eslatma ' },
+        {
+          ...doctorUser,
+          role: 'admin',
+        },
+      );
+      expect(m.notificationsRepo.findAll).toHaveBeenCalledWith({
+        skip: 0,
+        take: 10,
+        where: { message: { contains: 'eslatma', mode: 'insensitive' } },
       });
     });
   });
@@ -522,16 +647,17 @@ describe('NotificationsService (boshqa metodlar)', () => {
       ...partial,
     });
 
-    it('default — bugungi UTC kun, bemorlar uchun reminderSentAt: null', async () => {
-      jest.useFakeTimers({ now: new Date('2026-06-17T15:00:00.000Z') });
+    it('default — bugungi Toshkent kuni, bemorlar uchun reminderSentAt: null', async () => {
+      // 2026-06-17 20:00Z = 2026-06-18 01:00 Toshkent
+      jest.useFakeTimers({ now: new Date('2026-06-17T20:00:00.000Z') });
       m.prisma.booking.findMany.mockResolvedValue([]);
       await m.service.findRecipients({ targetType: 'patient' });
       expect(m.prisma.booking.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
             date: {
-              gte: new Date('2026-06-17T00:00:00.000Z'),
-              lte: new Date('2026-06-17T23:59:59.999Z'),
+              gte: new Date('2026-06-18T00:00:00.000Z'),
+              lte: new Date('2026-06-18T00:00:00.000Z'),
             },
             status: { in: ['confirmed', 'pending'] },
             reminderSentAt: null,
@@ -552,7 +678,7 @@ describe('NotificationsService (boshqa metodlar)', () => {
       expect(where).not.toHaveProperty('reminderSentAt');
       expect(where.date).toEqual({
         gte: new Date('2026-06-01T00:00:00.000Z'),
-        lte: new Date('2026-06-03T23:59:59.999Z'),
+        lte: new Date('2026-06-03T00:00:00.000Z'),
       });
     });
 
@@ -679,7 +805,9 @@ describe('NotificationsService (boshqa metodlar)', () => {
       });
     });
 
-    it('Eskiz o‘chiq — telefon to‘g‘ri bo‘lsa "sent" hisoblanadi', async () => {
+    // Fixed: without Eskiz nothing is sent, but it used to count as "sent"
+    // and mark the booking reminded.
+    it('Eskiz o‘chiq — hech narsa yuborilmaydi: "failed", booking belgilanmaydi', async () => {
       m.prisma.patient.findMany.mockResolvedValue([
         target('p1', '901112233', upcoming),
         target('p2', ''),
@@ -690,10 +818,10 @@ describe('NotificationsService (boshqa metodlar)', () => {
         message: 'Salom!',
       });
       expect(m.eskiz.sendSms).not.toHaveBeenCalled();
-      expect(out).toEqual({ sent: 1, failed: 1, total: 3 });
-      expect(m.txMock.booking.updateMany.mock.calls[0][0].where.id.in).toEqual([
-        'b1',
-      ]);
+      expect(out).toEqual({ sent: 0, failed: 2, total: 3 });
+      const rows = m.txMock.notification.createMany.mock.calls[0][0].data;
+      expect(rows.map((r: any) => r.status)).toEqual(['failed', 'failed']);
+      expect(m.txMock.booking.updateMany).not.toHaveBeenCalled();
     });
 
     it('booking siz bemor — matn o‘zgarmaydi, updateMany yo‘q', async () => {
@@ -726,6 +854,9 @@ describe('NotificationsService (boshqa metodlar)', () => {
     });
 
     it('shifokorlar — doctor.findMany, doctorId yozuvi', async () => {
+      m.eskiz.isConfigured.mockReturnValue(true);
+      m.eskiz.normalizeMobile.mockImplementation(realNormalize);
+      m.eskiz.sendSms.mockResolvedValue({ ok: true });
       m.prisma.doctor.findMany.mockResolvedValue([
         target('d1', '+998901112200', upcoming),
       ]);
@@ -760,13 +891,42 @@ describe('NotificationsService (boshqa metodlar)', () => {
       expect(m.prisma.$transaction).not.toHaveBeenCalled();
     });
 
-    // BUG (notifications.service.ts:366,374,405-412): for targetType
-    // 'doctor', a successful send marks the doctor's next *patient* booking
-    // with reminderSentAt. That booking is then excluded from sendReminders
-    // and from findRecipients/bulkSend for patients (reminderSentAt: null
-    // filter), so the patient never receives their reminder.
-    it.todo(
-      'bulkSend(doctor) — bemor booking.reminderSentAt belgilanmasligi kerak',
-    );
+    // Fixed: an SMS to a doctor marked the doctor's next *patient* booking
+    // as reminded, so the patient never got their own reminder.
+    it('bulkSend(doctor) — bemor booking.reminderSentAt belgilanmaydi', async () => {
+      m.eskiz.isConfigured.mockReturnValue(true);
+      m.eskiz.normalizeMobile.mockImplementation(realNormalize);
+      m.eskiz.sendSms.mockResolvedValue({ ok: true });
+      m.prisma.doctor.findMany.mockResolvedValue([
+        target('d1', '+998901112200', upcoming),
+      ]);
+      const out = await m.service.bulkSend({
+        targetIds: ['d1'],
+        targetType: 'doctor',
+        message: 'Ertaga: [bemor] [vaqt]',
+      });
+      expect(out).toEqual({ sent: 1, failed: 0, total: 1 });
+      expect(m.txMock.notification.createMany).toHaveBeenCalled();
+      expect(m.txMock.booking.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('bulkSend — sendSms reject qilsa ham qolganlari yuboriladi', async () => {
+      m.eskiz.isConfigured.mockReturnValue(true);
+      m.eskiz.normalizeMobile.mockImplementation(realNormalize);
+      m.eskiz.sendSms
+        .mockRejectedValueOnce(new Error('timeout'))
+        .mockResolvedValueOnce({ ok: true });
+      m.prisma.patient.findMany.mockResolvedValue([
+        target('p1', '+998901112201'),
+        target('p2', '+998901112202'),
+      ]);
+      await expect(
+        m.service.bulkSend({
+          targetIds: ['p1', 'p2'],
+          targetType: 'patient',
+          message: 'Salom!',
+        }),
+      ).resolves.toEqual({ sent: 1, failed: 1, total: 2 });
+    });
   });
 });
