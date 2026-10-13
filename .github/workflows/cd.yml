@@ -1,7 +1,7 @@
 name: CD
 
 # Faqat CI main'dagi push uchun muvaffaqiyatli tugaganda ishlaydi.
-# Stages: build (image + Trivy + Docker Hub push) -> prepare (.env + pull)
+# Stages: build (image + Trivy + Docker Hub push) -> prepare (.env + pull) -> migrate (prisma)
 #         -> deploy (run + health check, xato bo'lsa eski image'ga rollback) -> notify
 # production environment (env4ci): SERVER_HOST, SERVER_USER, DOCKERHUB_USERNAME,
 #   IMAGE_NAME, CONTAINER_NAME, DOCKER_NETWORK, SSH_PRIVATE_KEY, DOCKERHUB_TOKEN + .env kalitlari
@@ -158,9 +158,40 @@ jobs:
           # shellcheck disable=SC2029 # IMAGE runner'da ochiladi (ataylab)
           ssh server "docker pull '$IMAGE'"
 
+  migrate:
+    name: Migrate
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    env:
+      SERVER_HOST: ${{ vars.SERVER_HOST }}
+      SERVER_USER: ${{ vars.SERVER_USER }}
+      IMAGE: ${{ vars.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha || github.sha }}
+      CONTAINER: ${{ vars.CONTAINER_NAME }}
+      NETWORK: ${{ vars.DOCKER_NETWORK }}
+      ENV_FILE: /home/ubuntu/zahrodent_backend/.env
+    steps:
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id
+          chmod 600 ~/.ssh/id
+          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host server\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id\n' "$SERVER_HOST" "$SERVER_USER" > ~/.ssh/config
+
+      # Yangi image bilan `prisma migrate deploy` (faqat pending migratsiyalar).
+      # Xato bo'lsa deploy qilinmaydi — eski container ishlashda davom etadi.
+      - name: Prisma migrate deploy
+        run: |
+          # shellcheck disable=SC2029 # qiymatlar runner'da ochiladi (ataylab)
+          ssh server "docker run --rm --network '$NETWORK' --env-file '$ENV_FILE' '$IMAGE' ./node_modules/.bin/prisma migrate deploy"
+
   deploy:
     name: Deploy
-    needs: prepare
+    needs: migrate
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: production
@@ -225,7 +256,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     environment: production
-    needs: [build, prepare, deploy]
+    needs: [build, prepare, migrate, deploy]
     if: always() && needs.build.result != 'skipped'
     permissions:
       contents: read
@@ -241,6 +272,7 @@ jobs:
           WORKFLOW: CD
           BUILD: ${{ needs.build.result }}
           PREPARE: ${{ needs.prepare.result }}
+          MIGRATE: ${{ needs.migrate.result }}
           DEPLOY: ${{ needs.deploy.result }}
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.run_id }}
