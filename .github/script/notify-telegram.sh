@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sends CI result to the Telegram dev group topic.
-# Env: BOT_TOKEN CHAT_ID TOPIC_ID LINT TYPECHECK TEST BUILD DEPLOY REPO BRANCH ACTOR
+# Env: BOT_TOKEN CHAT_ID TOPIC_ID LINT TYPECHECK TEST BUILD PREPARE DEPLOY REPO BRANCH ACTOR
 #      REPO_URL RUN_URL COMMIT_MSG COMMIT_URL
 # LINT/TYPECHECK/TEST/BUILD are optional: an unset stage is not reported
 # (e.g. frontend repos have no Test job), so one script serves every repo.
@@ -15,6 +15,7 @@ LINT="${LINT:-}"
 TYPECHECK="${TYPECHECK:-}"
 TEST="${TEST:-}"
 BUILD="${BUILD:-}"
+PREPARE="${PREPARE:-}"
 DEPLOY="${DEPLOY:-}"
 
 escape_html() {
@@ -44,6 +45,7 @@ if [ -n "${GH_TOKEN:-}" ] && [ -n "${RUN_ID:-}" ]; then
       Typecheck) TYPECHECK=failure ;;
       Test) TEST=failure ;;
       *[Bb]uild*) BUILD=failure ;;
+      [Pp]repare) PREPARE=failure ;;
       [Dd]eploy) DEPLOY=failure ;;
     esac
     LOG=$(gh api "repos/${REPO}/actions/jobs/${JOB_ID}/logs" 2>/dev/null \
@@ -70,12 +72,13 @@ add_stage "$LINT" "Lint"
 add_stage "$TYPECHECK" "Typecheck"
 add_stage "$TEST" "Test"
 add_stage "$BUILD" "Docker build"
+add_stage "$PREPARE" "Prepare"
 add_stage "$DEPLOY" "Deploy"
 
 if [ -z "$FAILED_STAGES" ]; then
-  STATUS="✅ <b>CI passed</b>"
+  STATUS="✅ <b>${WORKFLOW:-CI} passed</b>"
 else
-  STATUS="❌ <b>CI failed: ${FAILED_STAGES%, }</b>"
+  STATUS="❌ <b>${WORKFLOW:-CI} failed: ${FAILED_STAGES%, }</b>"
 fi
 
 SAFE_REPO=$(escape_html "$REPO")
