@@ -15,6 +15,7 @@ rules:
   - { pattern: "PR_*_ID",    type: variable }
   - { pattern: "SERVER_*", type: variable }
   - { pattern: "DOCKERHUB_USERNAME", type: variable }
+  - { pattern: "DOCKER_NETWORK", type: variable }
   - { pattern: "IMAGE_NAME", type: variable }
   - { pattern: "CONTAINER_NAME", type: variable }
   - { pattern: "PORT", type: variable }
@@ -37,6 +38,7 @@ rules:
 # Branch -> environment. "env4ci push" on a branch writes to its environment.
 branches:
   "main": production
+  "dev": production
 
 # env4ci's own tokens/addresses (generated, gitignored).
 auth_file: .github/env4ci.env
