@@ -35,7 +35,7 @@ describe('PatientsRepository', () => {
     expect(prisma.patient.findMany).toHaveBeenCalledWith({
       where: { source: 'phone' },
       include,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       skip: 5,
       take: 5,
     });
@@ -43,7 +43,7 @@ describe('PatientsRepository', () => {
     expect(prisma.patient.findMany).toHaveBeenLastCalledWith({
       where: undefined,
       include,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
   });
 

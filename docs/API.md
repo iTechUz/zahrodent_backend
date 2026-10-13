@@ -375,6 +375,16 @@ ham 200 (idempotent). Topilmasa **404**.
 
 ---
 
+## Modul: Public leads (landing)
+
+**Controller:** `PublicLeadsController` — `POST /public/leads` (JWT yo'q, 5 so'rov/daqiqa/IP)
+
+Landing sahifadagi forma. `source: "website"` bilan `Lead` yaratadi (adminkada "Murojaatlar"da ko'rinadi, `newLead` socket hodisasi ketadi).
+Body: `name`, `phone` (majburiy), `service`, `date` (YYYY-MM-DD), `note` (ixtiyoriy; `date` + `note` → `message`). Javob: `{ "ok": true }`.
+Landing domeni `CORS_ORIGINS` ga qo'shilishi shart.
+
+---
+
 ## Modul: Notifications
 
 **Controller:** `NotificationsController` — `/notifications`  
