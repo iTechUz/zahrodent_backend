@@ -30,7 +30,8 @@ export class PatientsRepository {
       this.prisma.patient.findMany({
         where,
         include: PATIENT_INCLUDE,
-        orderBy: opts?.orderBy ?? { createdAt: 'desc' },
+        // created_at is a DATE column: same-day rows tie, so break ties by id (cuid, newest last-created first)
+        orderBy: opts?.orderBy ?? [{ createdAt: 'desc' }, { id: 'desc' }],
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
