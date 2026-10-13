@@ -3,3 +3,5 @@ dist
 .env
 *.log
 coverage
+/.github/env4ci.env
+/.github/production.env
