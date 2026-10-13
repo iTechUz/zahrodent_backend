@@ -17,7 +17,10 @@ export class PublicLeadDto {
   phone: string;
   @IsOptional() @IsString() @MaxLength(100) service?: string;
   /** Preferred date (YYYY-MM-DD) and the visitor's note, stored together in `message`. */
-  @IsOptional() @IsString() @MaxLength(20) date?: string;
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date must be YYYY-MM-DD' })
+  date?: string;
   @IsOptional() @IsString() @MaxLength(1000) note?: string;
 }
 
