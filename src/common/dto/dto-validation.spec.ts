@@ -221,12 +221,21 @@ describe('DTO validation', () => {
 
   describe('Leads', () => {
     it('Create — name/phone majburiy, status enum', () => {
-      expect(errorsOf(CreateLeadDto, { name: 'A', phone: '1' })).toEqual({});
+      expect(
+        errorsOf(CreateLeadDto, { name: 'A', phone: '+998901234567' }),
+      ).toEqual({});
+      expect(
+        errorsOf(CreateLeadDto, { name: 'A', phone: 'abc' }),
+      ).toHaveProperty('phone');
       expect(
         Object.keys(errorsOf(CreateLeadDto, { name: '', phone: '' })).sort(),
       ).toEqual(['name', 'phone']);
       expect(
-        errorsOf(CreateLeadDto, { name: 'A', phone: '1', status: 'won' }),
+        errorsOf(CreateLeadDto, {
+          name: 'A',
+          phone: '+998901234567',
+          status: 'won',
+        }),
       ).toHaveProperty('status');
     });
 

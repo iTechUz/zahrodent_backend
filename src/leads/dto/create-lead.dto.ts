@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsIn, IsNotEmpty } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsIn,
+  IsNotEmpty,
+  Matches,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export const LEAD_STATUSES = [
@@ -19,6 +25,7 @@ export class CreateLeadDto {
   @ApiProperty({ example: '+998901234567' })
   @IsString()
   @IsNotEmpty()
+  @Matches(/^\+?[\d\s()-]{7,20}$/, { message: 'Invalid phone' })
   phone: string;
 
   @ApiProperty({ example: 'Implantatsiya', required: false })

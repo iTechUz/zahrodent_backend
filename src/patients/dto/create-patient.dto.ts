@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  Max,
   Min,
   MinLength,
 } from 'class-validator';
@@ -30,6 +31,7 @@ export class CreatePatientDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(120)
   age: number;
 
   @IsString()
