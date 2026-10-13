@@ -1,0 +1,181 @@
+name: CD
+
+# Faqat CI main'dagi push uchun muvaffaqiyatli tugaganda ishlaydi.
+# Jobs: deploy (image build + Docker Hub push + server) -> notify (Telegram).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: 10449/zahrodent_backend
+  ENV_FILE: /home/ubuntu/projects/zaxro_dent/backend/zahrodent_backend/.env
+  SERVER_HOST: 116.203.244.91
+  CONTAINER: zahrodent_backend
+
+jobs:
+  deploy:
+    name: Deploy
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: 10449
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.event.workflow_run.head_sha || github.sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # .env GitHub "production" environment'dagi secrets/vars'dan yig'iladi.
+      # Majburiy kalit bo'sh bo'lsa deploy to'xtaydi — serverdagi .env buzilmaydi.
+      - name: Create .env
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          INITIAL_ADMIN_PASSWORD: ${{ secrets.INITIAL_ADMIN_PASSWORD }}
+          ESKIZ_EMAIL: ${{ secrets.ESKIZ_EMAIL }}
+          ESKIZ_PASSWORD: ${{ secrets.ESKIZ_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          PORT: ${{ vars.PORT }}
+          HOST: ${{ vars.HOST }}
+          NODE_ENV: ${{ vars.NODE_ENV }}
+          TZ: ${{ vars.TZ }}
+          CORS_ORIGINS: ${{ vars.CORS_ORIGINS }}
+          PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+          TRUST_PROXY: ${{ vars.TRUST_PROXY }}
+          SWAGGER_ENABLED: ${{ vars.SWAGGER_ENABLED }}
+          LOG_FORMAT: ${{ vars.LOG_FORMAT }}
+          JWT_EXPIRES_IN: ${{ vars.JWT_EXPIRES_IN }}
+          REFRESH_TOKEN_TTL_DAYS: ${{ vars.REFRESH_TOKEN_TTL_DAYS }}
+          INITIAL_ADMIN_PHONE: ${{ vars.INITIAL_ADMIN_PHONE }}
+          INITIAL_ADMIN_NAME: ${{ vars.INITIAL_ADMIN_NAME }}
+          ESKIZ_FROM: ${{ vars.ESKIZ_FROM }}
+          ESKIZ_BASE_URL: ${{ vars.ESKIZ_BASE_URL }}
+          ESKIZ_HTTP_TIMEOUT_MS: ${{ vars.ESKIZ_HTTP_TIMEOUT_MS }}
+          TELEGRAM_BOT_ENABLED: ${{ vars.TELEGRAM_BOT_ENABLED }}
+        run: |
+          umask 077
+          missing=""
+          for k in DATABASE_URL JWT_SECRET CORS_ORIGINS INITIAL_ADMIN_PHONE INITIAL_ADMIN_PASSWORD; do
+            [ -z "${!k}" ] && missing="$missing $k"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::production environment'da yo'q:$missing"
+            exit 1
+          fi
+          for k in DATABASE_URL JWT_SECRET INITIAL_ADMIN_PASSWORD ESKIZ_EMAIL ESKIZ_PASSWORD TELEGRAM_BOT_TOKEN PORT HOST NODE_ENV TZ CORS_ORIGINS PUBLIC_BASE_URL TRUST_PROXY SWAGGER_ENABLED LOG_FORMAT JWT_EXPIRES_IN REFRESH_TOKEN_TTL_DAYS INITIAL_ADMIN_PHONE INITIAL_ADMIN_NAME ESKIZ_FROM ESKIZ_BASE_URL ESKIZ_HTTP_TIMEOUT_MS TELEGRAM_BOT_ENABLED; do
+            if [ -n "${!k}" ]; then printf '%s=%s\n' "$k" "${!k}"; fi
+          done > app.env
+          echo "$(wc -l < app.env) ta kalit yozildi"
+
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id
+          chmod 600 ~/.ssh/id
+          ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts
+          printf 'Host server\n  HostName %s\n  User ubuntu\n  IdentityFile ~/.ssh/id\n' "$SERVER_HOST" > ~/.ssh/config
+
+      # Eski .env .env.bak sifatida saqlanadi (qo'lda qaytarish uchun).
+      - name: Upload .env
+        run: |
+          # shellcheck disable=SC2029 # ENV_FILE runner'da ochiladi (ataylab)
+          ssh server "set -e; umask 077; mkdir -p \"\$(dirname '$ENV_FILE')\"; if [ -f '$ENV_FILE' ]; then cp '$ENV_FILE' '$ENV_FILE.bak'; fi; cat > '$ENV_FILE'" < app.env
+          rm -f app.env
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SERVER_HOST }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -e
+            IMAGE="${{ env.IMAGE }}:${{ github.event.workflow_run.head_sha || github.sha }}"
+            echo "Deploying $IMAGE"
+
+            docker pull "$IMAGE"
+            docker rm -f ${{ env.CONTAINER }} || true
+
+            docker run -d \
+              --name ${{ env.CONTAINER }} \
+              --restart unless-stopped \
+              --network zaxro_network \
+              -p 7878:7878 \
+              --env-file ${{ env.ENV_FILE }} \
+              "$IMAGE"
+
+            # Health check: migratsiya + start uchun 90s gacha kutadi
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:7878/health > /dev/null; then
+                echo "✅ Healthy"
+                docker image prune -af --filter "until=168h" > /dev/null || true
+                exit 0
+              fi
+              sleep 3
+            done
+            echo "❌ Health check failed"
+            docker logs --tail 100 ${{ env.CONTAINER }}
+            exit 1
+
+  notify:
+    name: Notify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    environment: production
+    needs: [deploy]
+    if: always() && needs.deploy.result != 'skipped'
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      # Every value goes through env, never ${{ }} inside run: (script injection).
+      - name: Send Telegram message
+        env:
+          BOT_TOKEN: ${{ secrets.PR_TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ vars.PR_DEV_GROUP_ID }}
+          TOPIC_ID: ${{ vars.PR_TOPIC_ID }}
+          DEPLOY: ${{ needs.deploy.result }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          ACTOR: ${{ github.event.workflow_run.actor.login || github.actor }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_MSG: ${{ github.event.workflow_run.head_commit.message || 'manual deploy' }}
+          COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.event.workflow_run.head_sha || github.sha }}
+        run: bash .github/script/notify-telegram.sh
