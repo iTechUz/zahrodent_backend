@@ -13,6 +13,10 @@ rules:
   - { pattern: "ENVIRONMENT", type: variable }
   - { pattern: "VITE_*",     type: variable }
   - { pattern: "PR_*_ID",    type: variable }
+  - { pattern: "SERVER_*", type: variable }
+  - { pattern: "DOCKERHUB_USERNAME", type: variable }
+  - { pattern: "IMAGE_NAME", type: variable }
+  - { pattern: "CONTAINER_NAME", type: variable }
   - { pattern: "PORT", type: variable }
   - { pattern: "HOST", type: variable }
   - { pattern: "NODE_ENV", type: variable }

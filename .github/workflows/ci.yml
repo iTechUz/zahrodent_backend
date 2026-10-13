@@ -81,6 +81,8 @@ jobs:
     environment: production
     needs: [lint, typecheck, test, build]
     if: always()
+    # Telegram xatosi CI'ni qizil qilmasin — aks holda CD (workflow_run success) skip bo'ladi.
+    continue-on-error: true
     permissions:
       contents: read
       actions: read
