@@ -58,24 +58,38 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.registry.register(bot.telegram);
 
     // Webhook o'rniga hozircha long-polling ishlatamiz oson ishlashi uchun
-    bot.launch().catch((err) => {
-      this.launched = false;
-      this.registry.register(null);
-      this.logger.error('Telegram bot launch error:', err);
-    });
+    bot
+      .launch()
+      .then(() => {
+        // launch() resolves only when polling ends; unless we are shutting
+        // down (launched=false) that means it stopped on its own.
+        if (this.launched) {
+          this.registry.reportFailure('polling stopped');
+          this.logger.error('Telegram polling stopped unexpectedly');
+        }
+      })
+      .catch((err) => {
+        this.launched = false;
+        this.registry.register(null);
+        // 409 Conflict (second poller), bad token, network at startup…
+        this.registry.reportFailure(
+          err instanceof Error ? err.message : String(err),
+        );
+        this.logger.error('Telegram bot launch error:', err);
+      });
     this.logger.log('Telegram bot is running...');
   }
 
   onModuleDestroy() {
     this.registry.register(null);
     if (!this.bot || !this.launched) return;
+    this.launched = false;
     try {
       this.bot.stop('shutdown');
     } catch (err) {
       // stop() throws if polling never actually started.
       this.logger.warn(`Telegram bot stop: ${String(err)}`);
     }
-    this.launched = false;
   }
 
   /**
