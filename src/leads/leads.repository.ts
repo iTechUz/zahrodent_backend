@@ -45,4 +45,51 @@ export class LeadsRepository {
   async delete(id: string): Promise<Lead> {
     return this.prisma.lead.delete({ where: { id } });
   }
+
+  /**
+   * Updates the lead and, in the same transaction, makes sure a patient with
+   * the lead's phone exists (reuses a live one instead of duplicating).
+   */
+  async updateAndEnsurePatient(
+    id: string,
+    data: Prisma.LeadUpdateInput,
+    lead: Pick<Lead, 'name' | 'phone' | 'source' | 'service' | 'message'>,
+    patientDate: Date,
+  ): Promise<Lead> {
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.lead.update({ where: { id }, data });
+      const existing = await tx.patient.findFirst({
+        where: { phone: lead.phone, deletedAt: null },
+        select: { id: true },
+      });
+      if (!existing) {
+        const [firstName, ...rest] = lead.name.trim().split(/\s+/);
+        const notes = [
+          lead.service && `Xizmat: ${lead.service}`,
+          lead.message && `Murojaat: ${lead.message}`,
+        ]
+          .filter(Boolean)
+          .join('\n');
+        await tx.patient.create({
+          data: {
+            firstName: firstName || lead.name,
+            lastName: rest.join(' '),
+            // Unknown at lead stage; the schema requires a value.
+            age: 0,
+            phone: lead.phone,
+            source: patientSourceFromLead(lead.source),
+            notes,
+            createdAt: patientDate,
+          },
+        });
+      }
+      return updated;
+    });
+  }
+}
+
+function patientSourceFromLead(source: string): string {
+  if (source === 'telegram_bot') return 'telegram';
+  if (source === 'website') return 'website';
+  return 'phone';
 }

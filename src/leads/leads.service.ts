@@ -6,7 +6,11 @@ import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { Prisma } from '@prisma/client';
 import { LeadsQueryDto } from './dto/leads-query.dto';
 import { orderByOption } from '../common/dto/pagination.dto';
-import { tashkentInstantRange } from '../common/utils/date.util';
+import {
+  parseDateOnlyToUTC,
+  tashkentInstantRange,
+  todayInTashkent,
+} from '../common/utils/date.util';
 
 @Injectable()
 export class LeadsService {
@@ -67,6 +71,15 @@ export class LeadsService {
   async update(id: string, dto: UpdateLeadDto) {
     const lead = await this.leadsRepository.findById(id);
     if (!lead) throw new NotFoundException('Murojaat topilmadi');
+    // First move to "converted" → the lead becomes a patient automatically.
+    if (dto.status === 'converted' && lead.status !== 'converted') {
+      return this.leadsRepository.updateAndEnsurePatient(
+        id,
+        dto,
+        { ...lead, ...dto },
+        parseDateOnlyToUTC(todayInTashkent()),
+      );
+    }
     return this.leadsRepository.update(id, dto);
   }
 
