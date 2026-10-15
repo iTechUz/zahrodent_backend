@@ -58,7 +58,12 @@ const USER_AGENT_MAX = 512;
 const IP_MAX = 64;
 const BCRYPT_ROUNDS = 10;
 
-const APP_ROLES: readonly string[] = ['admin', 'doctor', 'receptionist'];
+const APP_ROLES: readonly string[] = [
+  'admin',
+  'doctor',
+  'receptionist',
+  'pharmacist',
+];
 // bcrypt hash of a throwaway string — compared against for unknown phones.
 const DUMMY_BCRYPT_HASH =
   '$2b$10$SgcmXHrYsTKpWDPH8w3xh.fROlQEv1n8B/n1QHbkGg7b2Z82wvgiS';

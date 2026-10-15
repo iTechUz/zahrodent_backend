@@ -72,6 +72,7 @@ model Patient {
   payments      Payment[]
   notifications Notification[]
   comments      PatientComment[]
+  prescriptions Prescription[]
 
   @@index([createdAt])
   @@index([phone])
@@ -93,6 +94,7 @@ model Doctor {
 
   bookings      Booking[]
   visits        Visit[]
+  prescriptions Prescription[]
   notifications Notification[]
   user          User?          @relation(fields: [userId], references: [id])
   userId        String?        @unique @map("user_id")
@@ -156,10 +158,11 @@ model Visit {
   treatment String   @default("")
   notes     String   @default("")
 
-  patient  Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctor   Doctor    @relation(fields: [doctorId], references: [id], onDelete: Restrict)
-  booking  Booking?  @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  payments Payment[]
+  patient       Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor        Doctor         @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  booking       Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  payments      Payment[]
+  prescriptions Prescription[]
 
   @@index([patientId])
   @@index([doctorId])
@@ -255,4 +258,46 @@ model ClinicSettings {
   updatedAt                DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("clinic_settings")
+}
+
+/// Electronic prescription. The pharmacy finds it by `code` (or patient phone)
+/// and marks it dispensed. status: issued | dispensed | cancelled
+model Prescription {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  patientId   String    @map("patient_id")
+  doctorId    String    @map("doctor_id")
+  visitId     String?   @map("visit_id")
+  status      String    @default("issued")
+  notes       String    @default("")
+  validUntil  DateTime  @map("valid_until") @db.Date
+  createdAt   DateTime  @default(now()) @map("created_at")
+  dispensedAt DateTime? @map("dispensed_at")
+  dispensedBy String?   @map("dispensed_by")
+
+  patient Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor  Doctor             @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  visit   Visit?             @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  items   PrescriptionItem[]
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([status])
+  @@map("prescriptions")
+}
+
+model PrescriptionItem {
+  id             String @id @default(cuid())
+  prescriptionId String @map("prescription_id")
+  name           String
+  dosage         String @default("")
+  frequency      String @default("")
+  duration       String @default("")
+  quantity       String @default("")
+  instructions   String @default("")
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+
+  @@index([prescriptionId])
+  @@map("prescription_items")
 }

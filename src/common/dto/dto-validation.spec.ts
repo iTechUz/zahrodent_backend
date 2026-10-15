@@ -440,13 +440,13 @@ describe('DTO validation', () => {
       'CreateUserDto.role %p — 400',
       (role) => {
         expect(errorsOf(CreateUserDto, { ...ok, role }).role).toEqual([
-          "role faqat admin, doctor yoki receptionist bo'lishi mumkin",
+          "role faqat admin, doctor, receptionist yoki pharmacist bo'lishi mumkin",
         ]);
         expect(errorsOf(UpdateUserDto, { role })).toHaveProperty('role');
       },
     );
 
-    it.each(['admin', 'doctor', 'receptionist'])(
+    it.each(['admin', 'doctor', 'receptionist', 'pharmacist'])(
       'CreateUserDto.role %p — ok',
       (role) => {
         expect(errorsOf(CreateUserDto, { ...ok, role })).toEqual({});
