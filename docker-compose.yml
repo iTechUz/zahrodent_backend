@@ -26,10 +26,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nest_api
+    container_name: nest_api_dev
     restart: always
     ports:
-      - "7879:7878"
+      - "7879:7879"
     environment:
       - PORT=7879
       - TZ=Asia/Tashkent
