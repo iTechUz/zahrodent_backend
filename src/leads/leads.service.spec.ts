@@ -2,6 +2,8 @@ import { NotFoundException } from '@nestjs/common';
 import { LeadsService } from './leads.service';
 import { LeadsRepository } from './leads.repository';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
+import { Logger } from '@nestjs/common';
 
 describe('LeadsService', () => {
   let service: LeadsService;
@@ -17,6 +19,7 @@ describe('LeadsService', () => {
     >
   >;
   let gateway: jest.Mocked<Pick<NotificationsGateway, 'sendNewLead'>>;
+  let tg: { sendMessage: jest.Mock };
 
   const lead = { id: 'l1', name: 'Ali', phone: '+998901112233' } as any;
 
@@ -30,10 +33,95 @@ describe('LeadsService', () => {
       updateAndEnsurePatient: jest.fn(),
     };
     gateway = { sendNewLead: jest.fn() };
+    tg = { sendMessage: jest.fn().mockResolvedValue({ ok: true }) };
     service = new LeadsService(
       repo as unknown as LeadsRepository,
       gateway as unknown as NotificationsGateway,
+      tg as unknown as TelegramBotRegistry,
     );
+  });
+
+  describe('Telegram guruhga e’lon', () => {
+    const saved = process.env.TELEGRAM_LEADS_CHAT_ID;
+    const flush = () => new Promise((r) => setImmediate(r));
+    const web = {
+      id: 'l2',
+      name: 'Ali <b>@bad</b>',
+      phone: '+998901112233',
+      service: 'Implant',
+      message: 'Sana: 2026-10-20\nSalom [x](http://evil)',
+      source: 'website',
+      createdAt: new Date('2026-10-15T09:30:00Z'),
+    } as any;
+    let warn: jest.SpyInstance;
+
+    beforeEach(() => {
+      warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    });
+    afterEach(() => {
+      if (saved === undefined) delete process.env.TELEGRAM_LEADS_CHAT_ID;
+      else process.env.TELEGRAM_LEADS_CHAT_ID = saved;
+      jest.restoreAllMocks();
+    });
+
+    it('env bor — guruhga yuboriladi (Toshkent vaqti, @ zararsizlangan)', async () => {
+      process.env.TELEGRAM_LEADS_CHAT_ID = '-100123';
+      repo.create.mockResolvedValue(web);
+      await expect(service.create({ name: 'x', phone: '1' })).resolves.toBe(
+        web,
+      );
+      await flush();
+      expect(tg.sendMessage).toHaveBeenCalledTimes(1);
+      const [chat, text] = tg.sendMessage.mock.calls[0];
+      expect(chat).toBe('-100123');
+      expect(text).toContain('+998901112233');
+      expect(text).toContain('Implant');
+      expect(text).toContain('Sayt');
+      expect(text).toContain('15.10.2026 14:30');
+      expect(text).not.toMatch(/@(?!\u200b)/);
+    });
+
+    it('env yo‘q — yuborilmaydi, lead qaytadi', async () => {
+      delete process.env.TELEGRAM_LEADS_CHAT_ID;
+      repo.create.mockResolvedValue(web);
+      await expect(service.create({ name: 'x', phone: '1' })).resolves.toBe(
+        web,
+      );
+      await flush();
+      expect(tg.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('crm manbasi — yuborilmaydi', async () => {
+      process.env.TELEGRAM_LEADS_CHAT_ID = '-100123';
+      repo.create.mockResolvedValue({ ...web, source: 'crm' });
+      await service.create({ name: 'x', phone: '1' });
+      await flush();
+      expect(tg.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('Telegram ok:false — lead baribir qaytadi, warn', async () => {
+      process.env.TELEGRAM_LEADS_CHAT_ID = '-100123';
+      tg.sendMessage.mockResolvedValue({ ok: false, error: 'chat not found' });
+      repo.create.mockResolvedValue(web);
+      await expect(service.create({ name: 'x', phone: '1' })).resolves.toBe(
+        web,
+      );
+      await flush();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('chat not found'),
+      );
+    });
+
+    it('Telegram throw qilsa ham — lead qaytadi, unhandled rejection yo‘q', async () => {
+      process.env.TELEGRAM_LEADS_CHAT_ID = '-100123';
+      tg.sendMessage.mockRejectedValue(new Error('boom'));
+      repo.create.mockResolvedValue(web);
+      await expect(service.create({ name: 'x', phone: '1' })).resolves.toBe(
+        web,
+      );
+      await flush();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('boom'));
+    });
   });
 
   it('create — saqlaydi va websocket orqali e’lon qiladi', async () => {
