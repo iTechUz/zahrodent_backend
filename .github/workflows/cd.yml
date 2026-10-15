@@ -9,7 +9,7 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 concurrency:
@@ -25,8 +25,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: production
+    environment: 
+      name: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main' && 'production' || github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && 'production' || 'development' }}
     env:
+      DEPLOY_ENV: ${{ github.event.workflow_run.head_branch == 'main' && 'production' || github.event.workflow_run.head_branch == 'dev' && 'development' || github.ref_name == 'main' && 'production' || 'development' }}
       SERVER_HOST: ${{ vars.SERVER_HOST }}
       SERVER_USER: ${{ vars.SERVER_USER }}
       IMAGE_NAME: ${{ vars.IMAGE_NAME }}
@@ -92,8 +94,10 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: production
+    environment: 
+      name: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main' && 'production' || github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && 'production' || 'development' }}
     env:
+      DEPLOY_ENV: ${{ github.event.workflow_run.head_branch == 'main' && 'production' || github.event.workflow_run.head_branch == 'dev' && 'development' || github.ref_name == 'main' && 'production' || 'development' }}
       SERVER_HOST: ${{ vars.SERVER_HOST }}
       SERVER_USER: ${{ vars.SERVER_USER }}
       IMAGE_NAME: ${{ vars.IMAGE_NAME }}
@@ -173,8 +177,10 @@ jobs:
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: production
+    environment: 
+      name: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main' && 'production' || github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && 'production' || 'development' }}
     env:
+      DEPLOY_ENV: ${{ github.event.workflow_run.head_branch == 'main' && 'production' || github.event.workflow_run.head_branch == 'dev' && 'development' || github.ref_name == 'main' && 'production' || 'development' }}
       SERVER_HOST: ${{ vars.SERVER_HOST }}
       SERVER_USER: ${{ vars.SERVER_USER }}
       IMAGE_NAME: ${{ vars.IMAGE_NAME }}
@@ -209,8 +215,10 @@ jobs:
     needs: migrate
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: production
+    environment: 
+      name: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main' && 'production' || github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && 'production' || 'development' }}
     env:
+      DEPLOY_ENV: ${{ github.event.workflow_run.head_branch == 'main' && 'production' || github.event.workflow_run.head_branch == 'dev' && 'development' || github.ref_name == 'main' && 'production' || 'development' }}
       SERVER_HOST: ${{ vars.SERVER_HOST }}
       SERVER_USER: ${{ vars.SERVER_USER }}
       IMAGE_NAME: ${{ vars.IMAGE_NAME }}
@@ -275,7 +283,7 @@ jobs:
     name: Notify
     runs-on: ubuntu-24.04
     timeout-minutes: 2
-    environment: production
+    environment: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main' && 'production' || github.event_name == 'workflow_dispatch' && github.ref_name == 'main' && 'production' || 'development' }}
     needs: [build, prepare, migrate, deploy]
     if: always() && needs.build.result != 'skipped'
     permissions:
