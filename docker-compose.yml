@@ -19,7 +19,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - backend
+      - zahro_network
 
   api:
     image: 10449/zahrodent_backend:${IMAGE_TAG:-latest}
@@ -41,10 +41,10 @@ services:
       db:
         condition: service_healthy
     networks:
-      - backend
+      - zahro_network
 
 networks:
-  backend:
+  zahro_network:
 
 volumes:
   pgdata:
