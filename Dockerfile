@@ -41,6 +41,11 @@ RUN addgroup -S nodegroup && adduser -S nodeuser -G nodegroup
 COPY package*.json ./
 RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
 
+# The runtime never calls npm/npx/corepack (CMD uses node + ./node_modules/.bin/prisma).
+# Removing them drops the npm-bundled deps (tar, glob, minimatch, ...) flagged by Trivy.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 # Copy built files and Prisma
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma

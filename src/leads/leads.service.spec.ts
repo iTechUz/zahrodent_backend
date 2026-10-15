@@ -8,7 +8,12 @@ describe('LeadsService', () => {
   let repo: jest.Mocked<
     Pick<
       LeadsRepository,
-      'findAll' | 'findById' | 'create' | 'update' | 'delete'
+      | 'findAll'
+      | 'findById'
+      | 'create'
+      | 'update'
+      | 'delete'
+      | 'updateAndEnsurePatient'
     >
   >;
   let gateway: jest.Mocked<Pick<NotificationsGateway, 'sendNewLead'>>;
@@ -22,6 +27,7 @@ describe('LeadsService', () => {
       create: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+      updateAndEnsurePatient: jest.fn(),
     };
     gateway = { sendNewLead: jest.fn() };
     service = new LeadsService(
@@ -133,13 +139,40 @@ describe('LeadsService', () => {
       expect(repo.update).not.toHaveBeenCalled();
     });
 
-    it('update — repo ga uzatadi', async () => {
+    it('update — oddiy holat repo.update ga uzatiladi', async () => {
       repo.findById.mockResolvedValue(lead);
-      repo.update.mockResolvedValue({ ...lead, status: 'converted' });
+      repo.update.mockResolvedValue({ ...lead, status: 'contacted' });
+      await expect(
+        service.update('l1', { status: 'contacted' }),
+      ).resolves.toMatchObject({ status: 'contacted' });
+      expect(repo.update).toHaveBeenCalledWith('l1', { status: 'contacted' });
+      expect(repo.updateAndEnsurePatient).not.toHaveBeenCalled();
+    });
+
+    it('update — converted ga o‘tganda bemor yaratiladi', async () => {
+      repo.findById.mockResolvedValue({ ...lead, status: 'proposal' });
+      repo.updateAndEnsurePatient.mockResolvedValue({
+        ...lead,
+        status: 'converted',
+      });
       await expect(
         service.update('l1', { status: 'converted' }),
       ).resolves.toMatchObject({ status: 'converted' });
-      expect(repo.update).toHaveBeenCalledWith('l1', { status: 'converted' });
+      expect(repo.updateAndEnsurePatient).toHaveBeenCalledWith(
+        'l1',
+        { status: 'converted' },
+        expect.objectContaining({ phone: lead.phone, name: 'Ali' }),
+        expect.any(Date),
+      );
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('update — allaqachon converted bo‘lsa takroran bemor yaratilmaydi', async () => {
+      repo.findById.mockResolvedValue({ ...lead, status: 'converted' });
+      repo.update.mockResolvedValue({ ...lead, status: 'converted' });
+      await service.update('l1', { status: 'converted' });
+      expect(repo.updateAndEnsurePatient).not.toHaveBeenCalled();
+      expect(repo.update).toHaveBeenCalled();
     });
 
     it('remove — topilmasa 404', async () => {
