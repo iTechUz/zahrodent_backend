@@ -19,10 +19,10 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - zahro_network
+      - zahro_dev_network
 
   api:
-    image: 10449/zahrodent_backend:${IMAGE_TAG:-latest}
+    image: 10449/zahrodent_backend_dev:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -41,10 +41,10 @@ services:
       db:
         condition: service_healthy
     networks:
-      - zahro_network
+      - zahro_dev_network
 
 networks:
-  backend:
+  zahro_dev_network:
 
 volumes:
   pgdata:
