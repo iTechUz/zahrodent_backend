@@ -53,18 +53,18 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 # Files stay root-owned (read-only for the app user); nothing is written at runtime.
 # Set production environment
-ENV NODE_ENV=production
+ENV NODE_ENV=development
 ENV TZ=Asia/Tashkent
-ENV PORT=7878
+ENV PORT=7879
 
 # Expose port
-EXPOSE 7878
+EXPOSE 7879
 
 USER nodeuser
 
 # Health check (GET /health — no DB access, no auth)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD curl -fsS "http://localhost:${PORT:-7878}/health" || exit 1
+  CMD curl -fsS "http://localhost:${PORT:-7879}/health" || exit 1
 
 # Apply pending migrations, then start. `exec` makes node PID 1 so SIGTERM
 # triggers Nest shutdown hooks (Prisma disconnect, Telegram bot stop).

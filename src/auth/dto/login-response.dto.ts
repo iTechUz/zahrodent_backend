@@ -10,7 +10,7 @@ export class AuthUserResponseDto {
   @ApiProperty({ example: '+998901234567' })
   phone: string;
 
-  @ApiProperty({ enum: ['admin', 'doctor', 'receptionist'] })
+  @ApiProperty({ enum: ['admin', 'doctor', 'receptionist', 'pharmacist'] })
   role: string;
 
   @ApiPropertyOptional({ example: 'Umumiy stomatologiya' })
@@ -55,7 +55,7 @@ export class MeResponseDto {
   @ApiProperty({ example: '+998901234567' })
   phone: string;
 
-  @ApiProperty({ enum: ['admin', 'doctor', 'receptionist'] })
+  @ApiProperty({ enum: ['admin', 'doctor', 'receptionist', 'pharmacist'] })
   role: string;
 
   @ApiProperty({
