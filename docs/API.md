@@ -222,9 +222,10 @@ ham 200 (idempotent). Topilmasa **404**.
 
 ### POST /patients
 
-**Body** (`CreatePatientDto`): `firstName`, `lastName` (min 1), `age` (int ≥ 1), `phone` (`+?[\d\s-]{10,20}`),
-`source` (`walk-in` | `telegram` | `website` | `phone`), `address` (min 3), `workplace` (min 1); ixtiyoriy `notes`,
-`avatar`, `assignedDoctorId`, `toothChart`.
+**Body** (`CreatePatientDto`): `firstName`, `lastName` (min 1), `age` (int 0–120), `phone` (`+?[\d\s-]{10,20}`),
+`workplace` (min 1); ixtiyoriy `source` (`walk-in` | `telegram` | `website` | `phone`, standart `walk-in`), `address`
+(standart `""`), `notes`, `avatar`, `assignedDoctorId`, `toothChart`. Tez qo‘shishda faqat ism-familya, telefon, yosh va
+ish joyi yuboriladi, qolganini keyin `PATCH /patients/:id` bilan to‘ldiriladi.
 
 ---
 
