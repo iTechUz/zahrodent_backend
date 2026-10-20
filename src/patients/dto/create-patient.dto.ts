@@ -30,7 +30,7 @@ export class CreatePatientDto {
 
   @Type(() => Number)
   @IsInt()
-  @Min(0)
+  @Min(1)
   @Max(120)
   age: number;
 
@@ -38,19 +38,16 @@ export class CreatePatientDto {
   @Matches(/^\+?[\d\s-]{10,20}$/, { message: 'Invalid phone' })
   phone: string;
 
-  /** Tez qo‘shishda yuborilmaydi — `walk-in` */
-  @IsOptional()
   @IsIn(SOURCES)
-  source?: (typeof SOURCES)[number];
+  source: (typeof SOURCES)[number];
 
   @IsOptional()
   @IsString()
   notes?: string;
 
-  /** Keyinroq to‘ldiriladi; bo‘sh qator ham mumkin */
-  @IsOptional()
   @IsString()
-  address?: string;
+  @MinLength(3)
+  address: string;
 
   @IsString()
   @MinLength(1)
