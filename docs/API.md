@@ -16,7 +16,7 @@ Manba: `backend/src` dagi **haqiqiy** controller, DTO va guard kodlari. Base URL
 
 ### RBAC (rollar)
 
-`JwtAuthGuard` + `RolesGuard` — `ROLES_STAFF` = `admin`, `doctor`, `receptionist`; `ROLES_FINANCE` = faqat `admin`; `ROLES_DOCTOR_WRITE` = `admin`, `doctor`.
+`JwtAuthGuard` + `RolesGuard` — `ROLES_STAFF` = `admin`, `doctor`, `receptionist` (`pharmacist` — apteka roli, faqat `prescriptions/pharmacy/*` va `dispense`); `ROLES_FINANCE` = faqat `admin`; `ROLES_DOCTOR_WRITE` = `admin`, `doctor`.
 
 | Modul | Marshrutlar | Kim kiradi |
 |-------|-------------|------------|
@@ -222,9 +222,10 @@ ham 200 (idempotent). Topilmasa **404**.
 
 ### POST /patients
 
-**Body** (`CreatePatientDto`): `firstName`, `lastName` (min 1), `age` (int ≥ 1), `phone` (`+?[\d\s-]{10,20}`),
-`source` (`walk-in` | `telegram` | `website` | `phone`), `address` (min 3), `workplace` (min 1); ixtiyoriy `notes`,
-`avatar`, `assignedDoctorId`, `toothChart`.
+**Body** (`CreatePatientDto`): `firstName`, `lastName` (min 1), `age` (int 0–120), `phone` (`+?[\d\s-]{10,20}`),
+`workplace` (min 1); ixtiyoriy `source` (`walk-in` | `telegram` | `website` | `phone`, standart `walk-in`), `address`
+(standart `""`), `notes`, `avatar`, `assignedDoctorId`, `toothChart`. Tez qo‘shishda faqat ism-familya, telefon, yosh va
+ish joyi yuboriladi, qolganini keyin `PATCH /patients/:id` bilan to‘ldiriladi.
 
 ---
 
@@ -374,6 +375,22 @@ ham 200 (idempotent). Topilmasa **404**.
 | `date` | ixtiyoriy YYYY-MM-DD |
 
 ---
+
+## Modul: Prescriptions (elektron retseptlar)
+
+Shifokor retsept yozadi → apteka (`pharmacist` roli) kod yoki bemor telefoni bo‘yicha topib, dori berilganini belgilaydi.
+Holatlar: `issued` → `dispensed` | `cancelled`. Retsept `validUntil` (standart 30 kun, 1–90) gacha amal qiladi.
+
+| Marshrut | Kim | Tavsif |
+|----------|-----|--------|
+| `POST /prescriptions` | admin, doctor | Body: `patientId`, `items[]` (`name` majburiy; `dosage`, `frequency`, `duration`, `quantity`, `instructions`), `visitId?`, `notes?`, `validDays?`, `doctorId` (faqat admin). Doctor faqat o‘z bemoriga yoza oladi. Javobda 8 belgili `code`. |
+| `GET /prescriptions` | staff | `patientId`, `status`, sahifalash. Doctor — faqat o‘zinikilari. |
+| `GET /prescriptions/:id` | staff | Doctor — faqat o‘zinikini. |
+| `PATCH /prescriptions/:id/cancel` | admin, doctor | Faqat `issued` bo‘lsa, aks holda 409. |
+| `GET /prescriptions/pharmacy/search?q=` | admin, pharmacist | `q` — kod yoki telefon. Faqat faol (`issued`, muddati o‘tmagan) retseptlar. |
+| `POST /prescriptions/:id/dispense` | admin, pharmacist | Atomik `issued → dispensed`; allaqachon berilgan/bekor/muddati o‘tgan bo‘lsa 409. |
+
+`pharmacist` hisobini admin `POST /users` orqali `role: "pharmacist"` bilan yaratadi.
 
 ## Modul: Public leads (landing)
 
