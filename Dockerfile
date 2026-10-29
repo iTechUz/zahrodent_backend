@@ -29,8 +29,9 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apk add --no-cache openssl curl
+# Install runtime dependencies. `apk upgrade` pulls fixed Alpine packages
+# (e.g. brotli-libs, curl) that are newer than the base image snapshot — keeps Trivy CRITICAL gate green.
+RUN apk upgrade --no-cache && apk add --no-cache openssl curl
 
 # Create non-root user
 RUN addgroup -S nodegroup && adduser -S nodeuser -G nodegroup
