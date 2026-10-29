@@ -2,7 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { LeadsService } from './leads.service';
 import { LeadsRepository } from './leads.repository';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
-import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
+import { NotificationLogService } from '../notifications/notification-log.service';
 import { Logger } from '@nestjs/common';
 
 describe('LeadsService', () => {
@@ -20,7 +20,7 @@ describe('LeadsService', () => {
     >
   >;
   let gateway: jest.Mocked<Pick<NotificationsGateway, 'sendNewLead'>>;
-  let tg: { sendMessage: jest.Mock };
+  let tg: { enqueue: jest.Mock };
 
   const lead = { id: 'l1', name: 'Ali', phone: '+998901112233' } as any;
 
@@ -35,11 +35,11 @@ describe('LeadsService', () => {
       updateAndEnsurePatient: jest.fn(),
     };
     gateway = { sendNewLead: jest.fn() };
-    tg = { sendMessage: jest.fn().mockResolvedValue({ ok: true }) };
+    tg = { enqueue: jest.fn().mockResolvedValue({}) };
     service = new LeadsService(
       repo as unknown as LeadsRepository,
       gateway as unknown as NotificationsGateway,
-      tg as unknown as TelegramBotRegistry,
+      tg as unknown as NotificationLogService,
     );
   });
 
@@ -106,8 +106,10 @@ describe('LeadsService', () => {
         web,
       );
       await flush();
-      expect(tg.sendMessage).toHaveBeenCalledTimes(1);
-      const [chat, text] = tg.sendMessage.mock.calls[0];
+      expect(tg.enqueue).toHaveBeenCalledTimes(1);
+      const { chatId: chat, text, kind, leadId } = tg.enqueue.mock.calls[0][0];
+      expect(kind).toBe('lead_group');
+      expect(leadId).toBe('l2');
       expect(chat).toBe('-100123');
       expect(text).toContain('+998901112233');
       expect(text).toContain('Implant');
@@ -123,7 +125,7 @@ describe('LeadsService', () => {
         web,
       );
       await flush();
-      expect(tg.sendMessage).not.toHaveBeenCalled();
+      expect(tg.enqueue).not.toHaveBeenCalled();
     });
 
     it('crm manbasi — yuborilmaydi', async () => {
@@ -131,25 +133,12 @@ describe('LeadsService', () => {
       repo.create.mockResolvedValue({ ...web, source: 'crm' });
       await service.create({ name: 'x', phone: '1' });
       await flush();
-      expect(tg.sendMessage).not.toHaveBeenCalled();
+      expect(tg.enqueue).not.toHaveBeenCalled();
     });
 
-    it('Telegram ok:false — lead baribir qaytadi, warn', async () => {
+    it('enqueue throw qilsa ham — lead qaytadi, unhandled rejection yo‘q', async () => {
       process.env.TELEGRAM_LEADS_CHAT_ID = '-100123';
-      tg.sendMessage.mockResolvedValue({ ok: false, error: 'chat not found' });
-      repo.create.mockResolvedValue(web);
-      await expect(service.create({ name: 'x', phone: '1' })).resolves.toBe(
-        web,
-      );
-      await flush();
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('chat not found'),
-      );
-    });
-
-    it('Telegram throw qilsa ham — lead qaytadi, unhandled rejection yo‘q', async () => {
-      process.env.TELEGRAM_LEADS_CHAT_ID = '-100123';
-      tg.sendMessage.mockRejectedValue(new Error('boom'));
+      tg.enqueue.mockRejectedValue(new Error('boom'));
       repo.create.mockResolvedValue(web);
       await expect(service.create({ name: 'x', phone: '1' })).resolves.toBe(
         web,

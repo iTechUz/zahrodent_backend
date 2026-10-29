@@ -4,7 +4,7 @@ import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { Lead, Prisma } from '@prisma/client';
-import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
+import { NotificationLogService } from '../notifications/notification-log.service';
 import { normalizeUzPhone } from '../common/utils/phone.util';
 import { LeadsQueryDto } from './dto/leads-query.dto';
 import { orderByOption } from '../common/dto/pagination.dto';
@@ -78,7 +78,7 @@ export class LeadsService {
   constructor(
     private readonly leadsRepository: LeadsRepository,
     private readonly notificationsGateway: NotificationsGateway,
-    private readonly telegram: TelegramBotRegistry,
+    private readonly outbox: NotificationLogService,
   ) {}
 
   async create(dto: CreateLeadDto) {
@@ -103,18 +103,20 @@ export class LeadsService {
     return lead;
   }
 
-  /** Posts a new website/bot lead to TELEGRAM_LEADS_CHAT_ID (off when unset). */
+  /**
+   * Queues a new website/bot lead for TELEGRAM_LEADS_CHAT_ID (off when unset).
+   * The outbox logs the attempt and retries on Telegram failures.
+   */
   private async notifyLeadsChat(lead: Lead): Promise<void> {
     try {
       const chatId = process.env.TELEGRAM_LEADS_CHAT_ID?.trim();
       if (!chatId || !NOTIFIED_SOURCES.includes(lead.source)) return;
-      const res = await this.telegram.sendMessage(
+      await this.outbox.enqueue({
+        kind: 'lead_group',
         chatId,
-        formatLeadMessage(lead),
-      );
-      if (res.ok === false) {
-        this.logger.warn(`Lead Telegram guruhiga yuborilmadi: ${res.error}`);
-      }
+        text: formatLeadMessage(lead),
+        leadId: lead.id,
+      });
     } catch (e) {
       this.logger.warn(
         `Lead Telegram guruhiga yuborilmadi: ${e instanceof Error ? e.message : String(e)}`,

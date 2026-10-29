@@ -228,6 +228,31 @@ model Notification {
   @@map("notifications")
 }
 
+/// Outgoing Telegram message queue + delivery history (outbox).
+/// status: pending (queued / waiting for retry) | sent | failed (gave up)
+model NotificationLog {
+  id            String    @id @default(cuid())
+  channel       String    @default("telegram")
+  /// lead_group | lead_status_group | patient_booking | patient_status | reminder ...
+  kind          String
+  chatId        String    @map("chat_id")
+  text          String
+  /// Telegram `reply_markup` (inline keyboard) as sent.
+  replyMarkup   Json?     @map("reply_markup")
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at")
+  lastError     String?   @map("last_error")
+  leadId        String?   @map("lead_id")
+  patientId     String?   @map("patient_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  sentAt        DateTime? @map("sent_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([createdAt])
+  @@map("notification_logs")
+}
+
 model Lead {
   id          String   @id @default(cuid())
   name        String
