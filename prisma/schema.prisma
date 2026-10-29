@@ -130,12 +130,16 @@ model Booking {
   createdAt      DateTime  @default(now()) @map("created_at") @db.Date
   serviceId      String?   @map("service_id")
   reminderSentAt DateTime? @map("reminder_sent_at")
+  /// Patient's 1..5 rating from the Telegram "completed" message.
+  feedbackRating Int?      @map("feedback_rating")
+  feedbackAt     DateTime? @map("feedback_at")
 
   patient Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
   doctor  Doctor   @relation(fields: [doctorId], references: [id], onDelete: Restrict)
   service Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
 
-  visits Visit[]
+  visits     Visit[]
+  statusLogs BookingStatusLog[]
 
   @@index([patientId])
   @@index([doctorId])
@@ -144,6 +148,24 @@ model Booking {
   @@index([date, status])
   @@index([doctorId, date])
   @@map("bookings")
+}
+
+/// Who changed a booking's status, when, and why (cancel reason).
+model BookingStatusLog {
+  id            String   @id @default(cuid())
+  bookingId     String   @map("booking_id")
+  fromStatus    String   @map("from_status")
+  toStatus      String   @map("to_status")
+  reason        String?
+  changedById   String?  @map("changed_by_id")
+  /// Snapshot, so the log stays readable if the user is renamed/deleted.
+  changedByName String   @map("changed_by_name")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId, createdAt])
+  @@map("booking_status_logs")
 }
 
 model Visit {

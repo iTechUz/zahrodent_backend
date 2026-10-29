@@ -9,6 +9,7 @@ import { LeadsService } from '../leads/leads.service';
 import { PatientsRepository } from '../patients/patients.repository';
 import { TelegramBotRegistry } from './telegram-bot.registry';
 import { normalizeUzPhone } from '../common/utils/phone.util';
+import { PrismaService } from '../database/prisma.service';
 
 /** Max leads one Telegram user can create per window (spam guard). */
 export const TELEGRAM_LEAD_LIMIT = 3;
@@ -32,6 +33,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly leadsService: LeadsService,
     private readonly patientsRepository: PatientsRepository,
     private readonly registry: TelegramBotRegistry,
+    private readonly prisma?: PrismaService,
   ) {}
 
   onModuleInit() {
@@ -114,6 +116,41 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Stores a patient's 1..5 rating for a completed booking. Only the chat
+   * linked to that booking's patient may rate (callback data is guessable by
+   * anyone who sees a booking id), and only once.
+   */
+  async saveFeedback(
+    chatId: number | string,
+    bookingId: string,
+    rating: number,
+  ): Promise<'saved' | 'already' | 'denied'> {
+    if (!this.prisma || !(rating >= 1 && rating <= 5)) return 'denied';
+    const b = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        status: true,
+        feedbackRating: true,
+        patient: { select: { telegramChatId: true } },
+      },
+    });
+    if (
+      !b ||
+      b.status !== 'completed' ||
+      !b.patient.telegramChatId ||
+      b.patient.telegramChatId !== String(chatId)
+    ) {
+      return 'denied';
+    }
+    if (b.feedbackRating != null) return 'already';
+    const r = await this.prisma.booking.updateMany({
+      where: { id: bookingId, feedbackRating: null },
+      data: { feedbackRating: rating, feedbackAt: new Date() },
+    });
+    return r.count ? 'saved' : 'already';
+  }
+
   /** Sliding-window limit per Telegram user; records the attempt if allowed. */
   private allowLead(telegramUserId: number, now = Date.now()): boolean {
     const recent = (this.leadTimestamps.get(telegramUserId) ?? []).filter(
@@ -181,7 +218,27 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
     });
 
-    bot.action(/service_(.+)/, async (ctx) => {
+    bot.action(/^fb_(.+)_([1-5])$/, async (ctx) => {
+      try {
+        const r = await this.saveFeedback(
+          ctx.chat?.id ?? ctx.from.id,
+          ctx.match[1],
+          Number(ctx.match[2]),
+        );
+        await ctx.answerCbQuery(
+          r === 'saved'
+            ? 'Rahmat! Fikringiz qabul qilindi 🙏'
+            : r === 'already'
+              ? 'Siz allaqachon baho bergansiz'
+              : 'Bu tugma siz uchun emas',
+        );
+        if (r === 'saved') await ctx.editMessageReplyMarkup(undefined);
+      } catch (err) {
+        this.logger.warn(`Feedback xatosi: ${String(err)}`);
+      }
+    });
+
+    bot.action(/^service_(.+)/, async (ctx) => {
       const serviceType = ctx.match[1];
       const state = this.userStates.get(ctx.from.id);
 
