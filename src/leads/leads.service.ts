@@ -5,6 +5,7 @@ import { UpdateLeadDto } from './dto/update-lead.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { Lead, Prisma } from '@prisma/client';
 import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
+import { normalizeUzPhone } from '../common/utils/phone.util';
 import { LeadsQueryDto } from './dto/leads-query.dto';
 import { orderByOption } from '../common/dto/pagination.dto';
 import {
@@ -15,6 +16,9 @@ import {
 
 /** Sources announced in the staff group (CRM-entered leads are not). */
 const NOTIFIED_SOURCES = ['website', 'telegram_bot'];
+
+/** Public/bot leads with the same phone inside this window are one lead. */
+export const LEAD_DEDUPE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 const SOURCE_LABELS: Record<string, string> = {
   website: 'Sayt',
@@ -56,6 +60,8 @@ export function formatLeadMessage(lead: Lead): string {
     `👤 ${clean(lead.name, 100)}`,
     `📞 ${clean(lead.phone, 30)}`,
   ];
+  if (lead.doctor) lines.push(`👨‍⚕️ ${clean(lead.doctor, 100)}`);
+  if (lead.preferredAt) lines.push(`📅 ${clean(lead.preferredAt, 30)}`);
   if (lead.service) lines.push(`🦷 ${clean(lead.service, 100)}`);
   if (lead.message) lines.push(`💬 ${clean(lead.message, 500)}`);
   lines.push(
@@ -76,9 +82,21 @@ export class LeadsService {
   ) {}
 
   async create(dto: CreateLeadDto) {
-    const lead = await this.leadsRepository.create(
-      dto as Prisma.LeadCreateInput,
-    );
+    // Canonical +998XXXXXXXXX when it is an Uzbek number (CRM may hold others).
+    const phone = normalizeUzPhone(dto.phone) ?? dto.phone.trim();
+    const automated = NOTIFIED_SOURCES.includes(dto.source ?? '');
+    if (automated) {
+      const dup = await this.leadsRepository.findOpenByPhoneSince(
+        phone,
+        new Date(Date.now() - LEAD_DEDUPE_WINDOW_MS),
+      );
+      // Same person re-submitting: keep one lead, no second staff ping.
+      if (dup) return dup;
+    }
+    const lead = await this.leadsRepository.create({
+      ...dto,
+      phone,
+    } as Prisma.LeadCreateInput);
     this.notificationsGateway.sendNewLead(lead);
     // Fire-and-forget: a Telegram problem must never fail lead creation.
     void this.notifyLeadsChat(lead);

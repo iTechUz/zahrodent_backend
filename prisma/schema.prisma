@@ -229,19 +229,24 @@ model Notification {
 }
 
 model Lead {
-  id        String   @id @default(cuid())
-  name      String
-  phone     String
-  service   String?
-  message   String?
-  status    String   @default("new") // new, contacted, consultation, proposal, converted, cancelled
-  source    String   @default("telegram_bot")
-  notes     String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String   @id @default(cuid())
+  name        String
+  phone       String
+  service     String?
+  message     String?
+  status      String   @default("new") // new, contacted, consultation, proposal, converted, cancelled
+  source      String   @default("telegram_bot")
+  notes       String?
+  /// Preferred doctor (free text from the website form).
+  doctor      String?
+  /// Preferred visit, "YYYY-MM-DD" or "YYYY-MM-DD HH:mm" (Asia/Tashkent).
+  preferredAt String?  @map("preferred_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@index([status])
   @@index([createdAt])
+  @@index([phone, createdAt])
   @@map("leads")
 }
 

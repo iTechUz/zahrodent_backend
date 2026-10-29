@@ -13,6 +13,7 @@ describe('LeadsService', () => {
       | 'findAll'
       | 'findById'
       | 'create'
+      | 'findOpenByPhoneSince'
       | 'update'
       | 'delete'
       | 'updateAndEnsurePatient'
@@ -28,6 +29,7 @@ describe('LeadsService', () => {
       findAll: jest.fn().mockResolvedValue({ data: [], total: 0 }),
       findById: jest.fn(),
       create: jest.fn(),
+      findOpenByPhoneSince: jest.fn().mockResolvedValue(null),
       update: jest.fn(),
       delete: jest.fn(),
       updateAndEnsurePatient: jest.fn(),
@@ -39,6 +41,39 @@ describe('LeadsService', () => {
       gateway as unknown as NotificationsGateway,
       tg as unknown as TelegramBotRegistry,
     );
+  });
+
+  describe('dublikat va telefon', () => {
+    it('stores the normalized phone', async () => {
+      repo.create.mockResolvedValue(lead);
+      await service.create({ name: 'Ali', phone: '90 111 22 33' });
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ phone: '+998901112233' }),
+      );
+    });
+
+    it('website re-submit with an open lead → returns it, no new row, no ping', async () => {
+      repo.findOpenByPhoneSince.mockResolvedValue(lead);
+      const r = await service.create({
+        name: 'Ali',
+        phone: '+998901112233',
+        source: 'website',
+      });
+      expect(r).toBe(lead);
+      expect(repo.create).not.toHaveBeenCalled();
+      expect(gateway.sendNewLead).not.toHaveBeenCalled();
+    });
+
+    it('CRM-entered leads are never deduped', async () => {
+      repo.create.mockResolvedValue(lead);
+      await service.create({
+        name: 'Ali',
+        phone: '+998901112233',
+        source: 'crm',
+      });
+      expect(repo.findOpenByPhoneSince).not.toHaveBeenCalled();
+      expect(repo.create).toHaveBeenCalled();
+    });
   });
 
   describe('Telegram guruhga e’lon', () => {
