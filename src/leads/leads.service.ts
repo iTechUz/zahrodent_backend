@@ -4,6 +4,7 @@ import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { Lead, Prisma } from '@prisma/client';
+import { ClientNotifierService } from '../notifications/client-notifier.service';
 import { NotificationLogService } from '../notifications/notification-log.service';
 import { normalizeUzPhone } from '../common/utils/phone.util';
 import { LeadsQueryDto } from './dto/leads-query.dto';
@@ -79,6 +80,7 @@ export class LeadsService {
     private readonly leadsRepository: LeadsRepository,
     private readonly notificationsGateway: NotificationsGateway,
     private readonly outbox: NotificationLogService,
+    private readonly clientNotifier: ClientNotifierService,
   ) {}
 
   async create(dto: CreateLeadDto) {
@@ -100,6 +102,9 @@ export class LeadsService {
     this.notificationsGateway.sendNewLead(lead);
     // Fire-and-forget: a Telegram problem must never fail lead creation.
     void this.notifyLeadsChat(lead);
+    // Website visitors have no bot chat yet: Telegram if linked, else SMS + deep link.
+    if (lead.source === 'website')
+      void this.clientNotifier.notifyLeadReceived(lead);
     return lead;
   }
 

@@ -2,6 +2,7 @@ import { NotFoundException } from '@nestjs/common';
 import { LeadsService } from './leads.service';
 import { LeadsRepository } from './leads.repository';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { ClientNotifierService } from '../notifications/client-notifier.service';
 import { NotificationLogService } from '../notifications/notification-log.service';
 import { Logger } from '@nestjs/common';
 
@@ -21,6 +22,7 @@ describe('LeadsService', () => {
   >;
   let gateway: jest.Mocked<Pick<NotificationsGateway, 'sendNewLead'>>;
   let tg: { enqueue: jest.Mock };
+  let notifier: { notifyLeadReceived: jest.Mock };
 
   const lead = { id: 'l1', name: 'Ali', phone: '+998901112233' } as any;
 
@@ -36,10 +38,12 @@ describe('LeadsService', () => {
     };
     gateway = { sendNewLead: jest.fn() };
     tg = { enqueue: jest.fn().mockResolvedValue({}) };
+    notifier = { notifyLeadReceived: jest.fn().mockResolvedValue('sms') };
     service = new LeadsService(
       repo as unknown as LeadsRepository,
       gateway as unknown as NotificationsGateway,
       tg as unknown as NotificationLogService,
+      notifier as unknown as ClientNotifierService,
     );
   });
 
@@ -126,6 +130,16 @@ describe('LeadsService', () => {
       );
       await flush();
       expect(tg.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('website lead → mijozga tasdiq; crm → yo‘q', async () => {
+      repo.create.mockResolvedValue(web);
+      await service.create({ name: 'x', phone: '1' });
+      expect(notifier.notifyLeadReceived).toHaveBeenCalledWith(web);
+      notifier.notifyLeadReceived.mockClear();
+      repo.create.mockResolvedValue({ ...web, source: 'crm' });
+      await service.create({ name: 'x', phone: '1' });
+      expect(notifier.notifyLeadReceived).not.toHaveBeenCalled();
     });
 
     it('crm manbasi — yuborilmaydi', async () => {

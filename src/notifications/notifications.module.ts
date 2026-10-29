@@ -7,6 +7,7 @@ import { PatientsModule } from '../patients/patients.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TelegramCoreModule } from '../telegram/telegram-core.module';
 import { NotificationsGateway } from './notifications.gateway';
+import { ClientNotifierService } from './client-notifier.service';
 import { NotificationLogService } from './notification-log.service';
 import { NotificationLogsController } from './notification-logs.controller';
 import { AuthModule } from '../auth/auth.module';
@@ -20,7 +21,12 @@ import { AuthModule } from '../auth/auth.module';
     EskizService,
     NotificationsGateway,
     NotificationLogService,
+    ClientNotifierService,
   ],
-  exports: [NotificationsGateway, NotificationLogService],
+  exports: [
+    NotificationsGateway,
+    NotificationLogService,
+    ClientNotifierService,
+  ],
 })
 export class NotificationsModule {}
