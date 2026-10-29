@@ -7,6 +7,8 @@ import { PatientsModule } from '../patients/patients.module';
 import { SettingsModule } from '../settings/settings.module';
 import { TelegramCoreModule } from '../telegram/telegram-core.module';
 import { NotificationsGateway } from './notifications.gateway';
+import { BookingStatusService } from '../bookings/booking-status.service';
+import { RemindersService } from './reminders.service';
 import { ClientNotifierService } from './client-notifier.service';
 import { NotificationLogService } from './notification-log.service';
 import { NotificationLogsController } from './notification-logs.controller';
@@ -22,11 +24,15 @@ import { AuthModule } from '../auth/auth.module';
     NotificationsGateway,
     NotificationLogService,
     ClientNotifierService,
+    BookingStatusService,
+    RemindersService,
   ],
   exports: [
     NotificationsGateway,
     NotificationLogService,
     ClientNotifierService,
+    BookingStatusService,
+    RemindersService,
   ],
 })
 export class NotificationsModule {}

@@ -10,6 +10,7 @@ import { PatientsRepository } from '../patients/patients.repository';
 import { TelegramBotRegistry } from './telegram-bot.registry';
 import { normalizeUzPhone } from '../common/utils/phone.util';
 import { PrismaService } from '../database/prisma.service';
+import { RemindersService } from '../notifications/reminders.service';
 
 /** Max leads one Telegram user can create per window (spam guard). */
 export const TELEGRAM_LEAD_LIMIT = 3;
@@ -34,6 +35,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly patientsRepository: PatientsRepository,
     private readonly registry: TelegramBotRegistry,
     private readonly prisma?: PrismaService,
+    private readonly reminders?: RemindersService,
   ) {}
 
   onModuleInit() {
@@ -235,6 +237,31 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         if (r === 'saved') await ctx.editMessageReplyMarkup(undefined);
       } catch (err) {
         this.logger.warn(`Feedback xatosi: ${String(err)}`);
+      }
+    });
+
+    bot.action(/^rem_(ok|re)_(.+)$/, async (ctx) => {
+      try {
+        const r = await this.reminders?.handleAnswer(
+          ctx.chat?.id ?? ctx.from.id,
+          ctx.match[2],
+          ctx.match[1] === 'ok' ? 'confirm' : 'reschedule',
+        );
+        await ctx.answerCbQuery(
+          r === 'confirmed'
+            ? 'Rahmat! Qabulingiz tasdiqlandi ✅'
+            : r === 'reschedule'
+              ? "Ariza qabul qilindi — administrator siz bilan bog'lanadi"
+              : r === 'already'
+                ? 'Javobingiz allaqachon qabul qilingan'
+                : 'Bu tugma endi amal qilmaydi',
+          { show_alert: r === 'reschedule' },
+        );
+        if (r === 'confirmed' || r === 'reschedule') {
+          await ctx.editMessageReplyMarkup(undefined);
+        }
+      } catch (err) {
+        this.logger.warn(`Eslatma javobi xatosi: ${String(err)}`);
       }
     });
 

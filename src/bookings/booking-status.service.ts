@@ -29,7 +29,7 @@ export type StatusChange = {
   from: string;
   to: string;
   reason?: string;
-  actor: { id: string; name: string };
+  actor: { id: string | null; name: string };
 };
 
 /**

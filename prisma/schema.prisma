@@ -119,20 +119,25 @@ model Service {
 }
 
 model Booking {
-  id             String    @id @default(cuid())
-  patientId      String    @map("patient_id")
-  doctorId       String    @map("doctor_id")
-  date           DateTime  @db.Date
-  time           String
-  source         String
-  status         String
-  notes          String    @default("")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Date
-  serviceId      String?   @map("service_id")
-  reminderSentAt DateTime? @map("reminder_sent_at")
+  id                    String    @id @default(cuid())
+  patientId             String    @map("patient_id")
+  doctorId              String    @map("doctor_id")
+  date                  DateTime  @db.Date
+  time                  String
+  source                String
+  status                String
+  notes                 String    @default("")
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Date
+  serviceId             String?   @map("service_id")
+  reminderSentAt        DateTime? @map("reminder_sent_at")
   /// Patient's 1..5 rating from the Telegram "completed" message.
-  feedbackRating Int?      @map("feedback_rating")
-  feedbackAt     DateTime? @map("feedback_at")
+  feedbackRating        Int?      @map("feedback_rating")
+  feedbackAt            DateTime? @map("feedback_at")
+  /// Scheduled Telegram reminders (24h / 2h before) and the patient's answers.
+  reminder24SentAt      DateTime? @map("reminder_24_sent_at")
+  reminder2SentAt       DateTime? @map("reminder_2_sent_at")
+  patientConfirmedAt    DateTime? @map("patient_confirmed_at")
+  rescheduleRequestedAt DateTime? @map("reschedule_requested_at")
 
   patient Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
   doctor  Doctor   @relation(fields: [doctorId], references: [id], onDelete: Restrict)
