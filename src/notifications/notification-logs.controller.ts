@@ -35,7 +35,6 @@ export class NotificationLogsController {
   }
 
   @Post(':id/retry')
-  @Roles('admin')
   @ApiOperation({ summary: 'Muvaffaqiyatsiz xabarni qayta yuborish' })
   retry(@Param('id') id: string) {
     return this.logs.retry(id);
