@@ -35,6 +35,18 @@ export class LeadsRepository {
     return this.prisma.lead.create({ data });
   }
 
+  /** Newest still-open lead with this phone created at/after `since`. */
+  async findOpenByPhoneSince(phone: string, since: Date): Promise<Lead | null> {
+    return this.prisma.lead.findFirst({
+      where: {
+        phone,
+        createdAt: { gte: since },
+        status: { notIn: ['converted', 'cancelled'] },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async update(id: string, data: Prisma.LeadUpdateInput): Promise<Lead> {
     return this.prisma.lead.update({
       where: { id },

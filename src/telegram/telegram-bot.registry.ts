@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 
 /** The part of `bot.telegram` used for outgoing messages and liveness. */
 export type TelegramSender = {
-  sendMessage(chatId: string | number, text: string): Promise<unknown>;
+  sendMessage(
+    chatId: string | number,
+    text: string,
+    extra?: Record<string, unknown>,
+  ): Promise<unknown>;
   /** Cheap liveness probe (Telegram `getMe`). */
   getMe?(): Promise<unknown>;
 };
@@ -50,10 +54,12 @@ export class TelegramBotRegistry {
   async sendMessage(
     chatId: string,
     text: string,
+    extra?: Record<string, unknown>,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!this.sender) return { ok: false, error: 'bot not running' };
     try {
-      await this.sender.sendMessage(chatId, text);
+      if (extra) await this.sender.sendMessage(chatId, text, extra);
+      else await this.sender.sendMessage(chatId, text);
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };

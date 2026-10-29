@@ -60,6 +60,13 @@ export class BookingsController {
     return this.bookingsService.create(dto);
   }
 
+  @Get(':id/status-log')
+  @ApiOperation({ summary: "Holat o'zgarishlari tarixi (kim, qachon, sabab)" })
+  @ApiParam({ name: 'id' })
+  statusLog(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.bookingsService.getStatusLog(id, user);
+  }
+
   @Patch(':id')
   @Roles('admin', 'receptionist')
   @ApiOperation({ summary: "Qabulni yangilash (holat o'zgartirish)" })
