@@ -4,9 +4,10 @@ import { PublicLeadsController } from './public-leads.controller';
 import { LeadsService } from './leads.service';
 import { LeadsRepository } from './leads.repository';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { TelegramCoreModule } from '../telegram/telegram-core.module';
 
 @Module({
-  imports: [NotificationsModule],
+  imports: [NotificationsModule, TelegramCoreModule],
   controllers: [LeadsController, PublicLeadsController],
   providers: [LeadsService, LeadsRepository],
   exports: [LeadsService, LeadsRepository],

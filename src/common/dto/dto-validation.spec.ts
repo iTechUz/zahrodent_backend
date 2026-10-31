@@ -314,20 +314,27 @@ describe('DTO validation', () => {
     it('Create — xatolar', () => {
       const e = errorsOf(CreatePatientDto, {
         ...ok,
-        age: 0,
+        age: 121,
         phone: 'abc',
         source: 'tiktok',
-        address: 'ab',
         toothChart: 'x',
       });
       expect(e.phone).toEqual(['Invalid phone']);
       expect(Object.keys(e).sort()).toEqual([
-        'address',
         'age',
         'phone',
         'source',
         'toothChart',
       ]);
+    });
+
+    it('Create — age 0 va qisqa/bo‘sh address ruxsat (tezkor yaratish)', () => {
+      expect(
+        errorsOf(CreatePatientDto, { ...ok, age: 0, address: '' }),
+      ).toEqual({});
+      expect(
+        errorsOf(CreatePatientDto, { ...ok, age: 0, address: 'ab' }),
+      ).toEqual({});
     });
 
     it('Update — bo‘sh ok; comment content majburiy', () => {
@@ -440,13 +447,13 @@ describe('DTO validation', () => {
       'CreateUserDto.role %p — 400',
       (role) => {
         expect(errorsOf(CreateUserDto, { ...ok, role }).role).toEqual([
-          "role faqat admin, doctor yoki receptionist bo'lishi mumkin",
+          "role faqat admin, doctor, receptionist yoki pharmacist bo'lishi mumkin",
         ]);
         expect(errorsOf(UpdateUserDto, { role })).toHaveProperty('role');
       },
     );
 
-    it.each(['admin', 'doctor', 'receptionist'])(
+    it.each(['admin', 'doctor', 'receptionist', 'pharmacist'])(
       'CreateUserDto.role %p — ok',
       (role) => {
         expect(errorsOf(CreateUserDto, { ...ok, role })).toEqual({});

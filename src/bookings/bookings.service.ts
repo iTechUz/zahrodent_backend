@@ -24,6 +24,7 @@ import {
 import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
 import { AuthUserView } from '../auth/auth.service';
 import { doctorScopeId } from '../common/auth/doctor-scope';
+import { BookingStatusService } from './booking-status.service';
 
 /** Statuses that occupy the doctor's time slot. */
 export const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed'];
@@ -40,7 +41,10 @@ type ScheduleSlot = {
 
 @Injectable()
 export class BookingsService {
-  constructor(private readonly bookingsRepository: BookingsRepository) {}
+  constructor(
+    private readonly bookingsRepository: BookingsRepository,
+    private readonly statusService?: BookingStatusService,
+  ) {}
 
   async findAll(
     query: BookingsQueryDto,
@@ -191,6 +195,7 @@ export class BookingsService {
 
     if (!mustCheck) {
       const b = await this.bookingsRepository.update(id, data);
+      this.afterStatusChange(current.status, b, dto, user);
       return this.toResponse(b);
     }
 
@@ -217,7 +222,30 @@ export class BookingsService {
         return this.bookingsRepository.update(id, data, tx);
       },
     );
+    this.afterStatusChange(current.status, b, dto, user);
     return this.toResponse(b);
+  }
+
+  /** Audit log + Telegram notices when the status really changed (fire-and-forget). */
+  private afterStatusChange(
+    from: string,
+    b: BookingWithPatient,
+    dto: UpdateBookingDto,
+    user: AuthUserView,
+  ) {
+    if (!this.statusService || !dto.status || dto.status === from) return;
+    void this.statusService.onChanged({
+      bookingId: b.id,
+      from,
+      to: dto.status,
+      reason: dto.statusReason,
+      actor: { id: user.id, name: user.name },
+    });
+  }
+
+  async getStatusLog(id: string, user: AuthUserView) {
+    await this.getAccessible(id, user);
+    return this.statusService ? this.statusService.history(id) : [];
   }
 
   async remove(id: string, user: AuthUserView) {
