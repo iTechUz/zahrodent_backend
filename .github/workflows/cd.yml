@@ -48,7 +48,7 @@ jobs:
           if [ -n "$missing" ]; then echo "::error::production environment'da yo'q:$missing"; exit 1; fi
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
@@ -292,7 +292,7 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Every value goes through env, never ${{ }} inside run: (script injection).
       - name: Send Telegram message
         env:

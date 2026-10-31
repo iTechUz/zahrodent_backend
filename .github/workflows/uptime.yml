@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # State (failure counters / "already alerted" flags) lives in the Actions
       # cache: each run restores the newest entry and saves a new one.
       - name: Restore state
