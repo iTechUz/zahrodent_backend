@@ -205,10 +205,12 @@ jobs:
 
       # Yangi image bilan `prisma migrate deploy` (faqat pending migratsiyalar).
       # Xato bo'lsa deploy qilinmaydi — eski container ishlashda davom etadi.
+      # Image distroless: entrypoint node, shell yo'q, shuning uchun .bin/prisma
+      # (#!/usr/bin/env node) emas, CLI'ning JS fayli node'ga beriladi.
       - name: Prisma migrate deploy
         run: |
           # shellcheck disable=SC2029 # qiymatlar runner'da ochiladi (ataylab)
-          ssh server "docker run --rm --network '$NETWORK' --env-file '$ENV_FILE' '$IMAGE' ./node_modules/.bin/prisma migrate deploy"
+          ssh server "docker run --rm --network '$NETWORK' --env-file '$ENV_FILE' '$IMAGE' node_modules/prisma/build/index.js migrate deploy"
 
   deploy:
     name: Deploy
