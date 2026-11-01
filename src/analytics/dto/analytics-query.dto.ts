@@ -10,6 +10,22 @@ export class DashboardQueryDto {
   })
   @DateOnlyQuery()
   date?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-09-01',
+    description:
+      'Davr boshi. `startDate`/`endDate` berilsa "oy" ko‘rsatkichlari (yangi bemorlar, daromad, xarajat) shu davr uchun hisoblanadi; berilmasa — `date` joylashgan oy',
+  })
+  @DateOnlyQuery()
+  startDate?: string;
+
+  @ApiPropertyOptional({
+    example: '2026-09-30',
+    description:
+      'Davr oxiri (shu kun ham kiradi). Faqat startDate bo‘lsa — `date` gacha',
+  })
+  @DateOnlyQuery()
+  endDate?: string;
 }
 
 export class MonthlyQueryDto {

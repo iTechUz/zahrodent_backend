@@ -27,12 +27,18 @@ describe('AnalyticsController', () => {
       await expect(
         controller.getDashboard({ date: '2026-09-01' } as any, user),
       ).resolves.toEqual({ patients: 1 });
-      expect(service.getDashboard).toHaveBeenCalledWith(user, '2026-09-01');
+      expect(service.getDashboard).toHaveBeenCalledWith(user, '2026-09-01', {
+        startDate: undefined,
+        endDate: undefined,
+      });
     });
 
     it('date berilmasa — undefined', async () => {
       await controller.getDashboard({} as any, user);
-      expect(service.getDashboard).toHaveBeenCalledWith(user, undefined);
+      expect(service.getDashboard).toHaveBeenCalledWith(user, undefined, {
+        startDate: undefined,
+        endDate: undefined,
+      });
     });
   });
 
