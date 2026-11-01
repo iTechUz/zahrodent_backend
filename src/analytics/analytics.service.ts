@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AnalyticsRepository } from './analytics.repository';
 import { AuthUserView } from '../auth/auth.service';
@@ -47,11 +47,25 @@ export class AnalyticsService {
   async getDashboard(
     user: AuthUserView,
     date: string = todayInTashkent(),
+    period: { startDate?: string; endDate?: string } = {},
   ): Promise<DashboardResponseDto> {
     const scope = this.scopes(user);
     const day = parseDateOnlyToUTC(date);
-    const month = monthBoundsOf(date);
-    const monthRange = dateOnlyColumnRange(month.start, month.end);
+    // "month" figures cover the requested period; without one — the month of `date`
+    let monthRange: { gte?: Date; lte?: Date };
+    if (period.startDate || period.endDate) {
+      const start = period.startDate;
+      const end = period.endDate ?? date;
+      if (start && start > end) {
+        throw new BadRequestException(
+          'startDate endDate dan keyin bo‘lishi mumkin emas',
+        );
+      }
+      monthRange = dateOnlyColumnRange(start, end);
+    } else {
+      const month = monthBoundsOf(date);
+      monthRange = dateOnlyColumnRange(month.start, month.end);
+    }
 
     const [
       totalPatients,

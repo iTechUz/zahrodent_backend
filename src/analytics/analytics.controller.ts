@@ -46,7 +46,10 @@ export class AnalyticsController {
     @Query() query: DashboardQueryDto,
     @GetUser() user: AuthUserView,
   ) {
-    return this.analyticsService.getDashboard(user, query.date);
+    return this.analyticsService.getDashboard(user, query.date, {
+      startDate: query.startDate,
+      endDate: query.endDate,
+    });
   }
 
   @Get('monthly')

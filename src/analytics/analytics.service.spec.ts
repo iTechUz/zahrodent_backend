@@ -70,6 +70,31 @@ describe('AnalyticsService', () => {
   afterEach(() => jest.useRealTimers());
 
   describe('getDashboard', () => {
+    it('startDate/endDate — oy ko‘rsatkichlari shu davr bo‘yicha', async () => {
+      await service.getDashboard(admin, '2026-11-01', {
+        startDate: '2026-10-01',
+        endDate: '2026-10-31',
+      });
+      const range = { gte: d('2026-10-01'), lte: d('2026-10-31') };
+      expect(repo.countPatients).toHaveBeenNthCalledWith(2, {
+        AND: [ND, { createdAt: range }],
+      });
+      expect(repo.sumPayments).toHaveBeenCalledWith({
+        type: 'INCOME',
+        status: { in: ['paid', 'partial'] },
+        date: range,
+      });
+    });
+
+    it('startDate endDate dan keyin — 400', async () => {
+      await expect(
+        service.getDashboard(admin, '2026-11-01', {
+          startDate: '2026-11-05',
+          endDate: '2026-11-01',
+        }),
+      ).rejects.toThrow('startDate');
+    });
+
     it('admin — barcha maydonlar, pul faqat INCOME/EXPENSE paid|partial', async () => {
       repo.countPatients.mockResolvedValueOnce(120).mockResolvedValueOnce(14);
       repo.countBookings

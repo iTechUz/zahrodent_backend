@@ -4,7 +4,10 @@ export class DashboardResponseDto {
   @ApiProperty({ example: 120, description: 'doctor uchun — o‘z bemorlari' })
   totalPatients: number;
 
-  @ApiProperty({ example: 14, description: '`date` joylashgan oy' })
+  @ApiProperty({
+    example: 14,
+    description: '`date` joylashgan oy (yoki startDate–endDate davri)',
+  })
   newPatientsThisMonth: number;
 
   @ApiProperty({ example: 9, description: '`date` kunidagi qabullar' })
