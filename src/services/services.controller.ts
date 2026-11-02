@@ -23,6 +23,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_STAFF } from '../common/constants/role-groups';
 import { ServicesQueryDto } from './dto/services-query.dto';
+import { PeriodQueryDto } from '../analytics/dto/analytics-query.dto';
 
 @ApiTags('services')
 @ApiBearerAuth('JWT')
@@ -35,8 +36,11 @@ export class ServicesController {
   @Get('stats')
   @Roles('admin', 'receptionist')
   @ApiOperation({ summary: 'Stats for services page' })
-  getStats() {
-    return this.servicesService.getStats();
+  getStats(@Query() query: PeriodQueryDto) {
+    return this.servicesService.getStats({
+      startDate: query.startDate,
+      endDate: query.endDate,
+    });
   }
 
   @Get()

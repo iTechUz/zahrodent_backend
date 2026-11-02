@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { dateOnlyColumnRange } from '../common/utils/date.util';
 import { Prisma } from '@prisma/client';
 import { DoctorsRepository, DoctorWithUser } from './doctors.repository';
 import { UsersService } from '../users/users.service';
@@ -192,8 +193,10 @@ export class DoctorsService {
     };
   }
 
-  async getEfficiency() {
-    const rawStats = await this.doctorsRepository.getDetailedEfficiencyStats();
+  async getEfficiency(period: { startDate?: string; endDate?: string } = {}) {
+    const rawStats = await this.doctorsRepository.getDetailedEfficiencyStats(
+      dateOnlyColumnRange(period.startDate, period.endDate),
+    );
 
     return rawStats
       .map((s) => {

@@ -142,6 +142,28 @@ describe('DoctorsRepository', () => {
     );
   });
 
+  it('getDetailedEfficiencyStats — davr berilsa booking/visit sana bo‘yicha filtrlanadi', async () => {
+    prisma.doctor.findMany.mockResolvedValue([]);
+    prisma.booking.groupBy.mockResolvedValue([]);
+    prisma.visit.groupBy.mockResolvedValue([]);
+    const range = {
+      gte: new Date('2026-10-01T00:00:00.000Z'),
+      lte: new Date('2026-10-31T00:00:00.000Z'),
+    };
+    await repo.getDetailedEfficiencyStats(range);
+    expect(prisma.booking.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          status: { in: ['pending', 'confirmed', 'completed'] },
+          date: range,
+        },
+      }),
+    );
+    for (const call of prisma.visit.groupBy.mock.calls) {
+      expect(call[0].where).toEqual({ status: 'completed', date: range });
+    }
+  });
+
   it('getDetailedEfficiencyStats — _sum.price null → 0', async () => {
     prisma.doctor.findMany.mockResolvedValue([{ id: 'd1' }]);
     prisma.booking.groupBy.mockResolvedValue([]);
