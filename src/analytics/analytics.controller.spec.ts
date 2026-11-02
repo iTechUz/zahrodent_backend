@@ -48,12 +48,18 @@ describe('AnalyticsController', () => {
       await expect(
         controller.getMonthly({ months: 12 } as any, user),
       ).resolves.toEqual([]);
-      expect(service.getMonthly).toHaveBeenCalledWith(user, 12);
+      expect(service.getMonthly).toHaveBeenCalledWith(user, 12, undefined, {
+        startDate: undefined,
+        endDate: undefined,
+      });
     });
 
     it('months berilmasa — standart 6', async () => {
       await controller.getMonthly({} as any, user);
-      expect(service.getMonthly).toHaveBeenCalledWith(user, 6);
+      expect(service.getMonthly).toHaveBeenCalledWith(user, 6, undefined, {
+        startDate: undefined,
+        endDate: undefined,
+      });
     });
   });
 
@@ -63,12 +69,18 @@ describe('AnalyticsController', () => {
       await expect(
         controller.getSources({ type: 'patients' } as any, user),
       ).resolves.toEqual([{ source: 'x', count: 1 }]);
-      expect(service.getSources).toHaveBeenCalledWith(user, 'patients');
+      expect(service.getSources).toHaveBeenCalledWith(user, 'patients', {
+        startDate: undefined,
+        endDate: undefined,
+      });
     });
 
     it('type berilmasa — standart bookings', async () => {
       await controller.getSources({} as any, user);
-      expect(service.getSources).toHaveBeenCalledWith(user, 'bookings');
+      expect(service.getSources).toHaveBeenCalledWith(user, 'bookings', {
+        startDate: undefined,
+        endDate: undefined,
+      });
     });
   });
 
