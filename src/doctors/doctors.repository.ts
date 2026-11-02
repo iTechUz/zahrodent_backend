@@ -85,7 +85,9 @@ export class DoctorsRepository {
     });
   }
 
-  async getDetailedEfficiencyStats() {
+  /** `range` limits bookings/visits by their date (inclusive); omitted → all time. */
+  async getDetailedEfficiencyStats(range?: { gte?: Date; lte?: Date }) {
+    const dateWhere = range && (range.gte || range.lte) ? { date: range } : {};
     // Get all doctors first
     const doctors = await this.prisma.doctor.findMany({
       select: {
@@ -101,7 +103,10 @@ export class DoctorsRepository {
     const bookingStats = await this.prisma.booking.groupBy({
       by: ['doctorId'],
       _count: { id: true },
-      where: { status: { in: ['pending', 'confirmed', 'completed'] } },
+      where: {
+        status: { in: ['pending', 'confirmed', 'completed'] },
+        ...dateWhere,
+      },
     });
 
     // Get visit stats per doctor
@@ -109,7 +114,7 @@ export class DoctorsRepository {
       by: ['doctorId'],
       _count: { id: true },
       _sum: { price: true },
-      where: { status: 'completed' },
+      where: { status: 'completed', ...dateWhere },
     });
 
     // Get payment stats (real revenue)
@@ -121,7 +126,7 @@ export class DoctorsRepository {
     // Get unique patient counts per doctor
     const uniquePatientStats = await this.prisma.visit.groupBy({
       by: ['doctorId', 'patientId'],
-      where: { status: 'completed' },
+      where: { status: 'completed', ...dateWhere },
     });
 
     const doctorUniquePatients = new Map<string, Set<string>>();

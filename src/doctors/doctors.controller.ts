@@ -20,6 +20,7 @@ import { DoctorsService } from './doctors.service';
 import { CreateDoctorDto } from './dto/create-doctor.dto';
 import { UpdateDoctorDto } from './dto/update-doctor.dto';
 import { DoctorsQueryDto } from './dto/doctors-query.dto';
+import { PeriodQueryDto } from '../analytics/dto/analytics-query.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -42,8 +43,11 @@ export class DoctorsController {
   @Get('efficiency')
   @Roles('admin')
   @ApiOperation({ summary: 'Doctor efficiency and performance stats' })
-  getEfficiency() {
-    return this.doctorsService.getEfficiency();
+  getEfficiency(@Query() query: PeriodQueryDto) {
+    return this.doctorsService.getEfficiency({
+      startDate: query.startDate,
+      endDate: query.endDate,
+    });
   }
 
   @Get()

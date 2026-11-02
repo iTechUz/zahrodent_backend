@@ -27,8 +27,13 @@ describe('ServicesController', () => {
   describe('delegatsiya', () => {
     it('getStats — servisga uzatadi va natijani qaytaradi', () => {
       service.getStats.mockReturnValue({ total: 3 });
-      expect(controller.getStats()).toEqual({ total: 3 });
-      expect(service.getStats).toHaveBeenCalledWith();
+      expect(controller.getStats({ startDate: '2026-10-01' } as any)).toEqual({
+        total: 3,
+      });
+      expect(service.getStats).toHaveBeenCalledWith({
+        startDate: '2026-10-01',
+        endDate: undefined,
+      });
     });
 
     it('findAll — query uzatiladi', async () => {

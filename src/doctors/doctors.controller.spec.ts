@@ -26,9 +26,14 @@ describe('DoctorsController', () => {
     service.getStats.mockResolvedValue({ a: 1 });
     service.getEfficiency.mockResolvedValue([{ b: 2 }]);
     await expect(controller.getStats()).resolves.toEqual({ a: 1 });
-    await expect(controller.getEfficiency()).resolves.toEqual([{ b: 2 }]);
+    await expect(controller.getEfficiency({} as any)).resolves.toEqual([
+      { b: 2 },
+    ]);
     expect(service.getStats).toHaveBeenCalledWith();
-    expect(service.getEfficiency).toHaveBeenCalledWith();
+    expect(service.getEfficiency).toHaveBeenCalledWith({
+      startDate: undefined,
+      endDate: undefined,
+    });
   });
 
   it('findAll — query', async () => {
