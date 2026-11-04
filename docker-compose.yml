@@ -26,12 +26,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nest_api_dev
+    container_name: zahrodent_backend
     restart: always
     ports:
-      - "7879:7879"
+      - "${PORT:?}:${PORT:?}"
     environment:
-      - PORT=7879
       - TZ=Asia/Tashkent
       # Docker tarmog'ida db xostiga ulanish uchun (localhost emas)
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/zahro_dental_dev?schema=public

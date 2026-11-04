@@ -3,8 +3,8 @@ name: CD
 # Faqat CI main'dagi push uchun muvaffaqiyatli tugaganda ishlaydi.
 # Stages: build (image + Trivy + Docker Hub push) -> prepare (.env + pull) -> migrate (prisma)
 #         -> deploy (run + health check, xato bo'lsa eski image'ga rollback) -> notify
-# production environment (env4ci): SERVER_HOST, SERVER_USER, DOCKERHUB_USERNAME,
-#   IMAGE_NAME, CONTAINER_NAME, DOCKER_NETWORK, SSH_PRIVATE_KEY, DOCKERHUB_TOKEN + .env kalitlari
+# production/development environment (env4ci): SERVER_HOST, SERVER_USER, DOCKERHUB_USERNAME,
+#   IMAGE_NAME, CONTAINER_NAME, DOCKER_NETWORK, ENV_FILE, PORT, SSH_PRIVATE_KEY, DOCKERHUB_TOKEN + .env kalitlari
 on:
   workflow_run:
     workflows: [CI]
@@ -35,6 +35,8 @@ jobs:
       SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       CONTAINER: ${{ vars.CONTAINER_NAME }}
       NETWORK: ${{ vars.DOCKER_NETWORK }}
+      ENV_FILE: ${{ vars.ENV_FILE }}
+      PORT: ${{ vars.PORT }}
     steps:
       # Tag = qisqa commit sha (7 belgi), masalan 10449/zahrodent_backend:8d777fa
       - name: Set image
@@ -43,9 +45,9 @@ jobs:
       - name: Check variables
         run: |
           missing=""
-          for k in SERVER_HOST SERVER_USER CONTAINER NETWORK; do [ -z "${!k}" ] && missing="$missing $k"; done
+          for k in SERVER_HOST SERVER_USER CONTAINER NETWORK ENV_FILE PORT; do [ -z "${!k}" ] && missing="$missing $k"; done
           [ -z "$IMAGE_NAME" ] && missing="$missing IMAGE_NAME"
-          if [ -n "$missing" ]; then echo "::error::production environment'da yo'q:$missing"; exit 1; fi
+          if [ -n "$missing" ]; then echo "::error::$DEPLOY_ENV environment'da yo'q:$missing"; exit 1; fi
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -104,7 +106,7 @@ jobs:
       SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       CONTAINER: ${{ vars.CONTAINER_NAME }}
       NETWORK: ${{ vars.DOCKER_NETWORK }}
-      ENV_FILE: /home/ubuntu/zahrodent_backend/.env
+      ENV_FILE: ${{ vars.ENV_FILE }}
     steps:
       # Tag = qisqa commit sha (7 belgi), masalan 10449/zahrodent_backend:8d777fa
       - name: Set image
@@ -187,7 +189,7 @@ jobs:
       SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       CONTAINER: ${{ vars.CONTAINER_NAME }}
       NETWORK: ${{ vars.DOCKER_NETWORK }}
-      ENV_FILE: /home/ubuntu/zahrodent_backend/.env
+      ENV_FILE: ${{ vars.ENV_FILE }}
     steps:
       # Tag = qisqa commit sha (7 belgi), masalan 10449/zahrodent_backend:8d777fa
       - name: Set image
@@ -227,7 +229,8 @@ jobs:
       SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       CONTAINER: ${{ vars.CONTAINER_NAME }}
       NETWORK: ${{ vars.DOCKER_NETWORK }}
-      ENV_FILE: /home/ubuntu/zahrodent_backend/.env
+      ENV_FILE: ${{ vars.ENV_FILE }}
+      PORT: ${{ vars.PORT }}
     steps:
       # Tag = qisqa commit sha (7 belgi), masalan 10449/zahrodent_backend:8d777fa
       - name: Set image
@@ -247,7 +250,7 @@ jobs:
       - name: Deploy
         run: |
           # shellcheck disable=SC2029 # qiymatlar runner'da ochiladi (ataylab)
-          ssh server "IMAGE='$IMAGE' CONTAINER='$CONTAINER' ENV_FILE='$ENV_FILE' NETWORK='${NETWORK:-}' bash -s" << 'EOF'
+          ssh server "IMAGE='$IMAGE' CONTAINER='$CONTAINER' ENV_FILE='$ENV_FILE' NETWORK='${NETWORK:-}' PORT='$PORT' bash -s" << 'EOF'
             set -u
             PREV=$(docker inspect -f '{{.Config.Image}}' "$CONTAINER" 2>/dev/null || true)
             echo "Oldingi image: ${PREV:-none}"
@@ -255,18 +258,17 @@ jobs:
               docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
               docker run -d --name "$CONTAINER" --restart unless-stopped \
                 ${NETWORK:+--network "$NETWORK"} \
-                -p 127.0.0.1:7879:7879 \
+                -p "127.0.0.1:$PORT:$PORT" \
                 --env-file "$ENV_FILE" "$1" >/dev/null
             }
             healthy() {
               for _ in $(seq 1 30); do
-                curl -fsS http://127.0.0.1:7879/health >/dev/null 2>&1 && return 0
+                curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && return 0
                 sleep 3
               done
               return 1
             }
-            run "$IMAGE"
-            if healthy; then echo "✅ Healthy: $IMAGE"; exit 0; fi
+            if run "$IMAGE" && healthy; then echo "✅ Healthy: $IMAGE"; exit 0; fi
             echo "❌ Health check failed"
             docker logs --tail 100 "$CONTAINER"
             if [ -n "$PREV" ]; then

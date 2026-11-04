@@ -78,16 +78,12 @@ COPY package.json ./
 # Set production environment
 ENV NODE_ENV=development
 ENV TZ=Asia/Tashkent
-ENV PORT=7879
-
-# Expose port
-EXPOSE 7879
 
 USER nonroot
 
 # Health check (GET /health — no DB access, no auth). No curl in distroless: node fetch.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD ["/nodejs/bin/node", "-e", "fetch('http://localhost:'+(process.env.PORT||7879)+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+  CMD ["/nodejs/bin/node", "-e", "fetch('http://localhost:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 
 # Migrations run in CD (migrate job) before deploy, not at container start.
 # node is PID 1, so SIGTERM triggers Nest shutdown hooks (Prisma disconnect, Telegram bot stop).
