@@ -15,7 +15,7 @@ describe('BookingsRepository', () => {
         findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn().mockResolvedValue(0),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-        findUnique: jest.fn(),
+        findFirst: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
@@ -25,10 +25,12 @@ describe('BookingsRepository', () => {
     repo = new BookingsRepository(prisma as PrismaService);
   });
 
+  const HAS_PATIENT = { patient: { is: { id: { not: '' } } } };
+
   it('findAll — date/time desc, pagination ixtiyoriy', async () => {
     await repo.findAll({ doctorId: 'd1' }, { skip: 0, take: 10 });
     expect(prisma.booking.findMany).toHaveBeenCalledWith({
-      where: { doctorId: 'd1' },
+      where: { AND: [{ doctorId: 'd1' }, HAS_PATIENT] },
       include: PS,
       orderBy: [{ date: 'desc' }, { time: 'desc' }],
       skip: 0,
@@ -36,9 +38,12 @@ describe('BookingsRepository', () => {
     });
     await repo.findAll();
     expect(prisma.booking.findMany).toHaveBeenLastCalledWith({
-      where: undefined,
+      where: { AND: [{}, HAS_PATIENT] },
       include: PS,
       orderBy: [{ date: 'desc' }, { time: 'desc' }],
+    });
+    expect(prisma.booking.count).toHaveBeenLastCalledWith({
+      where: { AND: [{}, HAS_PATIENT] },
     });
   });
 
@@ -69,11 +74,11 @@ describe('BookingsRepository', () => {
   it('CRUD/count/findServiceById delegatsiyasi', async () => {
     await repo.count({ status: 'pending' });
     expect(prisma.booking.count).toHaveBeenCalledWith({
-      where: { status: 'pending' },
+      where: { AND: [{ status: 'pending' }, HAS_PATIENT] },
     });
     await repo.findById('b1');
-    expect(prisma.booking.findUnique).toHaveBeenCalledWith({
-      where: { id: 'b1' },
+    expect(prisma.booking.findFirst).toHaveBeenCalledWith({
+      where: { id: 'b1', ...HAS_PATIENT },
       include: PS,
     });
     await repo.findServiceById('s1');
