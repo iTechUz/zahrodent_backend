@@ -1,3 +1,5 @@
+import { tombstonePhone } from '../users/users.service';
+import { revokeAllUserRefreshTokens } from '../auth/refresh-tokens.repository';
 import { Injectable } from '@nestjs/common';
 import { Doctor, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
@@ -43,6 +45,7 @@ export class DoctorsRepository {
       where: {
         bookings: {
           some: {
+            deletedAt: null,
             date: { gte: today, lt: tomorrow },
           },
         },
@@ -204,11 +207,21 @@ export class DoctorsRepository {
     });
   }
 
-  /** Deletes the doctor and its login user in one transaction. */
+  /** Soft-deletes the doctor and its login user (sessions revoked) atomically. */
   async deleteWithUser(id: string, userId: string | null): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       await tx.doctor.delete({ where: { id } });
-      if (userId) await tx.user.delete({ where: { id: userId } });
+      if (!userId) return;
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, phone: true },
+      });
+      if (!user) return;
+      await tx.user.update({
+        where: { id: userId },
+        data: { deletedAt: new Date(), phone: tombstonePhone(user) },
+      });
+      await revokeAllUserRefreshTokens(tx, userId);
     });
   }
 

@@ -21,7 +21,9 @@ model User {
   doctor        Doctor?
   comments      PatientComment[]
   refreshTokens RefreshToken[]
+  deletedAt     DateTime?        @map("deleted_at")
 
+  @@index([deletedAt])
   @@map("users")
 }
 
@@ -38,7 +40,7 @@ model RefreshToken {
   userAgent    String?   @map("user_agent")
   ip           String?
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([userId])
   @@index([familyId])
@@ -100,7 +102,9 @@ model Doctor {
   userId        String?        @unique @map("user_id")
 
   assignedPatients Patient[] @relation("AssignedDoctor")
+  deletedAt        DateTime? @map("deleted_at")
 
+  @@index([deletedAt])
   @@map("doctors")
 }
 
@@ -112,9 +116,11 @@ model Service {
   duration    Int
   description String?
 
-  bookings Booking[]
-  payments Payment[]
+  bookings  Booking[]
+  payments  Payment[]
+  deletedAt DateTime? @map("deleted_at")
 
+  @@index([deletedAt])
   @@map("services")
 }
 
@@ -139,12 +145,13 @@ model Booking {
   patientConfirmedAt    DateTime? @map("patient_confirmed_at")
   rescheduleRequestedAt DateTime? @map("reschedule_requested_at")
 
-  patient Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
   doctor  Doctor   @relation(fields: [doctorId], references: [id], onDelete: Restrict)
   service Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
 
   visits     Visit[]
   statusLogs BookingStatusLog[]
+  deletedAt  DateTime?          @map("deleted_at")
 
   @@index([patientId])
   @@index([doctorId])
@@ -152,6 +159,7 @@ model Booking {
   @@index([status])
   @@index([date, status])
   @@index([doctorId, date])
+  @@index([deletedAt])
   @@map("bookings")
 }
 
@@ -167,7 +175,7 @@ model BookingStatusLog {
   changedByName String   @map("changed_by_name")
   createdAt     DateTime @default(now()) @map("created_at")
 
-  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
 
   @@index([bookingId, createdAt])
   @@map("booking_status_logs")
@@ -185,7 +193,7 @@ model Visit {
   treatment String   @default("")
   notes     String   @default("")
 
-  patient       Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient       Patient        @relation(fields: [patientId], references: [id], onDelete: Restrict)
   doctor        Doctor         @relation(fields: [doctorId], references: [id], onDelete: Restrict)
   booking       Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
   payments      Payment[]
@@ -211,15 +219,17 @@ model Payment {
   serviceId   String?  @map("service_id")
   visitId     String?  @map("visit_id")
 
-  patient Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  service Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
-  visit   Visit?   @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  patient   Patient   @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  service   Service?  @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  visit     Visit?    @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  deletedAt DateTime? @map("deleted_at")
 
   @@index([patientId])
   @@index([status])
   @@index([date])
   @@index([type])
   @@index([visitId])
+  @@index([deletedAt])
   @@map("payments")
 }
 
@@ -230,8 +240,8 @@ model PatientComment {
   patientId String   @map("patient_id")
   authorId  String   @map("author_id")
 
-  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  author  User    @relation(fields: [authorId], references: [id], onDelete: Restrict)
 
   @@index([patientId])
   @@map("patient_comments")
@@ -246,8 +256,8 @@ model Notification {
   sentAt    DateTime @map("sent_at")
   status    String
 
-  patient Patient? @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctor  Doctor?  @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  patient Patient? @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  doctor  Doctor?  @relation(fields: [doctorId], references: [id], onDelete: Restrict)
 
   @@index([patientId])
   @@index([doctorId])
@@ -281,24 +291,26 @@ model NotificationLog {
 }
 
 model Lead {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   name        String
   phone       String
   service     String?
   message     String?
-  status      String   @default("new") // new, contacted, consultation, proposal, converted, cancelled
-  source      String   @default("telegram_bot")
+  status      String    @default("new") // new, contacted, consultation, proposal, converted, cancelled
+  source      String    @default("telegram_bot")
   notes       String?
   /// Preferred doctor (free text from the website form).
   doctor      String?
   /// Preferred visit, "YYYY-MM-DD" or "YYYY-MM-DD HH:mm" (Asia/Tashkent).
-  preferredAt String?  @map("preferred_at")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  preferredAt String?   @map("preferred_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
 
   @@index([status])
   @@index([createdAt])
   @@index([phone, createdAt])
+  @@index([deletedAt])
   @@map("leads")
 }
 
@@ -332,7 +344,7 @@ model Prescription {
   dispensedAt DateTime? @map("dispensed_at")
   dispensedBy String?   @map("dispensed_by")
 
-  patient Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient Patient            @relation(fields: [patientId], references: [id], onDelete: Restrict)
   doctor  Doctor             @relation(fields: [doctorId], references: [id], onDelete: Restrict)
   visit   Visit?             @relation(fields: [visitId], references: [id], onDelete: SetNull)
   items   PrescriptionItem[]
@@ -353,7 +365,7 @@ model PrescriptionItem {
   quantity       String @default("")
   instructions   String @default("")
 
-  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Restrict)
 
   @@index([prescriptionId])
   @@map("prescription_items")

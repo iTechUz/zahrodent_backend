@@ -22,6 +22,7 @@ function mockUser(partial: Partial<User>): User {
     avatar: null,
     createdAt: now,
     updatedAt: now,
+    deletedAt: null,
     ...partial,
   };
 }

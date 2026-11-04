@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { dateOnlyColumnRange } from '../common/utils/date.util';
 import { Prisma } from '@prisma/client';
 import { DoctorsRepository, DoctorWithUser } from './doctors.repository';
@@ -155,23 +151,8 @@ export class DoctorsService {
     const d = await this.doctorsRepository.findById(id);
     if (!d) throw new NotFoundException(DOCTOR_NOT_FOUND);
 
-    const history = await this.doctorsRepository.countHistory(id);
-    if (history.bookings > 0 || history.visits > 0) {
-      throw new ConflictException(DOCTOR_HAS_HISTORY);
-    }
-
-    try {
-      await this.doctorsRepository.deleteWithUser(id, d.userId ?? null);
-    } catch (e) {
-      // A booking/visit created between the check and the delete.
-      if (
-        e instanceof Prisma.PrismaClientKnownRequestError &&
-        e.code === 'P2003'
-      ) {
-        throw new ConflictException(DOCTOR_HAS_HISTORY);
-      }
-      throw e;
-    }
+    // Soft delete keeps bookings/visits intact, so history no longer blocks it.
+    await this.doctorsRepository.deleteWithUser(id, d.userId ?? null);
     return { id };
   }
 

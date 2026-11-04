@@ -336,6 +336,7 @@ export class NotificationsService {
               phone: true,
               bookings: {
                 where: {
+                  deletedAt: null,
                   date: { gte: fromToday },
                   status: { in: ['confirmed', 'pending'] },
                 },
@@ -353,6 +354,7 @@ export class NotificationsService {
               telegramChatId: true,
               bookings: {
                 where: {
+                  deletedAt: null,
                   date: { gte: fromToday },
                   status: { in: ['confirmed', 'pending'] },
                   reminderSentAt: null,

@@ -220,11 +220,22 @@ describe('UsersService', () => {
     });
 
     it('o‘chiradi va id qaytaradi', async () => {
-      prisma.user.findUnique.mockResolvedValue({ id: 'u1' });
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        phone: '+998901112233',
+      });
       await expect(service.remove('u1', 'admin1')).resolves.toEqual({
         id: 'u1',
       });
-      expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'u1' } });
+      expect(prisma.user.delete).not.toHaveBeenCalled();
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: {
+          deletedAt: expect.any(Date),
+          phone: 'deleted:u1:+998901112233',
+        },
+      });
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledTimes(1);
     });
 
     it('o‘zini o‘chira olmaydi — 409', async () => {

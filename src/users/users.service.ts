@@ -18,6 +18,10 @@ export const CANNOT_DELETE_SELF = "O'zingizning hisobingizni o'chira olmaysiz";
 export const LAST_ADMIN_MESSAGE =
   "Tizimdagi yagona adminni o'chirib yoki rolini o'zgartirib bo'lmaydi";
 
+/** Value stored in `phone` of a soft-deleted user (unique, not a valid login). */
+export const tombstonePhone = (u: { id: string; phone: string }) =>
+  `deleted:${u.id}:${u.phone}`;
+
 const PUBLIC_SELECT = {
   id: true,
   name: true,
@@ -124,9 +128,23 @@ export class UsersService {
     if (!user) throw new NotFoundException(USER_NOT_FOUND);
     if (user.role === 'admin') await this.assertNotLastAdmin();
 
-    // refresh_tokens.user_id is ON DELETE CASCADE → sessions go with the user.
-    await this.prisma.user.delete({ where: { id } });
+    await this.softDelete(user);
     return { id };
+  }
+
+  /**
+   * Soft delete: row stays (history), login is blocked, sessions revoked.
+   * Phone is tombstoned so `users.phone @unique` frees up for a new account.
+   */
+  async softDelete(
+    user: { id: string; phone: string },
+    tx: Prisma.TransactionClient | PrismaService = this.prisma,
+  ) {
+    await tx.user.update({
+      where: { id: user.id },
+      data: { deletedAt: new Date(), phone: tombstonePhone(user) },
+    });
+    await revokeAllUserRefreshTokens(tx, user.id);
   }
 
   private async assertNotLastAdmin() {

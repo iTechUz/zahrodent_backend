@@ -6,7 +6,7 @@ describe('PatientsRepository', () => {
   let repo: PatientsRepository;
   const include = {
     payments: {
-      where: { type: 'INCOME' },
+      where: { type: 'INCOME', deletedAt: null },
       select: { amount: true, status: true, discount: true },
     },
     visits: { where: { status: 'completed' }, select: { price: true } },

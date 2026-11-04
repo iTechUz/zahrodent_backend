@@ -14,7 +14,7 @@ export const COLLECTED_PAYMENT_STATUSES = ['paid', 'partial'] as const;
 
 export const PATIENT_BALANCE_INCLUDE = {
   payments: {
-    where: { type: 'INCOME' },
+    where: { type: 'INCOME', deletedAt: null },
     select: { amount: true, status: true, discount: true },
   },
   visits: { where: { status: 'completed' }, select: { price: true } },
@@ -48,7 +48,7 @@ export const debtorBalancesSql = Prisma.sql`
            SUM(CASE WHEN status IN ('paid', 'partial') THEN amount ELSE 0 END)
              + SUM(COALESCE(discount, 0)) AS credit
     FROM payments
-    WHERE type = 'INCOME'
+    WHERE type = 'INCOME' AND deleted_at IS NULL
     GROUP BY patient_id
   ) pay ON pay.patient_id = p.id
   LEFT JOIN (

@@ -57,6 +57,7 @@ describe('DoctorsRepository', () => {
       where: {
         bookings: {
           some: {
+            deletedAt: null,
             date: {
               gte: new Date(2026, 5, 17, 0, 0, 0, 0),
               lt: new Date(2026, 5, 18, 0, 0, 0, 0),
@@ -246,14 +247,29 @@ describe('DoctorsRepository', () => {
       });
     });
 
-    it('deleteWithUser — avval doctor, keyin user, bitta tranzaksiyada', async () => {
+    it('deleteWithUser — doctor, keyin user soft delete (telefon bo‘shatiladi, sessiyalar bekor), bitta tranzaksiyada', async () => {
       const order: string[] = [];
       tx.doctor.delete.mockImplementation(async () => order.push('doctor'));
-      tx.user.delete.mockImplementation(async () => order.push('user'));
+      tx.user.findUnique = jest
+        .fn()
+        .mockResolvedValue({ id: 'u5', phone: '+998901112233' });
+      tx.user.update.mockImplementation(async () => order.push('user'));
+      tx.refreshToken = {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      };
       await repo.deleteWithUser('d1', 'u5');
       expect(order).toEqual(['doctor', 'user']);
+      expect(tx.user.delete).not.toHaveBeenCalled();
+      expect(tx.user.update).toHaveBeenCalledWith({
+        where: { id: 'u5' },
+        data: {
+          deletedAt: expect.any(Date),
+          phone: 'deleted:u5:+998901112233',
+        },
+      });
+      expect(tx.refreshToken.updateMany).toHaveBeenCalled();
       await repo.deleteWithUser('d2', null);
-      expect(tx.user.delete).toHaveBeenCalledTimes(1);
+      expect(tx.user.update).toHaveBeenCalledTimes(1);
     });
   });
 

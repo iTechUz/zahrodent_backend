@@ -1,5 +1,4 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { DoctorsService } from './doctors.service';
 import { DoctorsRepository } from './doctors.repository';
 import { UsersService } from '../users/users.service';
@@ -309,9 +308,6 @@ describe('DoctorsService', () => {
   });
 
   describe('remove', () => {
-    const HISTORY_MSG =
-      "Shifokorni o'chirib bo'lmaydi: unga bog'langan qabullar yoki tashriflar mavjud";
-
     it('topilmasa 404', async () => {
       repo.findById.mockResolvedValue(null);
       await expect(service.remove('x')).rejects.toBeInstanceOf(
@@ -332,28 +328,12 @@ describe('DoctorsService', () => {
       expect(repo.deleteWithUser).toHaveBeenCalledWith('d1', null);
     });
 
-    // Fixed: the login user used to be deleted BEFORE the doctor; with
-    // bookings/visits (onDelete: Restrict) the doctor delete failed with 500
-    // after the account was already gone. Now: pre-check → 409, and the
-    // delete itself is atomic.
-    it('remove — tarixi bor shifokor: 409, user ham o‘chirilmaydi (atomik)', async () => {
+    // Soft delete: bookings/visits stay, so history does not block removal.
+    it('remove — tarixi bor shifokor ham soft delete bo‘ladi (user bilan)', async () => {
       repo.findById.mockResolvedValue(doc({ userId: 'u5' }));
-      repo.countHistory.mockResolvedValue({ bookings: 3, visits: 0 });
-      await expect(service.remove('d1')).rejects.toThrow(
-        new ConflictException(HISTORY_MSG),
-      );
-      expect(repo.deleteWithUser).not.toHaveBeenCalled();
-    });
-
-    it('remove — tekshiruvdan keyin paydo bo‘lgan bog‘liqlik (P2003) ham 409', async () => {
-      repo.findById.mockResolvedValue(doc({ userId: 'u5' }));
-      repo.deleteWithUser.mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('fk', {
-          code: 'P2003',
-          clientVersion: '5.22.0',
-        }),
-      );
-      await expect(service.remove('d1')).rejects.toThrow(HISTORY_MSG);
+      repo.countHistory.mockResolvedValue({ bookings: 3, visits: 2 });
+      await expect(service.remove('d1')).resolves.toEqual({ id: 'd1' });
+      expect(repo.deleteWithUser).toHaveBeenCalledWith('d1', 'u5');
     });
 
     it('remove — boshqa xatolar o‘zgarmasdan uzatiladi', async () => {
