@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AnalyticsRepository } from './analytics.repository';
 import { AuthUserView } from '../auth/auth.service';
@@ -7,6 +7,7 @@ import {
   doctorScopeId,
 } from '../common/auth/doctor-scope';
 import {
+  addDaysToDateOnly,
   addMonthsToMonthKey,
   dateOnlyColumnRange,
   monthBoundsOf,
@@ -16,6 +17,7 @@ import {
 } from '../common/utils/date.util';
 import { COLLECTED_PAYMENT_STATUSES } from '../patients/patient-balance';
 import {
+  DailyPointDto,
   DashboardResponseDto,
   MonthlyPointDto,
   SourcePointDto,
@@ -23,6 +25,22 @@ import {
 import type { SourceType } from './dto/analytics-query.dto';
 
 const COLLECTED = { in: [...COLLECTED_PAYMENT_STATUSES] };
+const MAX_DAILY_DAYS = 92;
+
+/** Whole months from `YYYY-MM` a to b (b ≥ a → ≥ 0). */
+function monthsBetween(a: string, b: string): number {
+  const [ay, am] = a.split('-').map(Number);
+  const [by, bm] = b.split('-').map(Number);
+  return (by - ay) * 12 + (bm - am);
+}
+
+/** Whole days from `YYYY-MM-DD` a to b. */
+function daysBetween(a: string, b: string): number {
+  return Math.round(
+    (parseDateOnlyToUTC(b).getTime() - parseDateOnlyToUTC(a).getTime()) /
+      86_400_000,
+  );
+}
 
 /**
  * Clinic dashboard numbers. Doctors see only their own patients/bookings;
@@ -47,11 +65,25 @@ export class AnalyticsService {
   async getDashboard(
     user: AuthUserView,
     date: string = todayInTashkent(),
+    period: { startDate?: string; endDate?: string } = {},
   ): Promise<DashboardResponseDto> {
     const scope = this.scopes(user);
     const day = parseDateOnlyToUTC(date);
-    const month = monthBoundsOf(date);
-    const monthRange = dateOnlyColumnRange(month.start, month.end);
+    // "month" figures cover the requested period; without one — the month of `date`
+    let monthRange: { gte?: Date; lte?: Date };
+    if (period.startDate || period.endDate) {
+      const start = period.startDate;
+      const end = period.endDate ?? date;
+      if (start && start > end) {
+        throw new BadRequestException(
+          'startDate endDate dan keyin bo‘lishi mumkin emas',
+        );
+      }
+      monthRange = dateOnlyColumnRange(start, end);
+    } else {
+      const month = monthBoundsOf(date);
+      monthRange = dateOnlyColumnRange(month.start, month.end);
+    }
 
     const [
       totalPatients,
@@ -133,21 +165,45 @@ export class AnalyticsService {
     };
   }
 
-  /** Last `months` calendar months (current included), oldest → newest. */
+  /**
+   * Last `months` calendar months (current included), oldest → newest.
+   * With a `period` — the calendar months from its start to its end (at most
+   * the last 24); only rows inside the period are counted.
+   */
   async getMonthly(
     user: AuthUserView,
     months = 6,
     now: Date = new Date(),
+    period: { startDate?: string; endDate?: string } = {},
   ): Promise<MonthlyPointDto[]> {
     const scope = this.scopes(user);
-    const currentMonth = todayInTashkent(now).slice(0, 7);
-    const keys = Array.from({ length: months }, (_, i) =>
-      addMonthsToMonthKey(currentMonth, i - (months - 1)),
-    );
-    const range = dateOnlyColumnRange(
-      `${keys[0]}-01`,
-      monthBoundsOf(`${currentMonth}-01`).end,
-    );
+    const today = todayInTashkent(now);
+    let keys: string[];
+    let range: { gte?: Date; lte?: Date };
+    if (period.startDate || period.endDate) {
+      const end = period.endDate ?? today;
+      this.assertPeriod(period.startDate, end);
+      const endKey = end.slice(0, 7);
+      const startKey = (period.startDate ?? `${endKey}-01`).slice(0, 7);
+      const count = Math.min(24, monthsBetween(startKey, endKey) + 1);
+      keys = Array.from({ length: count }, (_, i) =>
+        addMonthsToMonthKey(endKey, i - (count - 1)),
+      );
+      const from =
+        period.startDate && period.startDate.slice(0, 7) === keys[0]
+          ? period.startDate
+          : `${keys[0]}-01`;
+      range = dateOnlyColumnRange(from, end);
+    } else {
+      const currentMonth = today.slice(0, 7);
+      keys = Array.from({ length: months }, (_, i) =>
+        addMonthsToMonthKey(currentMonth, i - (months - 1)),
+      );
+      range = dateOnlyColumnRange(
+        `${keys[0]}-01`,
+        monthBoundsOf(`${currentMonth}-01`).end,
+      );
+    }
 
     const [patients, bookings, payments] = await Promise.all([
       this.repo.patientsPerDay({
@@ -194,16 +250,103 @@ export class AnalyticsService {
     return keys.map((k) => points.get(k)!);
   }
 
+  /** Per-day series for `startDate`..`endDate` (default: this month so far), empty days included. */
+  async getDaily(
+    user: AuthUserView,
+    period: { startDate?: string; endDate?: string } = {},
+    now: Date = new Date(),
+  ): Promise<DailyPointDto[]> {
+    const scope = this.scopes(user);
+    const today = todayInTashkent(now);
+    const end = period.endDate ?? today;
+    const start = period.startDate ?? `${end.slice(0, 7)}-01`;
+    this.assertPeriod(start, end);
+    const days = daysBetween(start, end) + 1;
+    if (days > MAX_DAILY_DAYS) {
+      throw new BadRequestException(
+        `Kunlik dinamika ko‘pi bilan ${MAX_DAILY_DAYS} kun uchun`,
+      );
+    }
+    const range = dateOnlyColumnRange(start, end);
+
+    const [patients, bookings, payments] = await Promise.all([
+      this.repo.patientsPerDay({
+        AND: [scope.patients, { createdAt: range }],
+      }),
+      this.repo.bookingsPerDayAndStatus({ ...scope.bookings, date: range }),
+      scope.canSeeMoney
+        ? this.repo.paymentsPerDayAndType({ status: COLLECTED, date: range })
+        : Promise.resolve([]),
+    ]);
+
+    const keys = Array.from({ length: days }, (_, i) =>
+      addDaysToDateOnly(start, i),
+    );
+    const points = new Map<string, DailyPointDto>(
+      keys.map((date) => [
+        date,
+        {
+          date,
+          newPatients: 0,
+          bookings: 0,
+          completedBookings: 0,
+          revenue: scope.canSeeMoney ? 0 : null,
+          expenses: scope.canSeeMoney ? 0 : null,
+        },
+      ]),
+    );
+    const at = (d: Date) => points.get(toDateOnlyString(d));
+
+    for (const r of patients) {
+      const p = at(r.date);
+      if (p) p.newPatients += r.count;
+    }
+    for (const r of bookings) {
+      const p = at(r.date);
+      if (!p) continue;
+      p.bookings += r.count;
+      if (r.status === 'completed') p.completedBookings += r.count;
+    }
+    for (const r of payments) {
+      const p = at(r.date);
+      if (!p) continue;
+      if (r.type === 'INCOME') p.revenue = (p.revenue ?? 0) + r.amount;
+      else if (r.type === 'EXPENSE') p.expenses = (p.expenses ?? 0) + r.amount;
+    }
+
+    return keys.map((k) => points.get(k)!);
+  }
+
+  private assertPeriod(start: string | undefined, end: string) {
+    if (start && start > end) {
+      throw new BadRequestException(
+        'startDate endDate dan keyin bo‘lishi mumkin emas',
+      );
+    }
+  }
+
   /** Bookings (default) or patients grouped by source, most frequent first. */
   async getSources(
     user: AuthUserView,
     type: SourceType = 'bookings',
+    period: { startDate?: string; endDate?: string } = {},
   ): Promise<SourcePointDto[]> {
     const scope = this.scopes(user);
+    const hasPeriod = !!(period.startDate || period.endDate);
+    if (hasPeriod && period.startDate && period.endDate) {
+      this.assertPeriod(period.startDate, period.endDate);
+    }
+    const range = dateOnlyColumnRange(period.startDate, period.endDate);
     const rows =
       type === 'patients'
-        ? await this.repo.patientsBySource(scope.patients)
-        : await this.repo.bookingsBySource(scope.bookings);
+        ? await this.repo.patientsBySource(
+            hasPeriod
+              ? { AND: [scope.patients, { createdAt: range }] }
+              : scope.patients,
+          )
+        : await this.repo.bookingsBySource(
+            hasPeriod ? { ...scope.bookings, date: range } : scope.bookings,
+          );
     return rows
       .sort((a, b) => b.count - a.count || a.source.localeCompare(b.source))
       .map((r) => ({ source: r.source, count: r.count }));

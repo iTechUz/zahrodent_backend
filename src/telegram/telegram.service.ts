@@ -9,6 +9,8 @@ import { LeadsService } from '../leads/leads.service';
 import { PatientsRepository } from '../patients/patients.repository';
 import { TelegramBotRegistry } from './telegram-bot.registry';
 import { normalizeUzPhone } from '../common/utils/phone.util';
+import { PrismaService } from '../database/prisma.service';
+import { RemindersService } from '../notifications/reminders.service';
 
 /** Max leads one Telegram user can create per window (spam guard). */
 export const TELEGRAM_LEAD_LIMIT = 3;
@@ -32,6 +34,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly leadsService: LeadsService,
     private readonly patientsRepository: PatientsRepository,
     private readonly registry: TelegramBotRegistry,
+    private readonly prisma?: PrismaService,
+    private readonly reminders?: RemindersService,
   ) {}
 
   onModuleInit() {
@@ -58,24 +62,38 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.registry.register(bot.telegram);
 
     // Webhook o'rniga hozircha long-polling ishlatamiz oson ishlashi uchun
-    bot.launch().catch((err) => {
-      this.launched = false;
-      this.registry.register(null);
-      this.logger.error('Telegram bot launch error:', err);
-    });
+    bot
+      .launch()
+      .then(() => {
+        // launch() resolves only when polling ends; unless we are shutting
+        // down (launched=false) that means it stopped on its own.
+        if (this.launched) {
+          this.registry.reportFailure('polling stopped');
+          this.logger.error('Telegram polling stopped unexpectedly');
+        }
+      })
+      .catch((err) => {
+        this.launched = false;
+        this.registry.register(null);
+        // 409 Conflict (second poller), bad token, network at startup…
+        this.registry.reportFailure(
+          err instanceof Error ? err.message : String(err),
+        );
+        this.logger.error('Telegram bot launch error:', err);
+      });
     this.logger.log('Telegram bot is running...');
   }
 
   onModuleDestroy() {
     this.registry.register(null);
     if (!this.bot || !this.launched) return;
+    this.launched = false;
     try {
       this.bot.stop('shutdown');
     } catch (err) {
       // stop() throws if polling never actually started.
       this.logger.warn(`Telegram bot stop: ${String(err)}`);
     }
-    this.launched = false;
   }
 
   /**
@@ -98,6 +116,41 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         `Bemorni Telegram chatga bog'lashda xato: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  /**
+   * Stores a patient's 1..5 rating for a completed booking. Only the chat
+   * linked to that booking's patient may rate (callback data is guessable by
+   * anyone who sees a booking id), and only once.
+   */
+  async saveFeedback(
+    chatId: number | string,
+    bookingId: string,
+    rating: number,
+  ): Promise<'saved' | 'already' | 'denied'> {
+    if (!this.prisma || !(rating >= 1 && rating <= 5)) return 'denied';
+    const b = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: {
+        status: true,
+        feedbackRating: true,
+        patient: { select: { telegramChatId: true } },
+      },
+    });
+    if (
+      !b ||
+      b.status !== 'completed' ||
+      !b.patient.telegramChatId ||
+      b.patient.telegramChatId !== String(chatId)
+    ) {
+      return 'denied';
+    }
+    if (b.feedbackRating != null) return 'already';
+    const r = await this.prisma.booking.updateMany({
+      where: { id: bookingId, feedbackRating: null },
+      data: { feedbackRating: rating, feedbackAt: new Date() },
+    });
+    return r.count ? 'saved' : 'already';
   }
 
   /** Sliding-window limit per Telegram user; records the attempt if allowed. */
@@ -167,7 +220,52 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
     });
 
-    bot.action(/service_(.+)/, async (ctx) => {
+    bot.action(/^fb_(.+)_([1-5])$/, async (ctx) => {
+      try {
+        const r = await this.saveFeedback(
+          ctx.chat?.id ?? ctx.from.id,
+          ctx.match[1],
+          Number(ctx.match[2]),
+        );
+        await ctx.answerCbQuery(
+          r === 'saved'
+            ? 'Rahmat! Fikringiz qabul qilindi 🙏'
+            : r === 'already'
+              ? 'Siz allaqachon baho bergansiz'
+              : 'Bu tugma siz uchun emas',
+        );
+        if (r === 'saved') await ctx.editMessageReplyMarkup(undefined);
+      } catch (err) {
+        this.logger.warn(`Feedback xatosi: ${String(err)}`);
+      }
+    });
+
+    bot.action(/^rem_(ok|re)_(.+)$/, async (ctx) => {
+      try {
+        const r = await this.reminders?.handleAnswer(
+          ctx.chat?.id ?? ctx.from.id,
+          ctx.match[2],
+          ctx.match[1] === 'ok' ? 'confirm' : 'reschedule',
+        );
+        await ctx.answerCbQuery(
+          r === 'confirmed'
+            ? 'Rahmat! Qabulingiz tasdiqlandi ✅'
+            : r === 'reschedule'
+              ? "Ariza qabul qilindi — administrator siz bilan bog'lanadi"
+              : r === 'already'
+                ? 'Javobingiz allaqachon qabul qilingan'
+                : 'Bu tugma endi amal qilmaydi',
+          { show_alert: r === 'reschedule' },
+        );
+        if (r === 'confirmed' || r === 'reschedule') {
+          await ctx.editMessageReplyMarkup(undefined);
+        }
+      } catch (err) {
+        this.logger.warn(`Eslatma javobi xatosi: ${String(err)}`);
+      }
+    });
+
+    bot.action(/^service_(.+)/, async (ctx) => {
       const serviceType = ctx.match[1];
       const state = this.userStates.get(ctx.from.id);
 

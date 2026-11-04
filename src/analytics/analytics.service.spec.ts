@@ -70,6 +70,31 @@ describe('AnalyticsService', () => {
   afterEach(() => jest.useRealTimers());
 
   describe('getDashboard', () => {
+    it('startDate/endDate — oy ko‘rsatkichlari shu davr bo‘yicha', async () => {
+      await service.getDashboard(admin, '2026-11-01', {
+        startDate: '2026-10-01',
+        endDate: '2026-10-31',
+      });
+      const range = { gte: d('2026-10-01'), lte: d('2026-10-31') };
+      expect(repo.countPatients).toHaveBeenNthCalledWith(2, {
+        AND: [ND, { createdAt: range }],
+      });
+      expect(repo.sumPayments).toHaveBeenCalledWith({
+        type: 'INCOME',
+        status: { in: ['paid', 'partial'] },
+        date: range,
+      });
+    });
+
+    it('startDate endDate dan keyin — 400', async () => {
+      await expect(
+        service.getDashboard(admin, '2026-11-01', {
+          startDate: '2026-11-05',
+          endDate: '2026-11-01',
+        }),
+      ).rejects.toThrow('startDate');
+    });
+
     it('admin — barcha maydonlar, pul faqat INCOME/EXPENSE paid|partial', async () => {
       repo.countPatients.mockResolvedValueOnce(120).mockResolvedValueOnce(14);
       repo.countBookings
@@ -183,6 +208,97 @@ describe('AnalyticsService', () => {
         service.getDashboard({ ...doctor, doctorId: undefined }),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(repo.countPatients).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getDaily', () => {
+    const now = new Date('2026-11-02T08:00:00.000Z');
+
+    it('kunlar ketma-ket, bo‘sh kunlar 0 bilan, davr chegarasida', async () => {
+      repo.patientsPerDay.mockResolvedValue([
+        { date: d('2026-10-02'), count: 3 },
+      ]);
+      repo.bookingsPerDayAndStatus.mockResolvedValue([
+        { date: d('2026-10-02'), status: 'completed', count: 2 },
+        { date: d('2026-10-02'), status: 'pending', count: 1 },
+      ]);
+      repo.paymentsPerDayAndType.mockResolvedValue([
+        { date: d('2026-10-03'), type: 'INCOME', amount: 700 },
+      ]);
+
+      const out = await service.getDaily(
+        admin,
+        { startDate: '2026-10-01', endDate: '2026-10-03' },
+        now,
+      );
+      expect(out.map((p) => p.date)).toEqual([
+        '2026-10-01',
+        '2026-10-02',
+        '2026-10-03',
+      ]);
+      expect(out[1]).toMatchObject({
+        newPatients: 3,
+        bookings: 3,
+        completedBookings: 2,
+        revenue: 0,
+      });
+      expect(out[2].revenue).toBe(700);
+      expect(repo.bookingsPerDayAndStatus).toHaveBeenCalledWith({
+        date: { gte: d('2026-10-01'), lte: d('2026-10-03') },
+      });
+    });
+
+    it('standart — shu oy boshidan bugungacha; pul faqat admin', async () => {
+      const out = await service.getDaily(receptionist, {}, now);
+      expect(out.map((p) => p.date)).toEqual(['2026-11-01', '2026-11-02']);
+      expect(out[0].revenue).toBeNull();
+    });
+
+    it('92 kundan uzun yoki teskari davr — 400', async () => {
+      await expect(
+        service.getDaily(
+          admin,
+          { startDate: '2026-01-01', endDate: '2026-11-01' },
+          now,
+        ),
+      ).rejects.toThrow('92');
+      await expect(
+        service.getDaily(
+          admin,
+          { startDate: '2026-11-02', endDate: '2026-11-01' },
+          now,
+        ),
+      ).rejects.toThrow('startDate');
+    });
+  });
+
+  describe('getMonthly (period)', () => {
+    it('davr oylari va chegarasi', async () => {
+      const out = await service.getMonthly(
+        admin,
+        6,
+        new Date('2026-11-02T08:00:00.000Z'),
+        { startDate: '2026-09-15', endDate: '2026-10-31' },
+      );
+      expect(out.map((p) => p.month)).toEqual(['2026-09', '2026-10']);
+      expect(repo.patientsPerDay).toHaveBeenCalledWith({
+        AND: [
+          ND,
+          { createdAt: { gte: d('2026-09-15'), lte: d('2026-10-31') } },
+        ],
+      });
+    });
+  });
+
+  describe('getSources (period)', () => {
+    it('davr berilsa qabullar sana bo‘yicha filtrlanadi', async () => {
+      await service.getSources(admin, 'bookings', {
+        startDate: '2026-10-01',
+        endDate: '2026-10-31',
+      });
+      expect(repo.bookingsBySource).toHaveBeenCalledWith({
+        date: { gte: d('2026-10-01'), lte: d('2026-10-31') },
+      });
     });
   });
 

@@ -72,6 +72,7 @@ model Patient {
   payments      Payment[]
   notifications Notification[]
   comments      PatientComment[]
+  prescriptions Prescription[]
 
   @@index([createdAt])
   @@index([phone])
@@ -93,6 +94,7 @@ model Doctor {
 
   bookings      Booking[]
   visits        Visit[]
+  prescriptions Prescription[]
   notifications Notification[]
   user          User?          @relation(fields: [userId], references: [id])
   userId        String?        @unique @map("user_id")
@@ -117,23 +119,32 @@ model Service {
 }
 
 model Booking {
-  id             String    @id @default(cuid())
-  patientId      String    @map("patient_id")
-  doctorId       String    @map("doctor_id")
-  date           DateTime  @db.Date
-  time           String
-  source         String
-  status         String
-  notes          String    @default("")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Date
-  serviceId      String?   @map("service_id")
-  reminderSentAt DateTime? @map("reminder_sent_at")
+  id                    String    @id @default(cuid())
+  patientId             String    @map("patient_id")
+  doctorId              String    @map("doctor_id")
+  date                  DateTime  @db.Date
+  time                  String
+  source                String
+  status                String
+  notes                 String    @default("")
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Date
+  serviceId             String?   @map("service_id")
+  reminderSentAt        DateTime? @map("reminder_sent_at")
+  /// Patient's 1..5 rating from the Telegram "completed" message.
+  feedbackRating        Int?      @map("feedback_rating")
+  feedbackAt            DateTime? @map("feedback_at")
+  /// Scheduled Telegram reminders (24h / 2h before) and the patient's answers.
+  reminder24SentAt      DateTime? @map("reminder_24_sent_at")
+  reminder2SentAt       DateTime? @map("reminder_2_sent_at")
+  patientConfirmedAt    DateTime? @map("patient_confirmed_at")
+  rescheduleRequestedAt DateTime? @map("reschedule_requested_at")
 
   patient Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
   doctor  Doctor   @relation(fields: [doctorId], references: [id], onDelete: Restrict)
   service Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
 
-  visits Visit[]
+  visits     Visit[]
+  statusLogs BookingStatusLog[]
 
   @@index([patientId])
   @@index([doctorId])
@@ -142,6 +153,24 @@ model Booking {
   @@index([date, status])
   @@index([doctorId, date])
   @@map("bookings")
+}
+
+/// Who changed a booking's status, when, and why (cancel reason).
+model BookingStatusLog {
+  id            String   @id @default(cuid())
+  bookingId     String   @map("booking_id")
+  fromStatus    String   @map("from_status")
+  toStatus      String   @map("to_status")
+  reason        String?
+  changedById   String?  @map("changed_by_id")
+  /// Snapshot, so the log stays readable if the user is renamed/deleted.
+  changedByName String   @map("changed_by_name")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId, createdAt])
+  @@map("booking_status_logs")
 }
 
 model Visit {
@@ -156,10 +185,11 @@ model Visit {
   treatment String   @default("")
   notes     String   @default("")
 
-  patient  Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctor   Doctor    @relation(fields: [doctorId], references: [id], onDelete: Restrict)
-  booking  Booking?  @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  payments Payment[]
+  patient       Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor        Doctor         @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  booking       Booking?       @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  payments      Payment[]
+  prescriptions Prescription[]
 
   @@index([patientId])
   @@index([doctorId])
@@ -225,20 +255,50 @@ model Notification {
   @@map("notifications")
 }
 
+/// Outgoing Telegram message queue + delivery history (outbox).
+/// status: pending (queued / waiting for retry) | sent | failed (gave up)
+model NotificationLog {
+  id            String    @id @default(cuid())
+  channel       String    @default("telegram")
+  /// lead_group | lead_status_group | patient_booking | patient_status | reminder ...
+  kind          String
+  chatId        String    @map("chat_id")
+  text          String
+  /// Telegram `reply_markup` (inline keyboard) as sent.
+  replyMarkup   Json?     @map("reply_markup")
+  status        String    @default("pending")
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at")
+  lastError     String?   @map("last_error")
+  leadId        String?   @map("lead_id")
+  patientId     String?   @map("patient_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  sentAt        DateTime? @map("sent_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([createdAt])
+  @@map("notification_logs")
+}
+
 model Lead {
-  id        String   @id @default(cuid())
-  name      String
-  phone     String
-  service   String?
-  message   String?
-  status    String   @default("new") // new, contacted, consultation, proposal, converted, cancelled
-  source    String   @default("telegram_bot")
-  notes     String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String   @id @default(cuid())
+  name        String
+  phone       String
+  service     String?
+  message     String?
+  status      String   @default("new") // new, contacted, consultation, proposal, converted, cancelled
+  source      String   @default("telegram_bot")
+  notes       String?
+  /// Preferred doctor (free text from the website form).
+  doctor      String?
+  /// Preferred visit, "YYYY-MM-DD" or "YYYY-MM-DD HH:mm" (Asia/Tashkent).
+  preferredAt String?  @map("preferred_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@index([status])
   @@index([createdAt])
+  @@index([phone, createdAt])
   @@map("leads")
 }
 
@@ -255,4 +315,46 @@ model ClinicSettings {
   updatedAt                DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("clinic_settings")
+}
+
+/// Electronic prescription. The pharmacy finds it by `code` (or patient phone)
+/// and marks it dispensed. status: issued | dispensed | cancelled
+model Prescription {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  patientId   String    @map("patient_id")
+  doctorId    String    @map("doctor_id")
+  visitId     String?   @map("visit_id")
+  status      String    @default("issued")
+  notes       String    @default("")
+  validUntil  DateTime  @map("valid_until") @db.Date
+  createdAt   DateTime  @default(now()) @map("created_at")
+  dispensedAt DateTime? @map("dispensed_at")
+  dispensedBy String?   @map("dispensed_by")
+
+  patient Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor  Doctor             @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  visit   Visit?             @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  items   PrescriptionItem[]
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([status])
+  @@map("prescriptions")
+}
+
+model PrescriptionItem {
+  id             String @id @default(cuid())
+  prescriptionId String @map("prescription_id")
+  name           String
+  dosage         String @default("")
+  frequency      String @default("")
+  duration       String @default("")
+  quantity       String @default("")
+  instructions   String @default("")
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+
+  @@index([prescriptionId])
+  @@map("prescription_items")
 }

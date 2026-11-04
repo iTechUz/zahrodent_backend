@@ -33,6 +33,16 @@ export class CreateLeadDto {
   @IsString()
   service?: string;
 
+  @ApiProperty({ example: 'Dr. Karimov', required: false })
+  @IsOptional()
+  @IsString()
+  doctor?: string;
+
+  @ApiProperty({ example: '2026-11-02 10:00', required: false })
+  @IsOptional()
+  @IsString()
+  preferredAt?: string;
+
   @ApiProperty({ example: 'Bot orqali kelgan xabar', required: false })
   @IsOptional()
   @IsString()

@@ -1,9 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { LeadsRepository } from './leads.repository';
 import { CreateLeadDto } from './dto/create-lead.dto';
 import { UpdateLeadDto } from './dto/update-lead.dto';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
-import { Prisma } from '@prisma/client';
+import { Lead, Prisma } from '@prisma/client';
+import { ClientNotifierService } from '../notifications/client-notifier.service';
+import { NotificationLogService } from '../notifications/notification-log.service';
+import { normalizeUzPhone } from '../common/utils/phone.util';
 import { LeadsQueryDto } from './dto/leads-query.dto';
 import { orderByOption } from '../common/dto/pagination.dto';
 import {
@@ -12,19 +15,118 @@ import {
   todayInTashkent,
 } from '../common/utils/date.util';
 
+/** Sources announced in the staff group (CRM-entered leads are not). */
+const NOTIFIED_SOURCES = ['website', 'telegram_bot'];
+
+/** Public/bot leads with the same phone inside this window are one lead. */
+export const LEAD_DEDUPE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const SOURCE_LABELS: Record<string, string> = {
+  website: 'Sayt',
+  telegram_bot: 'Telegram bot',
+};
+
+/** One line, no control chars, no @-mentions, length-capped (plain text only). */
+function clean(v: string | null | undefined, max: number): string {
+  const t = (v ?? '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/@/g, '@\u200b')
+    .trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+function tashkentTime(d: Date): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Tashkent',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+    .format(d)
+    .replace(/\//g, '.')
+    .replace(',', '');
+}
+
+/**
+ * Plain text on purpose (no parse_mode): visitor input can't inject
+ * markup/links through Telegram's HTML/Markdown parsers.
+ */
+export function formatLeadMessage(lead: Lead): string {
+  const lines = [
+    '🆕 Yangi murojaat',
+    `👤 ${clean(lead.name, 100)}`,
+    `📞 ${clean(lead.phone, 30)}`,
+  ];
+  if (lead.doctor) lines.push(`👨‍⚕️ ${clean(lead.doctor, 100)}`);
+  if (lead.preferredAt) lines.push(`📅 ${clean(lead.preferredAt, 30)}`);
+  if (lead.service) lines.push(`🦷 ${clean(lead.service, 100)}`);
+  if (lead.message) lines.push(`💬 ${clean(lead.message, 500)}`);
+  lines.push(
+    `📍 ${SOURCE_LABELS[lead.source] ?? clean(lead.source, 40)}`,
+    `🕒 ${tashkentTime(lead.createdAt ?? new Date())} (Toshkent)`,
+  );
+  return lines.join('\n');
+}
+
 @Injectable()
 export class LeadsService {
+  private readonly logger = new Logger(LeadsService.name);
+
   constructor(
     private readonly leadsRepository: LeadsRepository,
     private readonly notificationsGateway: NotificationsGateway,
+    private readonly outbox: NotificationLogService,
+    private readonly clientNotifier: ClientNotifierService,
   ) {}
 
   async create(dto: CreateLeadDto) {
-    const lead = await this.leadsRepository.create(
-      dto as Prisma.LeadCreateInput,
-    );
+    // Canonical +998XXXXXXXXX when it is an Uzbek number (CRM may hold others).
+    const phone = normalizeUzPhone(dto.phone) ?? dto.phone.trim();
+    const automated = NOTIFIED_SOURCES.includes(dto.source ?? '');
+    if (automated) {
+      const dup = await this.leadsRepository.findOpenByPhoneSince(
+        phone,
+        new Date(Date.now() - LEAD_DEDUPE_WINDOW_MS),
+      );
+      // Same person re-submitting: keep one lead, no second staff ping.
+      if (dup) return dup;
+    }
+    const lead = await this.leadsRepository.create({
+      ...dto,
+      phone,
+    } as Prisma.LeadCreateInput);
     this.notificationsGateway.sendNewLead(lead);
+    // Fire-and-forget: a Telegram problem must never fail lead creation.
+    void this.notifyLeadsChat(lead);
+    // Website visitors have no bot chat yet: Telegram if linked, else SMS + deep link.
+    if (lead.source === 'website')
+      void this.clientNotifier.notifyLeadReceived(lead);
     return lead;
+  }
+
+  /**
+   * Queues a new website/bot lead for TELEGRAM_LEADS_CHAT_ID (off when unset).
+   * The outbox logs the attempt and retries on Telegram failures.
+   */
+  private async notifyLeadsChat(lead: Lead): Promise<void> {
+    try {
+      const chatId = process.env.TELEGRAM_LEADS_CHAT_ID?.trim();
+      if (!chatId || !NOTIFIED_SOURCES.includes(lead.source)) return;
+      await this.outbox.enqueue({
+        kind: 'lead_group',
+        chatId,
+        text: formatLeadMessage(lead),
+        leadId: lead.id,
+      });
+    } catch (e) {
+      this.logger.warn(
+        `Lead Telegram guruhiga yuborilmadi: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
 
   async findAll(query: LeadsQueryDto) {

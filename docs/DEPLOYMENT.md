@@ -305,7 +305,15 @@ Oyiga kamida bir marta restore'ni alohida bazaga sinab ko'ring.
 
 ## 11. Monitoring va xizmat ko'rsatish
 
-- Uptime monitor (UptimeRobot, Better Stack…) → `https://api.<domen>/health` (liveness) va `/health/deps` (DB).
+- Uptime monitor (UptimeRobot, Better Stack…) → `https://api.<domen>/health` (liveness) va `/health/deps`
+  (DB down → **503**; javobda `telegram`: `ok`/`down`/`disabled`; bot `down` bo'lsa 200 + `status:"degraded"`).
+- **Avtomatik monitor** (`.github/workflows/uptime.yml` + `scripts/uptime-monitor.sh`, har 5 daqiqa): sayt, API
+  `/health/deps` va bot holatini tekshiradi; ketma-ket 2 xatodan keyin Telegramga `🔴 …`, tiklanganda `🟢 …` (faqat
+  holat o'zgarganda). Sozlash: repo → Settings → Secrets and variables → Actions:
+  variables `SITE_URL` (frontend public URL), `API_URL` (`https://api.<domen>`, oxirida `/`siz);
+  secrets `TG_ALERT_BOT_TOKEN`, `TG_ALERT_CHAT_ID` (admin chat). O'chirish: Actions → Uptime monitor → Disable.
+  Qo'lda sinash: `SITE_URL=… API_URL=… ./scripts/uptime-monitor.sh` (token bo'lmasa faqat konsolga chiqaradi).
+- Lidlar guruhi: `.env` da `TELEGRAM_LEADS_CHAT_ID` (README → Telegram bot, 5-band).
 - Konteyner holati: `docker ps`, `docker inspect --format '{{.State.Health.Status}}' zahrodent_backend`.
 - Loglar: `docker logs -f --tail 200 zahrodent_backend`; production'da har qator JSON —
   `docker logs zahrodent_backend 2>&1 | jq -c 'select(.level=="error")'`, bitta so'rov: `grep '<requestId>'`.

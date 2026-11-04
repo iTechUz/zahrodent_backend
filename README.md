@@ -175,6 +175,7 @@ Namuna fayllar: [.env.example](.env.example) (dev) va [.env.production.example](
 | `ESKIZ_HTTP_TIMEOUT_MS` | yo'q | `8000` | Eskiz HTTP timeout (ms) | `8000` |
 | `TELEGRAM_BOT_TOKEN` | bot uchun | — | @BotFather tokeni; bo'sh — bot o'chiq | `123456:AA…` |
 | `TELEGRAM_BOT_ENABLED` | yo'q | `true` | `false` — shu instansiyada polling qilmaslik | `true` |
+| `TELEGRAM_LEADS_CHAT_ID` | yo'q | — | Sayt/bot yangi lidlari yuboriladigan xodimlar guruhi chat id; bo'sh — o'chiq | `-1001234567890` |
 
 Ro'yxat koddagi barcha `process.env.*` bilan solishtirilgan (`grep -rhoE "process\.env\.[A-Z_]+" src prisma`).
 
@@ -272,7 +273,12 @@ POST /auth/logout {refresh_token} → { success: true }   (idempotent)
 4. Foydalanuvchi **o'z** kontaktini yuborsa (`contact.user_id === from.id`), raqam `+998XXXXXXXXX` ko'rinishiga
    keltiriladi va shu telefonli (o'chirilmagan) bemor kartalariga `telegram_chat_id` yoziladi — bemor javobida
    `telegramConnected: true`.
-5. Eslatmalar: `telegram_chat_id` bor va bot shu jarayonda ishlayotgan bo'lsa — Telegram orqali
+5. **Yangi lidlar guruhga**: `TELEGRAM_LEADS_CHAT_ID` berilsa, saytdan (`website`) va botdan (`telegram_bot`) kelgan
+   har yangi lid shu guruhga yuboriladi (ism, telefon, xizmat/izoh, manba, vaqt — Toshkent). Botni guruhga qo'shing,
+   guruh id sini oling (`/getUpdates` yoki @RawDataBot). Xabar oddiy matn (parse_mode yo'q); yuborish xatosi lid
+   saqlanishiga ta'sir qilmaydi (faqat `warn` log). **Guruhda faqat klinika xodimlari bo'lsin** — bemor ismi/telefoni
+   shaxsiy ma'lumot. O'chirish: o'zgaruvchini bo'shatib konteynerni qayta yarating.
+6. Eslatmalar: `telegram_chat_id` bor va bot shu jarayonda ishlayotgan bo'lsa — Telegram orqali
    (`telegramReminderTemplate`), aks holda Eskiz SMS (`smsReminderTemplate`). Yuborilmaganlar `failed` bo'lib
    yoziladi va keyingi ishga tushirishda qayta uriniladi.
 
@@ -306,7 +312,7 @@ Kerakli GitHub secrets: `DOCKERHUB_TOKEN`, `SSH_PRIVATE_KEY`. Batafsil, birinchi
 | Endpoint | Auth | Javob | Maqsad |
 |---|---|---|---|
 | `GET /health` | yo'q | `{"status":"ok","timestamp":"…"}` | Liveness — DB ga murojaat qilmaydi (Docker HEALTHCHECK) |
-| `GET /health/deps` | yo'q | `{"status":"ok"\|"degraded","db":"ok"\|"down","timestamp","latencyMs"}` | Readiness / monitoring — `SELECT 1` |
+| `GET /health/deps` | yo'q | `{"status":"ok"\|"degraded","db":"ok"\|"down","telegram":"ok"\|"down"\|"disabled","timestamp","latencyMs"}` | Readiness / monitoring — `SELECT 1` + bot `getMe` (60s kesh). **DB down → HTTP 503**; bot down → 200 + `degraded` (Docker HEALTHCHECK faqat `/health`, bot tufayli konteyner restart bo'lmaydi) |
 
 ```bash
 curl -fsS http://127.0.0.1:7878/health

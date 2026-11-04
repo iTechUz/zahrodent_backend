@@ -1,16 +1,16 @@
 services:
   db:
     image: postgres:15-alpine
-    container_name: zahro_db
+    container_name: zahro_dental_dev
     restart: always
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: zahro_dental
+      POSTGRES_DB: zahro_dental_dev
       TZ: Asia/Tashkent
     ports:
       # Only reachable from the host itself — never expose Postgres publicly.
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5436:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,32 +19,32 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - backend
+      - zahro_dev_network
 
   api:
-    image: 10449/zahrodent_backend:${IMAGE_TAG:-latest}
+    image: 10449/zahrodent_backend_dev:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nest_api
+    container_name: nest_api_dev
     restart: always
     ports:
-      - "7878:7878"
+      - "7879:7879"
     environment:
-      - PORT=7878
+      - PORT=7879
       - TZ=Asia/Tashkent
       # Docker tarmog'ida db xostiga ulanish uchun (localhost emas)
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/zahro_dental?schema=public
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/zahro_dental_dev?schema=public
     env_file:
       - .env
     depends_on:
       db:
         condition: service_healthy
     networks:
-      - backend
+      - zahro_dev_network
 
 networks:
-  backend:
+  zahro_dev_network:
 
 volumes:
   pgdata:

@@ -8,7 +8,12 @@ import {
   Matches,
 } from 'class-validator';
 
-export const USER_ROLES = ['admin', 'doctor', 'receptionist'] as const;
+export const USER_ROLES = [
+  'admin',
+  'doctor',
+  'receptionist',
+  'pharmacist',
+] as const;
 
 export class CreateUserDto {
   @ApiProperty({ example: 'Shokir Xodjayev' })
@@ -31,7 +36,8 @@ export class CreateUserDto {
 
   @ApiProperty({ example: 'receptionist', enum: USER_ROLES })
   @IsIn(USER_ROLES, {
-    message: "role faqat admin, doctor yoki receptionist bo'lishi mumkin",
+    message:
+      "role faqat admin, doctor, receptionist yoki pharmacist bo'lishi mumkin",
   })
   role: (typeof USER_ROLES)[number];
 

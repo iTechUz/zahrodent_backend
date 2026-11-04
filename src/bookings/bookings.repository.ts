@@ -12,6 +12,14 @@ export type BookingWithPatient = Booking & {
   patient?: PatientSummaryRow | null;
 };
 
+/**
+ * Skips orphan rows (patient_id without a patients row): one of them would
+ * otherwise fail the whole list with Prisma's "Inconsistent query result".
+ */
+const HAS_PATIENT_ROW: Prisma.BookingWhereInput = {
+  patient: { is: { id: { not: '' } } },
+};
+
 @Injectable()
 export class BookingsRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -24,21 +32,26 @@ export class BookingsRepository {
       orderBy?: Prisma.BookingOrderByWithRelationInput[];
     },
   ): Promise<{ data: BookingWithPatient[]; total: number }> {
+    const listWhere: Prisma.BookingWhereInput = {
+      AND: [where ?? {}, HAS_PATIENT_ROW],
+    };
     const [data, total] = await Promise.all([
       this.prisma.booking.findMany({
-        where,
+        where: listWhere,
         include: WITH_PATIENT_SUMMARY,
         orderBy: opts?.orderBy ?? [{ date: 'desc' }, { time: 'desc' }],
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
-      this.prisma.booking.count({ where }),
+      this.prisma.booking.count({ where: listWhere }),
     ]);
     return { data, total };
   }
 
   count(where?: Prisma.BookingWhereInput): Promise<number> {
-    return this.prisma.booking.count({ where });
+    return this.prisma.booking.count({
+      where: { AND: [where ?? {}, HAS_PATIENT_ROW] },
+    });
   }
 
   markReminderSent(bookingIds: string[], at: Date): Promise<void> {
@@ -52,8 +65,8 @@ export class BookingsRepository {
   }
 
   findById(id: string): Promise<BookingWithPatient | null> {
-    return this.prisma.booking.findUnique({
-      where: { id },
+    return this.prisma.booking.findFirst({
+      where: { id, ...HAS_PATIENT_ROW },
       include: WITH_PATIENT_SUMMARY,
     });
   }

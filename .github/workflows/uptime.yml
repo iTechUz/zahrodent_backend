@@ -1,0 +1,48 @@
+name: Uptime monitor
+
+# Every 5 min: public site + API /health/deps (DB) + Telegram bot state.
+# Telegram alert only on state change (🔴 after 2 failures in a row, 🟢 on
+# recovery). Disable = turn this workflow off in the Actions tab.
+# Needs repo variables SITE_URL, API_URL and secrets TG_ALERT_BOT_TOKEN,
+# TG_ALERT_CHAT_ID (see docs/DEPLOYMENT.md §11). GitHub cron may be delayed a
+# few minutes under load — it is best-effort.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: uptime-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      # State (failure counters / "already alerted" flags) lives in the Actions
+      # cache: each run restores the newest entry and saves a new one.
+      - name: Restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: .uptime-state
+          key: uptime-state-none
+          restore-keys: uptime-state-
+      - name: Check
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+          API_URL: ${{ vars.API_URL }}
+          TG_ALERT_BOT_TOKEN: ${{ secrets.TG_ALERT_BOT_TOKEN }}
+          TG_ALERT_CHAT_ID: ${{ secrets.TG_ALERT_CHAT_ID }}
+        run: ./scripts/uptime-monitor.sh
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .uptime-state
+          key: uptime-state-${{ github.run_id }}-${{ github.run_attempt }}

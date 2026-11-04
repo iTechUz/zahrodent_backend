@@ -122,9 +122,9 @@ export class PatientsService {
       lastName: dto.lastName,
       age: dto.age,
       phone: dto.phone,
-      source: dto.source,
+      source: dto.source ?? 'walk-in',
       notes: dto.notes ?? '',
-      address: dto.address,
+      address: dto.address ?? '',
       workplace: dto.workplace,
       assignedDoctor: dto.assignedDoctorId
         ? { connect: { id: dto.assignedDoctorId } }

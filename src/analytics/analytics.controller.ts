@@ -14,12 +14,14 @@ import { ROLES_STAFF } from '../common/constants/role-groups';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { AuthUserView } from '../auth/auth.service';
 import {
+  DailyQueryDto,
   DashboardQueryDto,
   MonthlyQueryDto,
   SourcesQueryDto,
 } from './dto/analytics-query.dto';
 import {
   DashboardResponseDto,
+  DailyPointDto,
   MonthlyPointDto,
   SourcePointDto,
 } from './dto/analytics-response.dto';
@@ -46,7 +48,10 @@ export class AnalyticsController {
     @Query() query: DashboardQueryDto,
     @GetUser() user: AuthUserView,
   ) {
-    return this.analyticsService.getDashboard(user, query.date);
+    return this.analyticsService.getDashboard(user, query.date, {
+      startDate: query.startDate,
+      endDate: query.endDate,
+    });
   }
 
   @Get('monthly')
@@ -57,7 +62,26 @@ export class AnalyticsController {
   })
   @ApiOkResponse({ type: MonthlyPointDto, isArray: true })
   getMonthly(@Query() query: MonthlyQueryDto, @GetUser() user: AuthUserView) {
-    return this.analyticsService.getMonthly(user, query.months ?? 6);
+    return this.analyticsService.getMonthly(
+      user,
+      query.months ?? 6,
+      undefined,
+      { startDate: query.startDate, endDate: query.endDate },
+    );
+  }
+
+  @Get('daily')
+  @ApiOperation({
+    summary: 'Kunlik dinamika (startDate–endDate, bo‘sh kunlar ham)',
+    description:
+      'Standart: shu oyning boshidan bugungacha. Ko‘pi bilan 92 kun. doctor — o‘z bemorlari/qabullari. revenue/expenses faqat admin uchun, qolganlarga null.',
+  })
+  @ApiOkResponse({ type: DailyPointDto, isArray: true })
+  getDaily(@Query() query: DailyQueryDto, @GetUser() user: AuthUserView) {
+    return this.analyticsService.getDaily(user, {
+      startDate: query.startDate,
+      endDate: query.endDate,
+    });
   }
 
   @Get('sources')
@@ -68,6 +92,9 @@ export class AnalyticsController {
   })
   @ApiOkResponse({ type: SourcePointDto, isArray: true })
   getSources(@Query() query: SourcesQueryDto, @GetUser() user: AuthUserView) {
-    return this.analyticsService.getSources(user, query.type ?? 'bookings');
+    return this.analyticsService.getSources(user, query.type ?? 'bookings', {
+      startDate: query.startDate,
+      endDate: query.endDate,
+    });
   }
 }

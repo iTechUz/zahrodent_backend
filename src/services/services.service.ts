@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { dateOnlyColumnRange } from '../common/utils/date.util';
 import { Prisma, Service } from '@prisma/client';
 import { ServicesRepository } from './services.repository';
 import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
@@ -75,11 +76,13 @@ export class ServicesService {
     return { id };
   }
 
-  async getStats() {
+  async getStats(period: { startDate?: string; endDate?: string } = {}) {
     const totalCount = await this.servicesRepository.count();
     const categoriesCount = await this.servicesRepository.countCategories();
     const avgPrice = await this.servicesRepository.getAvgPrice();
-    const detailed = await this.servicesRepository.getDetailedStats();
+    const detailed = await this.servicesRepository.getDetailedStats(
+      dateOnlyColumnRange(period.startDate, period.endDate),
+    );
 
     return {
       totalCount,

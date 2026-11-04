@@ -566,6 +566,38 @@ describe('BookingsService', () => {
     });
   });
 
+  describe('update — status log', () => {
+    it('status really changed → onChanged with actor and reason', async () => {
+      const statusService = {
+        onChanged: jest.fn().mockResolvedValue(undefined),
+      };
+      const svc = new BookingsService(repo as never, statusService as never);
+      repo.findById.mockResolvedValue(booking());
+      await svc.update(
+        'b1',
+        { status: 'cancelled', statusReason: 'Bemor so‘radi' },
+        user,
+      );
+      expect(statusService.onChanged).toHaveBeenCalledWith({
+        bookingId: 'b1',
+        from: 'pending',
+        to: 'cancelled',
+        reason: 'Bemor so‘radi',
+        actor: { id: 'u1', name: 'Test' },
+      });
+      expect(repo.update.mock.calls[0][1]).not.toHaveProperty('statusReason');
+    });
+
+    it('same status / no status → no log', async () => {
+      const statusService = { onChanged: jest.fn() };
+      const svc = new BookingsService(repo as never, statusService as never);
+      repo.findById.mockResolvedValue(booking());
+      await svc.update('b1', { status: 'pending' }, user);
+      await svc.update('b1', { notes: 'x' }, user);
+      expect(statusService.onChanged).not.toHaveBeenCalled();
+    });
+  });
+
   describe('update', () => {
     it('topilmasa 404', async () => {
       repo.findById.mockResolvedValue(null);

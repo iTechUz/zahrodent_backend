@@ -17,7 +17,7 @@ const ctorArgs: string[] = [];
 
 jest.mock('telegraf', () => {
   class FakeTelegraf {
-    telegram = { sendMessage: jest.fn() };
+    telegram = { sendMessage: jest.fn(), getMe: jest.fn() };
     constructor(token: string) {
       ctorArgs.push(token);
     }
@@ -123,6 +123,45 @@ describe('TelegramService', () => {
     expect(launch).not.toHaveBeenCalled();
     service.onModuleDestroy();
     expect(stop).not.toHaveBeenCalled();
+  });
+
+  describe('bot holati (health)', () => {
+    beforeEach(() => {
+      process.env.TELEGRAM_BOT_TOKEN = 'TEST_TOKEN';
+    });
+    const tick = () => new Promise((r) => setImmediate(r));
+
+    it('launch xatosi (409) — down', async () => {
+      launch.mockRejectedValue(new Error('409: Conflict'));
+      service.onModuleInit();
+      await tick();
+      await expect(registry.health()).resolves.toBe('down');
+    });
+
+    it('polling o‘zi to‘xtasa — down', async () => {
+      launch.mockResolvedValue(undefined);
+      service.onModuleInit();
+      await tick();
+      await expect(registry.health()).resolves.toBe('down');
+    });
+
+    it('normal ishlaganda ok; shutdown down bermaydi', async () => {
+      let end!: () => void;
+      launch.mockReturnValue(new Promise<void>((r) => (end = r)));
+      service.onModuleInit();
+      await tick();
+      await expect(registry.health()).resolves.toBe('ok');
+      service.onModuleDestroy();
+      end();
+      await tick();
+      await expect(registry.health()).resolves.toBe('disabled');
+    });
+
+    it('token yo‘q — disabled', async () => {
+      delete process.env.TELEGRAM_BOT_TOKEN;
+      service.onModuleInit();
+      await expect(registry.health()).resolves.toBe('disabled');
+    });
   });
 
   describe('token bor', () => {

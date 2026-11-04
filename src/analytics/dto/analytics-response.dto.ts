@@ -4,7 +4,10 @@ export class DashboardResponseDto {
   @ApiProperty({ example: 120, description: 'doctor uchun — o‘z bemorlari' })
   totalPatients: number;
 
-  @ApiProperty({ example: 14, description: '`date` joylashgan oy' })
+  @ApiProperty({
+    example: 14,
+    description: '`date` joylashgan oy (yoki startDate–endDate davri)',
+  })
   newPatientsThisMonth: number;
 
   @ApiProperty({ example: 9, description: '`date` kunidagi qabullar' })
@@ -82,4 +85,24 @@ export class SourcePointDto {
 
   @ApiProperty({ example: 25 })
   count: number;
+}
+
+export class DailyPointDto {
+  @ApiProperty({ example: '2026-10-15' })
+  date: string;
+
+  @ApiProperty({ example: 2 })
+  newPatients: number;
+
+  @ApiProperty({ example: 6 })
+  bookings: number;
+
+  @ApiProperty({ example: 4 })
+  completedBookings: number;
+
+  @ApiProperty({ type: Number, nullable: true, example: 1500000 })
+  revenue: number | null;
+
+  @ApiProperty({ type: Number, nullable: true, example: 300000 })
+  expenses: number | null;
 }

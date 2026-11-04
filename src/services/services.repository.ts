@@ -56,18 +56,20 @@ export class ServicesRepository {
     return this.prisma.service.update({ where: { id }, data });
   }
 
-  async getDetailedStats() {
+  /** `range` limits payments by their date (inclusive); omitted → all time. */
+  async getDetailedStats(range?: { gte?: Date; lte?: Date }) {
+    const dateWhere = range && (range.gte || range.lte) ? { date: range } : {};
     // Actually, Payment has serviceId.
     const paymentStats = await this.prisma.payment.groupBy({
       by: ['serviceId'],
-      where: { status: 'paid', serviceId: { not: null } },
+      where: { status: 'paid', serviceId: { not: null }, ...dateWhere },
       _sum: { amount: true },
       _count: { patientId: true }, // Total payments
     });
 
     const patientStatsRaw = await this.prisma.payment.groupBy({
       by: ['serviceId', 'patientId'],
-      where: { serviceId: { not: null } },
+      where: { serviceId: { not: null }, ...dateWhere },
     });
 
     // Manual aggregation due to prisma groupBy limitations on unique count
