@@ -214,6 +214,13 @@ jobs:
           # shellcheck disable=SC2029 # qiymatlar runner'da ochiladi (ataylab)
           ssh server "docker run --rm --network '$NETWORK' --env-file '$ENV_FILE' '$IMAGE' node_modules/prisma/build/index.js migrate deploy"
 
+      # "No pending migrations" faqat _prisma_migrations'ga qaraydi. Haqiqiy sxema
+      # schema.prisma bilan farq qilsa (exit 2) deploy to'xtaydi.
+      - name: Verify database schema
+        run: |
+          # shellcheck disable=SC2029 # qiymatlar runner'da ochiladi (ataylab)
+          ssh server "docker run --rm --network '$NETWORK' --env-file '$ENV_FILE' '$IMAGE' node_modules/prisma/build/index.js migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --exit-code --script"
+
   deploy:
     name: Deploy
     needs: migrate
