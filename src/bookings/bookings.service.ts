@@ -28,6 +28,12 @@ import { BookingStatusService } from './booking-status.service';
 
 /** Statuses that occupy the doctor's time slot. */
 export const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed'];
+/**
+ * Statuses that block the doctor's slot for conflict checks: the active ones
+ * plus 'arrived' (patient in the chair). Reminders keep using
+ * ACTIVE_BOOKING_STATUSES so arrived patients are not reminded.
+ */
+export const SLOT_OCCUPYING_STATUSES = [...ACTIVE_BOOKING_STATUSES, 'arrived'];
 const DEFAULT_DURATION_MIN = 30;
 
 export const BOOKING_NOT_FOUND = 'Qabul topilmadi';
@@ -117,7 +123,7 @@ export class BookingsService {
       dto.doctorId,
       dto.date,
       async (tx) => {
-        if (ACTIVE_BOOKING_STATUSES.includes(dto.status)) {
+        if (SLOT_OCCUPYING_STATUSES.includes(dto.status)) {
           await this.checkConflicts(tx, {
             doctorId: dto.doctorId,
             date: dto.date,
@@ -165,10 +171,10 @@ export class BookingsService {
       next.serviceId !== current.serviceId;
     // e.g. cancelled → pending: the slot may have been taken meanwhile.
     const reactivated =
-      !ACTIVE_BOOKING_STATUSES.includes(current.status) &&
-      ACTIVE_BOOKING_STATUSES.includes(next.status);
+      !SLOT_OCCUPYING_STATUSES.includes(current.status) &&
+      SLOT_OCCUPYING_STATUSES.includes(next.status);
     const mustCheck =
-      ACTIVE_BOOKING_STATUSES.includes(next.status) &&
+      SLOT_OCCUPYING_STATUSES.includes(next.status) &&
       (slotChanged || reactivated);
 
     const data: Prisma.BookingUpdateInput = {
@@ -192,6 +198,18 @@ export class BookingsService {
             ? { connect: { id: dto.serviceId } }
             : { disconnect: true },
     };
+
+    // Moved to another day/time/doctor: reminders and confirmations are stale.
+    if (
+      next.doctorId !== current.doctorId ||
+      next.date !== toDateOnlyString(current.date) ||
+      next.time !== current.time
+    ) {
+      data.reminder24SentAt = null;
+      data.reminder2SentAt = null;
+      data.patientConfirmedAt = null;
+      data.rescheduleRequestedAt = null;
+    }
 
     if (!mustCheck) {
       const b = await this.bookingsRepository.update(id, data);
@@ -359,7 +377,7 @@ export class BookingsService {
         doctorId: args.doctorId,
         date: parseDateOnlyToUTC(args.date),
         id: args.excludeId ? { not: args.excludeId } : undefined,
-        status: { in: ACTIVE_BOOKING_STATUSES },
+        status: { in: SLOT_OCCUPYING_STATUSES },
       },
       db,
     );

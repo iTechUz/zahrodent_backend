@@ -105,7 +105,11 @@ export class AnalyticsService {
         status: 'completed',
       }),
       this.repo.countBookings({ ...scope.bookings, status: 'pending' }),
-      this.repo.countDoctors({ bookings: { some: { date: day } } }),
+      this.repo.countDoctors({
+        bookings: {
+          some: { date: day, status: { notIn: ['cancelled', 'no-show'] } },
+        },
+      }),
       this.repo.countDoctors(),
     ]);
 

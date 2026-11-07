@@ -140,7 +140,12 @@ describe('AnalyticsService', () => {
         status: 'pending',
       });
       expect(repo.countDoctors).toHaveBeenNthCalledWith(1, {
-        bookings: { some: { date: d('2026-09-15') } },
+        bookings: {
+          some: {
+            date: d('2026-09-15'),
+            status: { notIn: ['cancelled', 'no-show'] },
+          },
+        },
       });
       expect(repo.sumPayments).toHaveBeenNthCalledWith(1, {
         type: 'INCOME',

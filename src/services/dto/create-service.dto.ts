@@ -1,4 +1,11 @@
-import { IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateServiceDto {
@@ -13,6 +20,7 @@ export class CreateServiceDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(2_000_000_000, { message: 'Summa 2 000 000 000 dan oshmasligi kerak' })
   price: number;
 
   @Type(() => Number)

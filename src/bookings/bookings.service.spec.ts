@@ -4,7 +4,11 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { BookingsService } from './bookings.service';
+import {
+  ACTIVE_BOOKING_STATUSES,
+  BookingsService,
+  SLOT_OCCUPYING_STATUSES,
+} from './bookings.service';
 import { BookingsRepository } from './bookings.repository';
 import type { AuthUserView } from '../auth/auth.service';
 
@@ -365,7 +369,7 @@ describe('BookingsService', () => {
           doctorId: 'd1',
           date: new Date('2026-06-10T00:00:00.000Z'),
           id: undefined,
-          status: { in: ['pending', 'confirmed'] },
+          status: { in: ['pending', 'confirmed', 'arrived'] },
         },
         'tx',
       );
@@ -630,6 +634,38 @@ describe('BookingsService', () => {
       });
     });
 
+    it.each([
+      ['time', { time: '11:00' }],
+      ['date', { date: '2026-06-11' }],
+      ['doctorId', { doctorId: 'd2' }],
+    ])(
+      '%s o‘zgarsa — eslatma/tasdiq maydonlari tozalanadi',
+      async (_n, dto) => {
+        repo.findById.mockResolvedValue(booking());
+        repo.findManyWithService.mockResolvedValue([]);
+        await service.update('b1', dto as any, user);
+        expect(repo.update.mock.calls[0][1]).toMatchObject({
+          reminder24SentAt: null,
+          reminder2SentAt: null,
+          patientConfirmedAt: null,
+          rescheduleRequestedAt: null,
+        });
+      },
+    );
+
+    it('bir xil time yuborilsa — eslatma maydonlari tegilmaydi', async () => {
+      repo.findById.mockResolvedValue(booking());
+      await service.update('b1', { time: '10:00', notes: 'x' }, user);
+      expect(repo.update.mock.calls[0][1]).not.toHaveProperty(
+        'reminder24SentAt',
+      );
+    });
+
+    it('arrived qabul slotni band qiladi — ACTIVE ga kirmaydi', async () => {
+      expect(SLOT_OCCUPYING_STATUSES).toContain('arrived');
+      expect(ACTIVE_BOOKING_STATUSES).not.toContain('arrived');
+    });
+
     it('vaqt o‘zgarsa — joriy qiymatlar bilan tekshiriladi, o‘zi chiqarib tashlanadi', async () => {
       repo.findById.mockResolvedValue(booking({ serviceId: 's1' }));
       repo.findServiceById.mockResolvedValue({ duration: 45 } as any);
@@ -640,7 +676,7 @@ describe('BookingsService', () => {
           doctorId: 'd1',
           date: new Date('2026-06-10T00:00:00.000Z'),
           id: { not: 'b1' },
-          status: { in: ['pending', 'confirmed'] },
+          status: { in: ['pending', 'confirmed', 'arrived'] },
         },
         'tx',
       );

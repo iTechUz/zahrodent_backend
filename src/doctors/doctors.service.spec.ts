@@ -424,6 +424,20 @@ describe('DoctorsService', () => {
       expect(s.avgCheck).toBe(0);
     });
 
+    it('conversionRate 100 dan oshmaydi (walk-in tashriflar)', async () => {
+      repo.getDetailedEfficiencyStats.mockResolvedValue([
+        {
+          ...base,
+          id: 'd1',
+          totalBookings: 2,
+          totalVisits: 5,
+          totalRevenue: 500,
+        },
+      ]);
+      const [s] = await service.getEfficiency();
+      expect(s.conversionRate).toBe(100);
+    });
+
     it('avgCheck yaxlitlanadi', async () => {
       repo.getDetailedEfficiencyStats.mockResolvedValue([
         {

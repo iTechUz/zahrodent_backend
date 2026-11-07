@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Doctor, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { parseDateOnlyToUTC, todayInTashkent } from '../common/utils/date.util';
 
 const USER_PHONE = { user: { select: { phone: true } } } as const;
 export type DoctorWithUser = Doctor & { user?: { phone: string } | null };
@@ -34,16 +35,15 @@ export class DoctorsRepository {
   }
 
   async getActiveCountToday() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
+    // DATE column: clinic calendar day (Asia/Tashkent), not the server's TZ.
+    const today = parseDateOnlyToUTC(todayInTashkent());
 
     const count = await this.prisma.doctor.count({
       where: {
         bookings: {
           some: {
-            date: { gte: today, lt: tomorrow },
+            date: today,
+            status: { notIn: ['cancelled', 'no-show'] },
           },
         },
       },

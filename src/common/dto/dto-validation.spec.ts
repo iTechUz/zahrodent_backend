@@ -355,6 +355,18 @@ describe('DTO validation', () => {
       description: 'Plomba',
     };
 
+    it('amount > 2 mlrd — 400 (Create va Update)', () => {
+      expect(
+        errorsOf(CreatePaymentDto, { ...ok, amount: 2_000_000_001 }).amount,
+      ).toBeDefined();
+      expect(
+        errorsOf(UpdatePaymentDto, { amount: 2_000_000_001 }).amount,
+      ).toBeDefined();
+      expect(
+        errorsOf(CreatePaymentDto, { ...ok, amount: 2_000_000_000 }),
+      ).toEqual({});
+    });
+
     it('Create — to‘g‘ri', () => {
       expect(errorsOf(CreatePaymentDto, ok)).toEqual({});
       expect(
@@ -392,6 +404,16 @@ describe('DTO validation', () => {
   });
 
   describe('Services', () => {
+    it('price > 2 mlrd — 400 (Create va Update)', () => {
+      const base = { name: 'P', category: 'T', duration: '30' };
+      expect(
+        errorsOf(CreateServiceDto, { ...base, price: 2_000_000_001 }).price,
+      ).toBeDefined();
+      expect(
+        errorsOf(UpdateServiceDto, { price: 2_000_000_001 }).price,
+      ).toBeDefined();
+    });
+
     it('Create — narx va davomiylik >= 1', () => {
       expect(
         errorsOf(CreateServiceDto, {
@@ -425,6 +447,15 @@ describe('DTO validation', () => {
       password: 'secret1',
       role: 'receptionist',
     };
+
+    it('password > 72 belgi — 400 (bcrypt kesadi)', () => {
+      expect(
+        errorsOf(CreateUserDto, { ...ok, password: 'a'.repeat(73) }).password,
+      ).toBeDefined();
+      expect(
+        errorsOf(CreateUserDto, { ...ok, password: 'a'.repeat(72) }),
+      ).toEqual({});
+    });
 
     it('Create — to‘g‘ri va xatolar', () => {
       expect(errorsOf(CreateUserDto, ok)).toEqual({});
@@ -462,6 +493,16 @@ describe('DTO validation', () => {
   });
 
   describe('Visits', () => {
+    it('price > 2 mlrd — 400 (Create va Update)', () => {
+      const base = { patientId: 'p1', doctorId: 'd1', status: 'completed' };
+      expect(
+        errorsOf(CreateVisitDto, { ...base, price: 2_000_000_001 }).price,
+      ).toBeDefined();
+      expect(
+        errorsOf(UpdateVisitDto, { price: 2_000_000_001 }).price,
+      ).toBeDefined();
+    });
+
     it('Create — to‘g‘ri va xatolar', () => {
       expect(
         errorsOf(CreateVisitDto, {

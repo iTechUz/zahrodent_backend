@@ -49,18 +49,17 @@ describe('DoctorsRepository', () => {
     await expect(repo.getTotalVisitsCount()).resolves.toEqual({ count: 9 });
   });
 
-  it('getActiveCountToday — bugungi booking li shifokorlar', async () => {
-    jest.useFakeTimers({ now: new Date(2026, 5, 17, 14, 0, 0) });
+  it('getActiveCountToday — Toshkent buguni, bekor/kelmagan hisobga olinmaydi', async () => {
+    // 2026-06-17 20:00 UTC == 2026-06-18 01:00 Tashkent
+    jest.useFakeTimers({ now: new Date('2026-06-17T20:00:00.000Z') });
     prisma.doctor.count.mockResolvedValue(2);
     await expect(repo.getActiveCountToday()).resolves.toEqual({ count: 2 });
     expect(prisma.doctor.count).toHaveBeenCalledWith({
       where: {
         bookings: {
           some: {
-            date: {
-              gte: new Date(2026, 5, 17, 0, 0, 0, 0),
-              lt: new Date(2026, 5, 18, 0, 0, 0, 0),
-            },
+            date: new Date('2026-06-18T00:00:00.000Z'),
+            status: { notIn: ['cancelled', 'no-show'] },
           },
         },
       },

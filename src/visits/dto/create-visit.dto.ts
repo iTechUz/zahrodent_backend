@@ -3,6 +3,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  Max,
   Min,
   MinLength,
   Matches,
@@ -52,5 +53,6 @@ export class CreateVisitDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(2_000_000_000, { message: 'Summa 2 000 000 000 dan oshmasligi kerak' })
   price?: number;
 }

@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  Max,
   Min,
   MinLength,
 } from 'class-validator';
@@ -29,6 +30,7 @@ export class CreatePaymentDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(2_000_000_000, { message: 'Summa 2 000 000 000 dan oshmasligi kerak' })
   amount: number;
 
   @IsIn(METHODS)

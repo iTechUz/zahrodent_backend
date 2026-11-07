@@ -72,9 +72,26 @@ describe('ServicesRepository', () => {
     ]);
     expect(prisma.payment.groupBy).toHaveBeenNthCalledWith(1, {
       by: ['serviceId'],
-      where: { status: 'paid', serviceId: { not: null } },
+      where: {
+        type: 'INCOME',
+        status: { in: ['paid', 'partial'] },
+        serviceId: { not: null },
+      },
       _sum: { amount: true },
       _count: { patientId: true },
+    });
+  });
+
+  it('getDetailedStats — patientCount so‘rovi ham INCOME + paid/partial', async () => {
+    prisma.payment.groupBy.mockResolvedValue([]);
+    await repo.getDetailedStats();
+    expect(prisma.payment.groupBy).toHaveBeenNthCalledWith(2, {
+      by: ['serviceId', 'patientId'],
+      where: {
+        type: 'INCOME',
+        status: { in: ['paid', 'partial'] },
+        serviceId: { not: null },
+      },
     });
   });
 
