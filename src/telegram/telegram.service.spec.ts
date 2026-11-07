@@ -8,6 +8,7 @@ type Handler = (ctx: any) => unknown;
 
 const handlers: {
   start?: Handler;
+  chatid?: Handler;
   on: Record<string, Handler>;
   action?: { re: RegExp; fn: Handler };
   catch?: (err: unknown) => void;
@@ -21,6 +22,9 @@ jest.mock('telegraf', () => {
     telegram = { sendMessage: jest.fn(), getMe: jest.fn() };
     constructor(token: string) {
       ctorArgs.push(token);
+    }
+    command(_name: string, fn: Handler) {
+      handlers.chatid = fn;
     }
     start(fn: Handler) {
       handlers.start = fn;
@@ -85,6 +89,7 @@ describe('TelegramService', () => {
 
   beforeEach(() => {
     handlers.start = undefined;
+    handlers.chatid = undefined;
     handlers.on = {};
     handlers.action = undefined;
     ctorArgs.length = 0;
@@ -190,6 +195,12 @@ describe('TelegramService', () => {
       expect(handlers.on.contact).toBeDefined();
       expect(handlers.on.text).toBeDefined();
       expect(handlers.action?.re.test('service_braces')).toBe(true);
+    });
+
+    it('/chatid — chat ID ni qaytaradi', () => {
+      const reply = jest.fn();
+      void handlers.chatid?.({ chat: { id: -1001234 }, reply });
+      expect(reply).toHaveBeenCalledWith('Chat ID: -1001234');
     });
 
     it('ikkinchi onModuleInit — qayta launch qilinmaydi (dublikat poller yo‘q)', () => {

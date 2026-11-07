@@ -151,12 +151,17 @@ describe('DoctorsRepository', () => {
     ]);
     expect(prisma.booking.groupBy).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { status: { not: 'cancelled' } },
+        where: {
+          patient: { deletedAt: null },
+          status: { not: 'cancelled' },
+        },
       }),
     );
     expect(prisma.visit.groupBy).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ where: { status: 'completed' } }),
+      expect.objectContaining({
+        where: { patient: { deletedAt: null }, status: 'completed' },
+      }),
     );
   });
 
@@ -173,17 +178,23 @@ describe('DoctorsRepository', () => {
     expect(prisma.booking.groupBy).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
+          patient: { deletedAt: null },
           status: { not: 'cancelled' },
           date: range,
         },
       }),
     );
     for (const call of prisma.visit.groupBy.mock.calls) {
-      expect(call[0].where).toEqual({ status: 'completed', date: range });
+      expect(call[0].where).toEqual({
+        patient: { deletedAt: null },
+        status: 'completed',
+        date: range,
+      });
     }
     expect(prisma.booking.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
+          patient: { deletedAt: null },
           status: 'completed',
           visits: { none: { status: 'completed' } },
           date: range,

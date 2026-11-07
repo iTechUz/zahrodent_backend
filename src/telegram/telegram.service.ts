@@ -222,6 +222,9 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private registerCommands(bot: Telegraf) {
+    // Staff helper: shows the chat id to put into TELEGRAM_STATUS_CHAT_ID.
+    bot.command('chatid', (ctx) => ctx.reply(`Chat ID: ${ctx.chat.id}`));
+
     bot.start((ctx) => {
       ctx.reply(
         `Zahro Dental klinikasiga xush kelibsiz, ${ctx.from.first_name}!\n\nIltimos, telefon raqamingizni yuboring:`,
