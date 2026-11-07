@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -17,6 +18,9 @@ export const USER_NOT_FOUND = 'Foydalanuvchi topilmadi';
 export const CANNOT_DELETE_SELF = "O'zingizning hisobingizni o'chira olmaysiz";
 export const LAST_ADMIN_MESSAGE =
   "Tizimdagi yagona adminni o'chirib yoki rolini o'zgartirib bo'lmaydi";
+
+export const DOCTOR_VIA_DOCTORS_MESSAGE =
+  "Shifokor foydalanuvchisini bu yerda yaratib bo'lmaydi — /doctors orqali shifokor qo'shing (login ham o'sha yerda beriladi)";
 
 const PUBLIC_SELECT = {
   id: true,
@@ -83,6 +87,11 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto) {
+    // A doctor login without a Doctor record would be a dead account
+    // (no schedule, no bookings): /doctors creates both atomically.
+    if (dto.role === 'doctor') {
+      throw new BadRequestException(DOCTOR_VIA_DOCTORS_MESSAGE);
+    }
     const data = await this.buildCreateData(dto);
     return this.prisma.user.create({
       data,
@@ -94,16 +103,20 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException(USER_NOT_FOUND);
 
-    if (user.role === 'admin' && dto.role && dto.role !== 'admin') {
-      await this.assertNotLastAdmin();
+    if (dto.role === 'doctor' && user.role !== 'doctor') {
+      throw new BadRequestException(DOCTOR_VIA_DOCTORS_MESSAGE);
     }
 
     const data = await this.buildUpdateData(id, dto);
-    const updated = await this.prisma.user.update({
-      where: { id },
-      data,
-      select: { id: true, name: true, phone: true, role: true },
-    });
+    const select = { id: true, name: true, phone: true, role: true } as const;
+    const demotesAdmin =
+      user.role === 'admin' && !!dto.role && dto.role !== 'admin';
+    const updated = demotesAdmin
+      ? await this.prisma.$transaction(async (tx) => {
+          await this.assertNotLastAdmin(tx, id);
+          return tx.user.update({ where: { id }, data, select });
+        })
+      : await this.prisma.user.update({ where: { id }, data, select });
     // New password or role → existing sessions must log in again.
     if (dto.password || (dto.role && dto.role !== user.role)) {
       await this.revokeSessions(id);
@@ -122,15 +135,33 @@ export class UsersService {
     }
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException(USER_NOT_FOUND);
-    if (user.role === 'admin') await this.assertNotLastAdmin();
 
     // refresh_tokens.user_id is ON DELETE CASCADE → sessions go with the user.
-    await this.prisma.user.delete({ where: { id } });
+    if (user.role === 'admin') {
+      await this.prisma.$transaction(async (tx) => {
+        await this.assertNotLastAdmin(tx, id);
+        await tx.user.delete({ where: { id } });
+      });
+    } else {
+      await this.prisma.user.delete({ where: { id } });
+    }
     return { id };
   }
 
-  private async assertNotLastAdmin() {
-    const admins = await this.prisma.user.count({ where: { role: 'admin' } });
-    if (admins <= 1) throw new ConflictException(LAST_ADMIN_MESSAGE);
+  /**
+   * Locks every admin row (FOR UPDATE) for the rest of the transaction, so two
+   * concurrent demotions/deletions of different admins serialise and the
+   * second one sees the first's result instead of both passing the check.
+   */
+  private async assertNotLastAdmin(
+    tx: Prisma.TransactionClient,
+    targetId: string,
+  ) {
+    const admins = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM users WHERE role = 'admin' FOR UPDATE
+    `;
+    if (admins.length <= 1 && admins.some((a) => a.id === targetId)) {
+      throw new ConflictException(LAST_ADMIN_MESSAGE);
+    }
   }
 }

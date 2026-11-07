@@ -16,6 +16,8 @@ export const LEAD_STATUSES = [
   'cancelled',
 ] as const;
 
+export const LEAD_PHONE_REGEX = /^\+?[\d\s()-]{7,20}$/;
+
 export class CreateLeadDto {
   @ApiProperty({ example: 'Ali Valiyev' })
   @IsString()
@@ -25,7 +27,7 @@ export class CreateLeadDto {
   @ApiProperty({ example: '+998901234567' })
   @IsString()
   @IsNotEmpty()
-  @Matches(/^\+?[\d\s()-]{7,20}$/, { message: 'Invalid phone' })
+  @Matches(LEAD_PHONE_REGEX, { message: 'Invalid phone' })
   phone: string;
 
   @ApiProperty({ example: 'Implantatsiya', required: false })

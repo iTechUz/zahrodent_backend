@@ -391,6 +391,7 @@ describe('DoctorsService', () => {
           ...base,
           id: 'd1',
           totalBookings: 3,
+          completedBookings: 2,
           totalVisits: 2,
           totalRevenue: 300_000,
         },
@@ -398,6 +399,7 @@ describe('DoctorsService', () => {
           ...base,
           id: 'd2',
           totalBookings: 10,
+          completedBookings: 5,
           totalVisits: 5,
           totalRevenue: 1_000_000,
         },
@@ -409,12 +411,28 @@ describe('DoctorsService', () => {
       expect(out[1]).toMatchObject({ conversionRate: 67, avgCheck: 150_000 });
     });
 
+    it('conversionRate tashriflarga emas, completed qabullarga bog‘liq', async () => {
+      repo.getDetailedEfficiencyStats.mockResolvedValue([
+        {
+          ...base,
+          id: 'd1',
+          totalBookings: 4,
+          completedBookings: 1,
+          totalVisits: 4,
+          totalRevenue: 400,
+        },
+      ]);
+      const [s] = await service.getEfficiency();
+      expect(s.conversionRate).toBe(25);
+    });
+
     it('nolga bo‘lish yo‘q — 0 qaytaradi', async () => {
       repo.getDetailedEfficiencyStats.mockResolvedValue([
         {
           ...base,
           id: 'd1',
           totalBookings: 0,
+          completedBookings: 0,
           totalVisits: 0,
           totalRevenue: 0,
         },
@@ -424,12 +442,13 @@ describe('DoctorsService', () => {
       expect(s.avgCheck).toBe(0);
     });
 
-    it('conversionRate 100 dan oshmaydi (walk-in tashriflar)', async () => {
+    it('conversionRate — completed / bekor qilinmagan qabullar, 100 dan oshmaydi', async () => {
       repo.getDetailedEfficiencyStats.mockResolvedValue([
         {
           ...base,
           id: 'd1',
           totalBookings: 2,
+          completedBookings: 3,
           totalVisits: 5,
           totalRevenue: 500,
         },
@@ -444,6 +463,7 @@ describe('DoctorsService', () => {
           ...base,
           id: 'd1',
           totalBookings: 3,
+          completedBookings: 3,
           totalVisits: 3,
           totalRevenue: 100,
         },

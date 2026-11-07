@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   Injectable,
+  HttpException,
+  HttpStatus,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -33,6 +35,12 @@ export const INVALID_CREDENTIALS_MESSAGE =
   "Telefon raqami yoki parol noto'g'ri";
 export const TOKEN_REFRESH_MESSAGE = 'Token yangilanishi kerak — qayta kiring';
 export const SESSION_EXPIRED_MESSAGE = 'Sessiya muddati tugagan, qayta kiring';
+export const LOGIN_LOCKED_MESSAGE =
+  "Juda ko'p noto'g'ri urinish — 15 daqiqadan keyin qayta urinib ko'ring";
+/** Per-phone lockout: this many failures in a row … */
+export const LOGIN_MAX_FAILURES = 10;
+/** … lock the account's login for this long. */
+export const LOGIN_LOCK_MS = 15 * 60 * 1000;
 export const WRONG_CURRENT_PASSWORD_MESSAGE = "Joriy parol noto'g'ri";
 
 /** Client metadata stored with a refresh token (audit only). */
@@ -84,6 +92,17 @@ function isJwtAccessPayload(p: unknown): p is JwtAccessPayload {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  /**
+   * Failed logins per phone (known or not — no account probing). In-memory:
+   * per API instance, reset on restart; the per-IP throttler stays the
+   * first line of defence. Trade-off: someone can lock a victim out for 15
+   * minutes by guessing wrong passwords on purpose.
+   */
+  private readonly loginFailures = new Map<
+    string,
+    { count: number; lockedUntil: number }
+  >();
+
   constructor(
     private readonly usersRepository: UsersRepository,
     private readonly jwtService: JwtService,
@@ -91,6 +110,7 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto, meta: SessionMeta = {}): Promise<AuthSession> {
+    this.assertLoginNotLocked(dto.phone);
     const user = await this.usersRepository.findByPhone(dto.phone);
     // Same message for unknown phone and wrong password (no account probing).
     // bcrypt still runs for unknown phones so timing doesn't leak either.
@@ -99,8 +119,10 @@ export class AuthService {
       user?.passwordHash ?? DUMMY_BCRYPT_HASH,
     );
     if (!user || !ok) {
+      this.recordLoginFailure(dto.phone);
       throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
     }
+    this.loginFailures.delete(dto.phone);
     // If doctor role, fetch the associated Doctor record id
     let doctorId: string | undefined;
     if (user.role === 'doctor') {
@@ -109,6 +131,38 @@ export class AuthService {
     }
     const view = this.toUserView(user, doctorId);
     return this.issueSession(view, randomUUID(), meta);
+  }
+
+  private assertLoginNotLocked(phone: string) {
+    const f = this.loginFailures.get(phone);
+    if (!f || f.lockedUntil === 0) return;
+    if (f.lockedUntil > Date.now()) {
+      throw new HttpException(
+        LOGIN_LOCKED_MESSAGE,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    // Lock expired → fresh start.
+    this.loginFailures.delete(phone);
+  }
+
+  private recordLoginFailure(phone: string) {
+    const now = Date.now();
+    // Opportunistic cleanup keeps the map from growing without bound.
+    if (this.loginFailures.size > 10_000) {
+      for (const [k, v] of this.loginFailures) {
+        if (v.lockedUntil !== 0 && v.lockedUntil <= now) {
+          this.loginFailures.delete(k);
+        }
+      }
+    }
+    const f = this.loginFailures.get(phone) ?? { count: 0, lockedUntil: 0 };
+    f.count += 1;
+    if (f.count >= LOGIN_MAX_FAILURES) {
+      f.lockedUntil = now + LOGIN_LOCK_MS;
+      this.logger.warn(`Login bloklandi (15 daqiqa): ${phone}`);
+    }
+    this.loginFailures.set(phone, f);
   }
 
   /**

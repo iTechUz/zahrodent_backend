@@ -6,8 +6,7 @@ describe('PatientsRepository', () => {
   let repo: PatientsRepository;
   const include = {
     payments: {
-      where: { type: 'INCOME' },
-      select: { amount: true, status: true, discount: true },
+      select: { amount: true, status: true, discount: true, type: true },
     },
     visits: { where: { status: 'completed' }, select: { price: true } },
     assignedDoctor: { select: { id: true, firstName: true, lastName: true } },
@@ -29,7 +28,7 @@ describe('PatientsRepository', () => {
     repo = new PatientsRepository(prisma as PrismaService);
   });
 
-  it('findAll — balans uchun INCOME payments va completed visits include', async () => {
+  it('findAll — balans uchun payments (INCOME+EXPENSE) va completed visits include', async () => {
     prisma.patient.count.mockResolvedValue(0);
     await repo.findAll({ source: 'phone' }, { skip: 5, take: 5 });
     expect(prisma.patient.findMany).toHaveBeenCalledWith({
@@ -177,11 +176,32 @@ describe('PatientsRepository', () => {
     ]);
     const sql = prisma.$queryRaw.mock.calls[0][0];
     const text = sql.strings.join('?');
-    expect(text).toContain("WHERE type = 'INCOME'");
-    expect(text).toContain("status IN ('paid', 'partial')");
+    // EXPENSE (refund) reduces credit, INCOME adds; discounts only on INCOME
+    expect(text).toContain(
+      "WHEN type = 'EXPENSE' AND status IN ('paid', 'partial') THEN -amount",
+    );
+    expect(text).toContain(
+      "WHEN type <> 'EXPENSE' AND status IN ('paid', 'partial') THEN amount",
+    );
+    expect(text).toContain(
+      "CASE WHEN type <> 'EXPENSE' THEN COALESCE(discount",
+    );
     expect(text).toContain("WHERE status = 'completed'");
     expect(text).toContain('< 0');
     expect(text).toContain('p.deleted_at IS NULL');
+  });
+
+  it('findActiveIdsByPhoneDigits — raqamlar bo‘yicha LIKE, o‘chirilmaganlar', async () => {
+    prisma.$queryRaw = jest.fn().mockResolvedValue([{ id: 'p1' }]);
+    await expect(repo.findActiveIdsByPhoneDigits('90123')).resolves.toEqual([
+      { id: 'p1' },
+    ]);
+    const [sql, ...values] = prisma.$queryRaw.mock.calls[0];
+    expect(sql.join('?')).toContain(
+      "regexp_replace(phone, '[^0-9]', '', 'g') LIKE",
+    );
+    expect(sql.join('?')).toContain('deleted_at IS NULL');
+    expect(values).toEqual(['%90123%', 1000]);
   });
 
   it('comments — author include, yangi birinchi', async () => {

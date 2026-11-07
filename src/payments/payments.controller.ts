@@ -23,6 +23,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_FINANCE } from '../common/constants/role-groups';
 import { PaymentsQueryDto } from './dto/payments-query.dto';
+import { DoctorStatsQueryDto } from './dto/doctor-stats-query.dto';
 
 @ApiTags('payments')
 @ApiBearerAuth('JWT')
@@ -43,9 +44,13 @@ export class PaymentsController {
   }
 
   @Get('doctor-stats')
-  @ApiOperation({ summary: 'Revenue breakdown per doctor' })
-  getDoctorStats() {
-    return this.paymentsService.getDoctorStats();
+  @ApiOperation({
+    summary: 'Revenue breakdown per doctor',
+    description:
+      "Faqat tashrifga bog'langan INCOME (paid|partial). startDate/endDate — to'lov sanasi bo'yicha (ixtiyoriy). `percent` — bog'langan to'lovlar yig'indisi (`linkedTotal`) ichidagi ulush.",
+  })
+  getDoctorStats(@Query() query: DoctorStatsQueryDto) {
+    return this.paymentsService.getDoctorStats(query);
   }
 
   @Get()

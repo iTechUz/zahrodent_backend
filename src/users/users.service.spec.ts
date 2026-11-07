@@ -1,6 +1,10 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { UsersService } from './users.service';
+import { DOCTOR_VIA_DOCTORS_MESSAGE, UsersService } from './users.service';
 import { PrismaService } from '../database/prisma.service';
 
 jest.mock('bcrypt', () => ({
@@ -19,6 +23,8 @@ describe('UsersService', () => {
       count: jest.Mock;
     };
     refreshToken: { updateMany: jest.Mock };
+    $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
   };
 
   const publicSelect = {
@@ -42,7 +48,11 @@ describe('UsersService', () => {
         count: jest.fn().mockResolvedValue(2),
       },
       refreshToken: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
+      // admin rows locked FOR UPDATE inside the transaction
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'a1' }, { id: 'a2' }]),
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation(async (fn: any) => fn(prisma));
     service = new UsersService(prisma as unknown as PrismaService);
     (bcrypt.hash as jest.Mock).mockClear();
   });
@@ -81,6 +91,14 @@ describe('UsersService', () => {
       password: 'secret1',
       role: 'receptionist' as const,
     };
+
+    it('role doctor — 400, /doctors ga yo‘naltiradi, hech narsa yozilmaydi', async () => {
+      await expect(service.create({ ...dto, role: 'doctor' })).rejects.toThrow(
+        new BadRequestException(DOCTOR_VIA_DOCTORS_MESSAGE),
+      );
+      expect(prisma.user.create).not.toHaveBeenCalled();
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
 
     it('telefon band — 409', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'other' });
@@ -202,10 +220,38 @@ describe('UsersService', () => {
 
     it('update — yagona adminning rolini o‘zgartirib bo‘lmaydi (409)', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'u1', role: 'admin' });
-      prisma.user.count.mockResolvedValue(1);
+      prisma.$queryRaw.mockResolvedValue([{ id: 'u1' }]);
       await expect(
         service.update('u1', { role: 'receptionist' }),
       ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('update — adminlar ko‘p bo‘lsa admin rolini o‘zgartirish tranzaksiyada o‘tadi', async () => {
+      prisma.user.findUnique.mockResolvedValue({ id: 'a1', role: 'admin' });
+      prisma.user.update.mockResolvedValue({ id: 'a1' });
+      await service.update('a1', { role: 'receptionist' });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.user.update).toHaveBeenCalled();
+    });
+
+    it('update — admin bo‘lmagan userga tranzaksiya/qulf kerak emas', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        role: 'receptionist',
+      });
+      await service.update('u1', { name: 'N' });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('update — rolni doctor ga o‘zgartirish — 400 (/doctors dan foydalaning)', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        role: 'receptionist',
+      });
+      await expect(service.update('u1', { role: 'doctor' })).rejects.toThrow(
+        new BadRequestException(DOCTOR_VIA_DOCTORS_MESSAGE),
+      );
       expect(prisma.user.update).not.toHaveBeenCalled();
     });
   });
@@ -236,20 +282,28 @@ describe('UsersService', () => {
 
     it('yagona adminni o‘chira olmaydi — 409', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'a2', role: 'admin' });
-      prisma.user.count.mockResolvedValue(1);
+      prisma.$queryRaw.mockResolvedValue([{ id: 'a2' }]);
       await expect(service.remove('a2', 'a1')).rejects.toBeInstanceOf(
         ConflictException,
       );
-      expect(prisma.user.count).toHaveBeenCalledWith({
-        where: { role: 'admin' },
-      });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(prisma.user.delete).not.toHaveBeenCalled();
     });
 
     it('adminlar ko‘p bo‘lsa adminni o‘chirish mumkin', async () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'a2', role: 'admin' });
-      prisma.user.count.mockResolvedValue(2);
+      prisma.$queryRaw.mockResolvedValue([{ id: 'a1' }, { id: 'a2' }]);
       await expect(service.remove('a2', 'a1')).resolves.toEqual({ id: 'a2' });
+      expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'a2' } });
+    });
+
+    it('admin bo‘lmagan userni o‘chirish — qulfsiz', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u5',
+        role: 'receptionist',
+      });
+      await service.remove('u5', 'a1');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 

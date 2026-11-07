@@ -17,7 +17,8 @@ describe('ServicesRepository', () => {
         update: jest.fn(),
         delete: jest.fn(),
       },
-      payment: { groupBy: jest.fn() },
+      payment: { groupBy: jest.fn(), count: jest.fn() },
+      booking: { count: jest.fn() },
     };
     repo = new ServicesRepository(prisma as PrismaService);
   });
@@ -28,14 +29,14 @@ describe('ServicesRepository', () => {
     await repo.findAll({}, { skip: 0, take: 10 });
     expect(prisma.service.findMany).toHaveBeenCalledWith({
       where: {},
-      orderBy: [{ category: 'asc' }, { name: 'asc' }],
+      orderBy: [{ category: 'asc' }, { name: 'asc' }, { id: 'asc' }],
       skip: 0,
       take: 10,
     });
     await repo.findAll();
     expect(prisma.service.findMany).toHaveBeenLastCalledWith({
       where: undefined,
-      orderBy: [{ category: 'asc' }, { name: 'asc' }],
+      orderBy: [{ category: 'asc' }, { name: 'asc' }, { id: 'asc' }],
     });
   });
 
@@ -92,6 +93,21 @@ describe('ServicesRepository', () => {
         status: { in: ['paid', 'partial'] },
         serviceId: { not: null },
       },
+    });
+  });
+
+  it('countUsage — qabul va to‘lovlar soni serviceId bo‘yicha', async () => {
+    prisma.booking.count.mockResolvedValue(3);
+    prisma.payment.count.mockResolvedValue(2);
+    await expect(repo.countUsage('s1')).resolves.toEqual({
+      bookings: 3,
+      payments: 2,
+    });
+    expect(prisma.booking.count).toHaveBeenCalledWith({
+      where: { serviceId: 's1' },
+    });
+    expect(prisma.payment.count).toHaveBeenCalledWith({
+      where: { serviceId: 's1' },
     });
   });
 

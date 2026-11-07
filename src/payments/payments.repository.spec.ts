@@ -33,7 +33,7 @@ describe('PaymentsRepository', () => {
     expect(prisma.payment.findMany).toHaveBeenCalledWith({
       where: { status: 'paid' },
       include: PS,
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
       skip: 10,
       take: 10,
     });
@@ -44,8 +44,28 @@ describe('PaymentsRepository', () => {
     expect(prisma.payment.findMany).toHaveBeenLastCalledWith({
       where: undefined,
       include: PS,
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
     });
+  });
+
+  it('getDoctorStats — davr berilsa payments.date bo‘yicha filtrlanadi', async () => {
+    prisma.payment.groupBy.mockResolvedValue([]);
+    prisma.visit.findMany.mockResolvedValue([]);
+    const range = {
+      gte: new Date('2026-10-01T00:00:00.000Z'),
+      lte: new Date('2026-10-31T00:00:00.000Z'),
+    };
+    await repo.getDoctorStats(range);
+    expect(prisma.payment.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          type: 'INCOME',
+          status: { in: ['paid', 'partial'] },
+          visitId: { not: null },
+          date: range,
+        },
+      }),
+    );
   });
 
   it('sumAmount — null → 0', async () => {

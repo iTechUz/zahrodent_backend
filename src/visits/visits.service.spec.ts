@@ -1,4 +1,8 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { VisitsService } from './visits.service';
 import { VisitsRepository } from './visits.repository';
 import type { AuthUserView } from '../auth/auth.service';
@@ -6,7 +10,15 @@ import type { AuthUserView } from '../auth/auth.service';
 describe('VisitsService', () => {
   let service: VisitsService;
   let repo: jest.Mocked<
-    Pick<VisitsRepository, 'findAll' | 'findById' | 'create' | 'update'>
+    Pick<
+      VisitsRepository,
+      | 'findAll'
+      | 'findById'
+      | 'create'
+      | 'update'
+      | 'patientInScope'
+      | 'findBookingOwner'
+    >
   >;
 
   const admin: AuthUserView = {
@@ -44,6 +56,10 @@ describe('VisitsService', () => {
       findById: jest.fn(),
       create: jest.fn().mockResolvedValue(visit()),
       update: jest.fn().mockResolvedValue(visit()),
+      patientInScope: jest.fn().mockResolvedValue(true),
+      findBookingOwner: jest
+        .fn()
+        .mockResolvedValue({ id: 'b1', patientId: 'p1', doctorId: 'd1' }),
     };
     service = new VisitsService(repo as unknown as VisitsRepository);
   });
@@ -196,6 +212,86 @@ describe('VisitsService', () => {
       });
     });
 
+    it('doctor — o‘z bemori doirasida emas — 404, yaratilmaydi', async () => {
+      repo.patientInScope.mockResolvedValue(false);
+      await expect(
+        service.create(
+          { patientId: 'p9', doctorId: 'd1', status: 'completed' },
+          doctor,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(repo.patientInScope).toHaveBeenCalledWith('p9', {
+        OR: [
+          { assignedDoctorId: 'd1' },
+          { bookings: { some: { doctorId: 'd1' } } },
+          { visits: { some: { doctorId: 'd1' } } },
+        ],
+      });
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('admin — bemor doirasi tekshirilmaydi', async () => {
+      await service.create(
+        { patientId: 'p9', doctorId: 'd1', status: 'completed' },
+        admin,
+      );
+      expect(repo.patientInScope).not.toHaveBeenCalled();
+    });
+
+    it('bookingId boshqa bemorga tegishli — 400', async () => {
+      repo.findBookingOwner.mockResolvedValue({
+        id: 'b1',
+        patientId: 'other',
+        doctorId: 'd1',
+      });
+      await expect(
+        service.create(
+          {
+            patientId: 'p1',
+            doctorId: 'd1',
+            bookingId: 'b1',
+            status: 'completed',
+          },
+          admin,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('bookingId topilmasa — 404', async () => {
+      repo.findBookingOwner.mockResolvedValue(null);
+      await expect(
+        service.create(
+          {
+            patientId: 'p1',
+            doctorId: 'd1',
+            bookingId: 'zz',
+            status: 'completed',
+          },
+          admin,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('doctor — boshqa shifokorning qabuliga bog‘lay olmaydi — 404', async () => {
+      repo.findBookingOwner.mockResolvedValue({
+        id: 'b1',
+        patientId: 'p1',
+        doctorId: 'd2',
+      });
+      await expect(
+        service.create(
+          {
+            patientId: 'p1',
+            doctorId: 'd1',
+            bookingId: 'b1',
+            status: 'completed',
+          },
+          doctor,
+        ),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
     it('admin — istalgan shifokor nomidan yaratadi', async () => {
       await service.create(
         { patientId: 'p1', doctorId: 'd2', status: 'completed' },
@@ -250,12 +346,43 @@ describe('VisitsService', () => {
       });
     });
 
+    it('bemorni almashtirish — 400, yozilmaydi', async () => {
+      repo.findById.mockResolvedValue(visit());
+      await expect(
+        service.update('v1', { patientId: 'p2' }, admin),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('xuddi shu patientId yuborilsa — xato emas va yangilanmaydi', async () => {
+      repo.findById.mockResolvedValue(visit());
+      await service.update('v1', { patientId: 'p1', notes: 'x' }, admin);
+      expect(repo.update.mock.calls[0][1]).not.toHaveProperty('patient');
+    });
+
+    it('yangi bookingId tashrifning bemoriga tegishli bo‘lishi kerak — 400', async () => {
+      repo.findById.mockResolvedValue(visit());
+      repo.findBookingOwner.mockResolvedValue({
+        id: 'b2',
+        patientId: 'other',
+        doctorId: 'd1',
+      });
+      await expect(
+        service.update('v1', { bookingId: 'b2' }, admin),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
     it('relation va sana o‘zgarishlari', async () => {
       repo.findById.mockResolvedValue(visit());
+      repo.findBookingOwner.mockResolvedValue({
+        id: 'b2',
+        patientId: 'p1',
+        doctorId: 'd2',
+      });
       await service.update(
         'v1',
         {
-          patientId: 'p2',
           doctorId: 'd2',
           bookingId: 'b2',
           date: '2026-07-01',
@@ -264,7 +391,6 @@ describe('VisitsService', () => {
       );
       expect(repo.update.mock.calls[0][1]).toMatchObject({
         date: new Date('2026-07-01T00:00:00.000Z'),
-        patient: { connect: { id: 'p2' } },
         doctor: { connect: { id: 'd2' } },
         booking: { connect: { id: 'b2' } },
       });

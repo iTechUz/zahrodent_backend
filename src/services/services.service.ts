@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { dateOnlyColumnRange } from '../common/utils/date.util';
 import { Prisma, Service } from '@prisma/client';
 import { ServicesRepository } from './services.repository';
@@ -6,6 +10,9 @@ import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
 import { ServicesQueryDto } from './dto/services-query.dto';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
+
+export const serviceInUseMessage = (bookings: number, payments: number) =>
+  `Xizmatni o'chirib bo'lmaydi: ${bookings} ta qabul va ${payments} ta to'lovga bog'langan (tarix buzilmasligi uchun)`;
 
 @Injectable()
 export class ServicesService {
@@ -72,6 +79,14 @@ export class ServicesService {
 
   async remove(id: string) {
     await this.ensureExists(id);
+    // FK is ON DELETE SET NULL: deleting would silently strip the service from
+    // booking/payment history (and from service revenue stats) → block.
+    const usage = await this.servicesRepository.countUsage(id);
+    if (usage.bookings > 0 || usage.payments > 0) {
+      throw new ConflictException(
+        serviceInUseMessage(usage.bookings, usage.payments),
+      );
+    }
     await this.servicesRepository.delete(id);
     return { id };
   }

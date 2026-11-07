@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { VisitsRepository, VisitWithPatient } from './visits.repository';
 import {
@@ -7,7 +11,10 @@ import {
 } from '../patients/patient-summary';
 import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
 import { VisitsQueryDto } from './dto/visits-query.dto';
-import { doctorScopeId } from '../common/auth/doctor-scope';
+import {
+  doctorPatientsWhere,
+  doctorScopeId,
+} from '../common/auth/doctor-scope';
 import { CreateVisitDto } from './dto/create-visit.dto';
 import { UpdateVisitDto } from './dto/update-visit.dto';
 import {
@@ -18,6 +25,12 @@ import {
 } from '../common/utils/date.util';
 
 export const VISIT_NOT_FOUND = 'Tashrif topilmadi';
+export const PATIENT_NOT_FOUND = 'Bemor topilmadi';
+export const BOOKING_NOT_FOUND = 'Qabul topilmadi';
+export const VISIT_PATIENT_IMMUTABLE =
+  "Tashrifning bemorini o'zgartirib bo'lmaydi (to'lovlar shu bemorga bog'langan) — yangi tashrif yarating";
+export const BOOKING_OTHER_PATIENT =
+  'Qabul boshqa bemorga tegishli — tashrifni unga bog‘lab bo‘lmaydi';
 import { AuthUserView } from '../auth/auth.service';
 
 @Injectable()
@@ -75,6 +88,15 @@ export class VisitsService {
     const scopedDoctorId = doctorScopeId(user);
     const doctorId = scopedDoctorId ?? dto.doctorId;
     const dateStr = dto.date ?? todayInTashkent();
+    if (scopedDoctorId)
+      await this.assertPatientInScope(dto.patientId, scopedDoctorId);
+    if (dto.bookingId) {
+      await this.assertBookingBelongs(
+        dto.bookingId,
+        dto.patientId,
+        scopedDoctorId,
+      );
+    }
     const v = await this.visitsRepository.create({
       patient: connectActivePatient(dto.patientId),
       doctor: { connect: { id: doctorId } },
@@ -90,9 +112,21 @@ export class VisitsService {
   }
 
   async update(id: string, dto: UpdateVisitDto, user: AuthUserView) {
-    await this.getAccessible(id, user);
+    const current = await this.getAccessible(id, user);
+    const scopedDoctorId = doctorScopeId(user);
+    // Payments (and balance) hang off the visit's patient: never re-parent.
+    if (dto.patientId !== undefined && dto.patientId !== current.patientId) {
+      throw new BadRequestException(VISIT_PATIENT_IMMUTABLE);
+    }
+    if (dto.bookingId) {
+      await this.assertBookingBelongs(
+        dto.bookingId,
+        current.patientId,
+        scopedDoctorId,
+      );
+    }
     // A doctor can't hand a visit over to another doctor.
-    const doctorId = doctorScopeId(user) ? undefined : dto.doctorId;
+    const doctorId = scopedDoctorId ? undefined : dto.doctorId;
     const v = await this.visitsRepository.update(id, {
       date: dto.date === undefined ? undefined : parseDateOnlyToUTC(dto.date),
       status: dto.status,
@@ -100,10 +134,6 @@ export class VisitsService {
       treatment: dto.treatment,
       notes: dto.notes,
       price: dto.price,
-      patient:
-        dto.patientId === undefined
-          ? undefined
-          : connectActivePatient(dto.patientId),
       doctor:
         doctorId === undefined ? undefined : { connect: { id: doctorId } },
       booking:
@@ -114,6 +144,31 @@ export class VisitsService {
             : { disconnect: true },
     });
     return this.toResponse(v);
+  }
+
+  /** A doctor only records visits for patients in their own scope. */
+  private async assertPatientInScope(patientId: string, doctorId: string) {
+    const ok = await this.visitsRepository.patientInScope(
+      patientId,
+      doctorPatientsWhere(doctorId),
+    );
+    // Same 404 as "missing" so ids of other patients can't be probed.
+    if (!ok) throw new NotFoundException(PATIENT_NOT_FOUND);
+  }
+
+  private async assertBookingBelongs(
+    bookingId: string,
+    patientId: string,
+    scopedDoctorId: string | null,
+  ) {
+    const booking = await this.visitsRepository.findBookingOwner(bookingId);
+    if (!booking) throw new NotFoundException(BOOKING_NOT_FOUND);
+    if (booking.patientId !== patientId) {
+      throw new BadRequestException(BOOKING_OTHER_PATIENT);
+    }
+    if (scopedDoctorId && booking.doctorId !== scopedDoctorId) {
+      throw new NotFoundException(BOOKING_NOT_FOUND);
+    }
   }
 
   private async getAccessible(id: string, user: AuthUserView) {

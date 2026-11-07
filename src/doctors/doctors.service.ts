@@ -200,10 +200,14 @@ export class DoctorsService {
 
     return rawStats
       .map((s) => {
-        // Walk-in visits can exceed bookings; never report > 100%.
+        // Completed bookings / non-cancelled bookings (arrived and no-show stay
+        // in the denominator), capped at 100.
         const conversionRate =
           s.totalBookings > 0
-            ? Math.min(100, Math.round((s.totalVisits / s.totalBookings) * 100))
+            ? Math.min(
+                100,
+                Math.round((s.completedBookings / s.totalBookings) * 100),
+              )
             : 0;
 
         const avgCheck =

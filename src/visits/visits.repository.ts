@@ -24,13 +24,31 @@ export class VisitsRepository {
       this.prisma.visit.findMany({
         where,
         include: WITH_PATIENT_SUMMARY,
-        orderBy: opts?.orderBy ?? { date: 'desc' },
+        orderBy: opts?.orderBy ?? [{ date: 'desc' }, { id: 'desc' }],
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
       this.prisma.visit.count({ where }),
     ]);
     return { data, total };
+  }
+
+  /** Is the patient (non-deleted) inside the given scope filter? */
+  async patientInScope(
+    patientId: string,
+    scope: Prisma.PatientWhereInput,
+  ): Promise<boolean> {
+    const n = await this.prisma.patient.count({
+      where: { AND: [{ id: patientId, deletedAt: null }, scope] },
+    });
+    return n > 0;
+  }
+
+  findBookingOwner(bookingId: string) {
+    return this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { id: true, patientId: true, doctorId: true },
+    });
   }
 
   findById(id: string): Promise<VisitWithPatient | null> {

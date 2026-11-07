@@ -18,7 +18,11 @@ export class ServicesRepository {
     const [data, total] = await Promise.all([
       this.prisma.service.findMany({
         where,
-        orderBy: opts?.orderBy ?? [{ category: 'asc' }, { name: 'asc' }],
+        orderBy: opts?.orderBy ?? [
+          { category: 'asc' },
+          { name: 'asc' },
+          { id: 'asc' },
+        ],
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
@@ -47,6 +51,17 @@ export class ServicesRepository {
 
   findById(id: string): Promise<Service | null> {
     return this.prisma.service.findUnique({ where: { id } });
+  }
+
+  /** Bookings and payments still pointing at the service. */
+  async countUsage(
+    id: string,
+  ): Promise<{ bookings: number; payments: number }> {
+    const [bookings, payments] = await Promise.all([
+      this.prisma.booking.count({ where: { serviceId: id } }),
+      this.prisma.payment.count({ where: { serviceId: id } }),
+    ]);
+    return { bookings, payments };
   }
 
   create(data: Prisma.ServiceCreateInput): Promise<Service> {

@@ -1,5 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { PaymentsService } from './payments.service';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+import { PAYMENT_DUPLICATE_MESSAGE, PaymentsService } from './payments.service';
 import { PaymentsRepository } from './payments.repository';
 
 describe('PaymentsService', () => {
@@ -444,10 +448,113 @@ describe('PaymentsService', () => {
     });
   });
 
-  it('getDoctorStats — repo ga delegatsiya', async () => {
-    repo.getDoctorStats.mockResolvedValue([{ doctorId: 'd1', total: 10 }]);
-    await expect(service.getDoctorStats()).resolves.toEqual([
-      { doctorId: 'd1', total: 10 },
-    ]);
+  describe('getDoctorStats', () => {
+    it('total saqlanadi, revenue/linkedTotal/percent qo‘shiladi (faqat bog‘langan to‘lovlar)', async () => {
+      repo.getDoctorStats.mockResolvedValue([
+        { doctorId: 'd1', total: 300 },
+        { doctorId: 'd2', total: 100 },
+      ]);
+      await expect(service.getDoctorStats()).resolves.toEqual([
+        {
+          doctorId: 'd1',
+          total: 300,
+          revenue: 300,
+          linkedTotal: 400,
+          percent: 75,
+        },
+        {
+          doctorId: 'd2',
+          total: 100,
+          revenue: 100,
+          linkedTotal: 400,
+          percent: 25,
+        },
+      ]);
+      expect(repo.getDoctorStats).toHaveBeenCalledWith({});
+    });
+
+    it('percent 1 xona aniqlikda; bo‘sh ro‘yxat — bo‘sh', async () => {
+      repo.getDoctorStats.mockResolvedValue([
+        { doctorId: 'd1', total: 1 },
+        { doctorId: 'd2', total: 2 },
+      ]);
+      const out = await service.getDoctorStats();
+      expect(out.map((r) => r.percent)).toEqual([33.3, 66.7]);
+      repo.getDoctorStats.mockResolvedValue([]);
+      await expect(service.getDoctorStats()).resolves.toEqual([]);
+    });
+
+    it('davr — to‘lov sanasi oralig‘i repo ga uzatiladi', async () => {
+      repo.getDoctorStats.mockResolvedValue([]);
+      await service.getDoctorStats({
+        startDate: '2026-10-01',
+        endDate: '2026-10-31',
+      });
+      expect(repo.getDoctorStats).toHaveBeenCalledWith({
+        gte: new Date('2026-10-01T00:00:00.000Z'),
+        lte: new Date('2026-10-31T00:00:00.000Z'),
+      });
+    });
+  });
+
+  describe('create — qayta yuborishdan himoya', () => {
+    const dto = {
+      patientId: 'p1',
+      amount: 50_000,
+      method: 'cash',
+      status: 'paid',
+      description: 'Plomba',
+    } as any;
+
+    it('10 soniya ichida xuddi shu to‘lov — 409, ikkinchisi yozilmaydi', async () => {
+      jest.useFakeTimers({ now: new Date('2026-11-08T10:00:00.000Z') });
+      await service.create(dto);
+      jest.setSystemTime(new Date('2026-11-08T10:00:05.000Z'));
+      await expect(service.create(dto)).rejects.toThrow(
+        new ConflictException(PAYMENT_DUPLICATE_MESSAGE),
+      );
+      expect(repo.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('parallel ikki so‘rov — faqat bittasi o‘tadi', async () => {
+      const results = await Promise.allSettled([
+        service.create(dto),
+        service.create(dto),
+      ]);
+      expect(results.map((r) => r.status).sort()).toEqual([
+        'fulfilled',
+        'rejected',
+      ]);
+      expect(repo.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('10 soniyadan keyin qayta kiritish mumkin', async () => {
+      jest.useFakeTimers({ now: new Date('2026-11-08T10:00:00.000Z') });
+      await service.create(dto);
+      jest.setSystemTime(new Date('2026-11-08T10:00:10.000Z'));
+      await service.create(dto);
+      expect(repo.create).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+      ['summa', { amount: 60_000 }],
+      ['tur', { type: 'EXPENSE' }],
+      ['bemor', { patientId: 'p2' }],
+      ['tashrif', { visitId: 'v1' }],
+    ])('%s boshqa bo‘lsa — dublikat emas', async (_n, change) => {
+      repo.findVisitOwner.mockResolvedValue({
+        id: 'v1',
+        patientId: (change as any).patientId ?? 'p1',
+      });
+      await service.create(dto);
+      await service.create({ ...dto, ...change });
+      expect(repo.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('yozish xatosi — qayta urinish mumkin (kalit bo‘shatiladi)', async () => {
+      repo.create.mockRejectedValueOnce(new Error('db down'));
+      await expect(service.create(dto)).rejects.toThrow('db down');
+      await expect(service.create(dto)).resolves.toBeDefined();
+    });
   });
 });

@@ -152,6 +152,22 @@ export class PatientsRepository {
     `;
   }
 
+  /**
+   * Ids of non-deleted patients whose phone, compared on digits only,
+   * contains `digits` (any formatting in the DB).
+   */
+  async findActiveIdsByPhoneDigits(
+    digits: string,
+    limit = 1000,
+  ): Promise<{ id: string }[]> {
+    return this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM patients
+      WHERE deleted_at IS NULL
+        AND regexp_replace(phone, '[^0-9]', '', 'g') LIKE ${'%' + digits + '%'}
+      LIMIT ${limit}
+    `;
+  }
+
   async setTelegramChatId(ids: string[], chatId: string): Promise<number> {
     if (!ids.length) return 0;
     const r = await this.prisma.patient.updateMany({

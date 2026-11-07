@@ -293,6 +293,30 @@ describe('LeadsService', () => {
       expect(repo.update).not.toHaveBeenCalled();
     });
 
+    it('update — telefon kanonik +998 formatga keltiriladi', async () => {
+      repo.findById.mockResolvedValue(lead);
+      repo.update.mockResolvedValue(lead);
+      await service.update('l1', { phone: '90 123-45-67' });
+      expect(repo.update).toHaveBeenCalledWith('l1', {
+        phone: '+998901234567',
+      });
+    });
+
+    it('update — converted bilan yangi telefon bemorga ham shu raqam bilan uzatiladi', async () => {
+      repo.findById.mockResolvedValue({ ...lead, status: 'proposal' });
+      repo.updateAndEnsurePatient.mockResolvedValue(lead);
+      await service.update('l1', {
+        status: 'converted',
+        phone: '901234567',
+      });
+      expect(repo.updateAndEnsurePatient).toHaveBeenCalledWith(
+        'l1',
+        { status: 'converted', phone: '+998901234567' },
+        expect.objectContaining({ phone: '+998901234567' }),
+        expect.any(Date),
+      );
+    });
+
     it('update — allaqachon converted bo‘lsa takroran bemor yaratilmaydi', async () => {
       repo.findById.mockResolvedValue({ ...lead, status: 'converted' });
       repo.update.mockResolvedValue({ ...lead, status: 'converted' });
