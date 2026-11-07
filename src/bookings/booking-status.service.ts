@@ -5,6 +5,7 @@ import { NotificationLogService } from '../notifications/notification-log.servic
 import { oneLine } from '../common/utils/text.util';
 import { toDateOnlyString } from '../common/utils/date.util';
 import { formatReminderDate } from '../settings/reminder-template';
+import { statusChatId } from '../telegram/dev-defaults';
 
 export const BOOKING_STATUS_LABELS: Record<string, string> = {
   pending: 'Yangi ariza',
@@ -260,9 +261,7 @@ export class BookingStatusService {
   }
 
   private async toGroup(kind: string, ctx: BookingSnapshot, text: string) {
-    const groupChat = (
-      process.env.TELEGRAM_STATUS_CHAT_ID || process.env.TELEGRAM_LEADS_CHAT_ID
-    )?.trim();
+    const groupChat = statusChatId();
     if (!groupChat) return;
     await this.outbox.enqueue({
       kind,

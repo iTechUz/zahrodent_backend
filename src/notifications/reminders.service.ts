@@ -19,6 +19,7 @@ import {
   toDateOnlyString,
   todayInTashkent,
 } from '../common/utils/date.util';
+import { statusChatId } from '../telegram/dev-defaults';
 
 export const REMINDER_CALLBACK_CONFIRM = 'rem_ok_';
 export const REMINDER_CALLBACK_RESCHEDULE = 'rem_re_';
@@ -299,9 +300,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       data: { rescheduleRequestedAt: now },
     });
     if (!r.count) return 'already';
-    const groupChat = (
-      process.env.TELEGRAM_STATUS_CHAT_ID || process.env.TELEGRAM_LEADS_CHAT_ID
-    )?.trim();
+    const groupChat = statusChatId();
     if (!groupChat) {
       this.logger.warn(
         `Ko'chirish so'rovi (qabul ${b.id}) — TELEGRAM_STATUS_CHAT_ID/TELEGRAM_LEADS_CHAT_ID sozlanmagan, xodimlarga xabar ketmadi`,

@@ -15,6 +15,7 @@ import { NotificationLogService } from '../notifications/notification-log.servic
 import { oneLine } from '../common/utils/text.util';
 import { formatReminderDate } from '../settings/reminder-template';
 import { toDateOnlyString } from '../common/utils/date.util';
+import { statusChatId, telegramBotToken } from './dev-defaults';
 
 /** Max leads one Telegram user can create per window (spam guard). */
 export const TELEGRAM_LEAD_LIMIT = 3;
@@ -48,7 +49,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.logger.log("TELEGRAM_BOT_ENABLED=false — Telegram bot o'chirilgan.");
       return;
     }
-    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const token = telegramBotToken();
     if (!token) {
       this.logger.warn(
         'TELEGRAM_BOT_TOKEN topilmadi. Telegram bot ishlamaydi.',
@@ -183,9 +184,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       doctor: { firstName: string; lastName: string };
     },
   ) {
-    const group = (
-      process.env.TELEGRAM_STATUS_CHAT_ID || process.env.TELEGRAM_LEADS_CHAT_ID
-    )?.trim();
+    const group = statusChatId();
     if (!group || !this.outbox) return;
     await this.outbox.enqueue({
       kind: 'feedback_low_group',

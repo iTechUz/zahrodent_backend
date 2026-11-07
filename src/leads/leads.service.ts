@@ -14,6 +14,7 @@ import {
   tashkentInstantRange,
   todayInTashkent,
 } from '../common/utils/date.util';
+import { leadsChatId } from '../telegram/dev-defaults';
 
 /** Sources announced in the staff group (CRM-entered leads are not). */
 const NOTIFIED_SOURCES = ['website', 'telegram_bot'];
@@ -114,7 +115,7 @@ export class LeadsService {
    */
   private async notifyLeadsChat(lead: Lead): Promise<void> {
     try {
-      const chatId = process.env.TELEGRAM_LEADS_CHAT_ID?.trim();
+      const chatId = leadsChatId();
       if (!chatId || !NOTIFIED_SOURCES.includes(lead.source)) return;
       await this.outbox.enqueue({
         kind: 'lead_group',
