@@ -20,6 +20,8 @@ describe('PatientsService', () => {
       | 'createComment'
       | 'findCommentsByPatientId'
       | 'findDebtors'
+      | 'findActiveIdsByMobile'
+      | 'findActiveIdsByPhoneDigits'
     >
   >;
 
@@ -78,19 +80,21 @@ describe('PatientsService', () => {
       createComment: jest.fn(),
       findCommentsByPatientId: jest.fn(),
       findDebtors: jest.fn().mockResolvedValue([]),
+      findActiveIdsByMobile: jest.fn().mockResolvedValue([]),
+      findActiveIdsByPhoneDigits: jest.fn().mockResolvedValue([]),
     };
     service = new PatientsService(repo as unknown as PatientsRepository);
   });
 
   describe('findAll', () => {
     const where = () => repo.findAll.mock.calls[0][0] as any;
-    const search = (q: string) => ({
+    const tokenMatch = (q: string) => ({
       OR: [
         { firstName: { contains: q, mode: 'insensitive' } },
         { lastName: { contains: q, mode: 'insensitive' } },
-        { phone: { contains: q, mode: 'insensitive' } },
       ],
     });
+    const search = (...tokens: string[]) => ({ AND: tokens.map(tokenMatch) });
 
     it('default pagination va bo‘sh where', async () => {
       await service.findAll({}, admin);
@@ -144,9 +148,34 @@ describe('PatientsService', () => {
       });
     });
 
-    it('search — ism/familiya/telefon bo‘yicha OR (trim)', async () => {
+    it('search — ism/familiya bo‘yicha (trim)', async () => {
       await service.findAll({ search: ' ali ' }, admin);
       expect(where()).toEqual({ AND: [ND, search('ali')] });
+      expect(repo.findActiveIdsByPhoneDigits).not.toHaveBeenCalled();
+    });
+
+    it('search — so‘zlarga bo‘linadi, har bir so‘z ism yoki familiyada (AND)', async () => {
+      await service.findAll({ search: 'ali   valiyev' }, admin);
+      expect(where()).toEqual({ AND: [ND, search('ali', 'valiyev')] });
+    });
+
+    it('search — telefon raqami raqamlar bo‘yicha qidiriladi', async () => {
+      repo.findActiveIdsByPhoneDigits.mockResolvedValue([{ id: 'p7' }]);
+      await service.findAll({ search: '+998 90 123' }, admin);
+      expect(repo.findActiveIdsByPhoneDigits).toHaveBeenCalledWith('99890123');
+      expect(where().AND[1]).toEqual({
+        OR: [search('+998', '90', '123'), { id: { in: ['p7'] } }],
+      });
+    });
+
+    it('search — raqam topilmasa faqat ism sharti', async () => {
+      await service.findAll({ search: '90123' }, admin);
+      expect(where().AND[1]).toEqual(search('90123'));
+    });
+
+    it('search — 3 tadan kam raqam telefon qidiruvini ishga tushirmaydi', async () => {
+      await service.findAll({ search: '90' }, admin);
+      expect(repo.findActiveIdsByPhoneDigits).not.toHaveBeenCalled();
     });
 
     it('bo‘sh joyli search e’tiborsiz', async () => {
@@ -368,6 +397,8 @@ describe('PatientsService', () => {
       await service.create(dto);
       expect(repo.create).toHaveBeenCalledWith({
         ...dto,
+        age: 30,
+        birthYear: expect.any(Number),
         notes: '',
         assignedDoctor: undefined,
         avatar: undefined,

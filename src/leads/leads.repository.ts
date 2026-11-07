@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Lead, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { normalizeUzPhone } from '../common/utils/phone.util';
 
 @Injectable()
 export class LeadsRepository {
@@ -69,12 +70,26 @@ export class LeadsRepository {
     patientDate: Date,
   ): Promise<Lead> {
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.lead.update({ where: { id }, data });
+      // Serialise conversions of the same phone (two leads / two clicks).
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lead.phone}))`;
+      // Claim the transition: only the request that really flips the status
+      // creates the patient; a concurrent twin just returns the lead.
+      const claimed = await tx.lead.updateMany({
+        where: { id, status: { not: 'converted' } },
+        data: data as Prisma.LeadUpdateManyMutationInput,
+      });
+      const updated = await tx.lead.findUniqueOrThrow({ where: { id } });
+      if (claimed.count === 0) return updated;
+      const canonical = normalizeUzPhone(lead.phone);
       const existing = await tx.patient.findFirst({
-        where: { phone: lead.phone, deletedAt: null },
+        where: {
+          phone: { in: [...new Set([lead.phone, canonical ?? lead.phone])] },
+          deletedAt: null,
+        },
         select: { id: true },
       });
       if (!existing) {
+        // "Ali Valiyev" → Ali / Valiyev; a single word is the first name.
         const [firstName, ...rest] = lead.name.trim().split(/\s+/);
         const notes = [
           lead.service && `Xizmat: ${lead.service}`,
@@ -86,9 +101,12 @@ export class LeadsRepository {
           data: {
             firstName: firstName || lead.name,
             lastName: rest.join(' '),
-            // Unknown at lead stage; the schema requires a value.
+            // Unknown at lead stage: birthYear stays NULL; `age` is NOT NULL
+            // in the schema, so 0 is the "unknown" placeholder.
             age: 0,
-            phone: lead.phone,
+            birthYear: null,
+            workplace: '',
+            phone: canonical ?? lead.phone,
             source: patientSourceFromLead(lead.source),
             notes,
             createdAt: patientDate,

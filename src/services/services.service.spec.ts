@@ -1,5 +1,5 @@
-import { NotFoundException } from '@nestjs/common';
-import { ServicesService } from './services.service';
+import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ServicesService, serviceInUseMessage } from './services.service';
 import { ServicesRepository } from './services.repository';
 
 describe('ServicesService', () => {
@@ -16,6 +16,7 @@ describe('ServicesService', () => {
       | 'countCategories'
       | 'getAvgPrice'
       | 'getDetailedStats'
+      | 'countUsage'
     >
   >;
 
@@ -41,6 +42,7 @@ describe('ServicesService', () => {
       countCategories: jest.fn(),
       getAvgPrice: jest.fn(),
       getDetailedStats: jest.fn(),
+      countUsage: jest.fn().mockResolvedValue({ bookings: 0, payments: 0 }),
     };
     service = new ServicesService(repo as unknown as ServicesRepository);
   });
@@ -145,6 +147,22 @@ describe('ServicesService', () => {
     await expect(service.remove('s1')).resolves.toEqual({ id: 's1' });
     expect(repo.delete).toHaveBeenCalledWith('s1');
   });
+
+  it.each([
+    [3, 0],
+    [0, 2],
+    [4, 5],
+  ])(
+    'remove — %i qabul / %i to‘lovga bog‘langan bo‘lsa 409, o‘chirilmaydi',
+    async (bookings, payments) => {
+      repo.findById.mockResolvedValue(svc());
+      repo.countUsage.mockResolvedValue({ bookings, payments });
+      await expect(service.remove('s1')).rejects.toThrow(
+        new ConflictException(serviceInUseMessage(bookings, payments)),
+      );
+      expect(repo.delete).not.toHaveBeenCalled();
+    },
+  );
 
   it('getStats — agregatlar', async () => {
     repo.count.mockResolvedValue(12);

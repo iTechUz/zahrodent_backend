@@ -28,11 +28,21 @@ export class CreatePatientDto {
   @MinLength(1)
   lastName: string;
 
+  /** Eski mijozlar uchun: `birthYear` yuborilsa, yosh undan hisoblanadi. */
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
   @Max(120)
-  age: number;
+  age?: number;
+
+  /** Tug‘ilgan yil (yosh shundan hisoblanadi). `age` yoki `birthYear` kerak. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1900)
+  @Max(2100)
+  birthYear?: number;
 
   @IsString()
   @Matches(/^\+?[\d\s-]{10,20}$/, { message: 'Invalid phone' })
@@ -52,9 +62,10 @@ export class CreatePatientDto {
   @IsString()
   address?: string;
 
+  /** Bo‘sh bo‘lishi mumkin (lead'dan yaratilgan bemorda noma'lum) */
+  @IsOptional()
   @IsString()
-  @MinLength(1)
-  workplace: string;
+  workplace?: string;
 
   /** PATCH: `null` → shifokor biriktirilishini olib tashlash */
   @IsOptional()

@@ -173,16 +173,28 @@ export class LeadsService {
   async update(id: string, dto: UpdateLeadDto) {
     const lead = await this.leadsRepository.findById(id);
     if (!lead) throw new NotFoundException('Murojaat topilmadi');
-    // First move to "converted" → the lead becomes a patient automatically.
-    if (dto.status === 'converted' && lead.status !== 'converted') {
+    // Same canonical phone as on create.
+    const data: UpdateLeadDto = { ...dto };
+    if (dto.phone !== undefined) {
+      data.phone = normalizeUzPhone(dto.phone) ?? dto.phone.trim();
+    }
+    // First move to "converted" → the lead becomes a patient automatically
+    // (the repository re-checks inside a transaction: concurrent-safe).
+    if (data.status === 'converted' && lead.status !== 'converted') {
       return this.leadsRepository.updateAndEnsurePatient(
         id,
-        dto,
-        { ...lead, ...dto },
+        data,
+        {
+          name: data.name ?? lead.name,
+          phone: data.phone ?? lead.phone,
+          source: lead.source,
+          service: data.service ?? lead.service,
+          message: data.message ?? lead.message,
+        },
         parseDateOnlyToUTC(todayInTashkent()),
       );
     }
-    return this.leadsRepository.update(id, dto);
+    return this.leadsRepository.update(id, data);
   }
 
   async remove(id: string) {

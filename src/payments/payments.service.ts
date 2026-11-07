@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -24,9 +25,41 @@ import { COLLECTED_PAYMENT_STATUSES } from '../patients/patient-balance';
 
 export const PAYMENT_NOT_FOUND = "To'lov topilmadi";
 
+/** Identical payment re-submitted inside this window = accidental double click. */
+export const PAYMENT_DUPLICATE_WINDOW_MS = 10_000;
+export const PAYMENT_DUPLICATE_MESSAGE =
+  "Xuddi shunday to'lov hozirgina kiritilgan (qayta yuborish ehtimoli) — 10 soniyadan keyin qayta urinib ko'ring";
+
 @Injectable()
 export class PaymentsService {
+  /**
+   * Double-submit guard: key (patient, visit, amount, type) → last accepted
+   * time. In-memory (one API instance; payments have no created_at column),
+   * checked and claimed synchronously so concurrent requests can't both pass.
+   */
+  private readonly recentSubmissions = new Map<string, number>();
+
   constructor(private readonly paymentsRepository: PaymentsRepository) {}
+
+  private claimSubmission(dto: CreatePaymentDto): string {
+    const now = Date.now();
+    for (const [k, at] of this.recentSubmissions) {
+      if (now - at >= PAYMENT_DUPLICATE_WINDOW_MS) {
+        this.recentSubmissions.delete(k);
+      }
+    }
+    const key = [
+      dto.patientId,
+      dto.visitId ?? '',
+      dto.amount,
+      dto.type || 'INCOME',
+    ].join('|');
+    if (this.recentSubmissions.has(key)) {
+      throw new ConflictException(PAYMENT_DUPLICATE_MESSAGE);
+    }
+    this.recentSubmissions.set(key, now);
+    return key;
+  }
 
   async findAll(
     query: PaymentsQueryDto,
@@ -90,7 +123,20 @@ export class PaymentsService {
   async create(dto: CreatePaymentDto) {
     if (dto.visitId) await this.assertVisitBelongs(dto.visitId, dto.patientId);
     const dateStr = dto.date ?? todayInTashkent();
-    const p = await this.paymentsRepository.create({
+    const claimed = this.claimSubmission(dto);
+    let p: PaymentWithPatient;
+    try {
+      p = await this.insertPayment(dto, dateStr);
+    } catch (e) {
+      // Nothing was saved → a retry is legitimate.
+      this.recentSubmissions.delete(claimed);
+      throw e;
+    }
+    return this.toResponse(p);
+  }
+
+  private insertPayment(dto: CreatePaymentDto, dateStr: string) {
+    return this.paymentsRepository.create({
       patient: connectActivePatient(dto.patientId),
       amount: dto.amount,
       method: dto.method,
@@ -102,7 +148,6 @@ export class PaymentsService {
       service: dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
       visit: dto.visitId ? { connect: { id: dto.visitId } } : undefined,
     });
-    return this.toResponse(p);
   }
 
   async update(id: string, dto: UpdatePaymentDto) {
@@ -191,8 +236,26 @@ export class PaymentsService {
     };
   }
 
-  async getDoctorStats() {
-    return this.paymentsRepository.getDoctorStats();
+  /**
+   * Collected INCOME per doctor, attributed through the payment's visit.
+   * `total` is kept for old clients; `revenue` is the same number under a
+   * clearer name. `percent` is the doctor's share of `linkedTotal` — the sum
+   * of payments linked to a visit — never of all clinic revenue (payments
+   * without a visit belong to no doctor).
+   */
+  async getDoctorStats(period: { startDate?: string; endDate?: string } = {}) {
+    const rows = await this.paymentsRepository.getDoctorStats(
+      dateOnlyColumnRange(period.startDate, period.endDate),
+    );
+    const linkedTotal = rows.reduce((n, r) => n + r.total, 0);
+    return rows.map((r) => ({
+      doctorId: r.doctorId,
+      total: r.total,
+      revenue: r.total,
+      linkedTotal,
+      percent:
+        linkedTotal > 0 ? Math.round((r.total / linkedTotal) * 1000) / 10 : 0,
+    }));
   }
 
   private async getOrThrow(id: string) {

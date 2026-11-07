@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AnalyticsService } from './analytics.service';
 import { AnalyticsRepository } from './analytics.repository';
 import type { AuthUserView } from '../auth/auth.service';
@@ -131,6 +131,7 @@ describe('AnalyticsService', () => {
       });
       expect(repo.countBookings).toHaveBeenNthCalledWith(1, {
         date: d('2026-09-15'),
+        status: { notIn: ['cancelled', 'no-show'] },
       });
       expect(repo.countBookings).toHaveBeenNthCalledWith(2, {
         date: d('2026-09-15'),
@@ -138,9 +139,15 @@ describe('AnalyticsService', () => {
       });
       expect(repo.countBookings).toHaveBeenNthCalledWith(3, {
         status: 'pending',
+        date: { gte: d('2026-09-15') },
       });
       expect(repo.countDoctors).toHaveBeenNthCalledWith(1, {
-        bookings: { some: { date: d('2026-09-15') } },
+        bookings: {
+          some: {
+            date: d('2026-09-15'),
+            status: { notIn: ['cancelled', 'no-show'] },
+          },
+        },
       });
       expect(repo.sumPayments).toHaveBeenNthCalledWith(1, {
         type: 'INCOME',
@@ -165,6 +172,7 @@ describe('AnalyticsService', () => {
       await service.getDashboard(admin);
       expect(repo.countBookings).toHaveBeenNthCalledWith(1, {
         date: d('2026-10-01'),
+        status: { notIn: ['cancelled', 'no-show'] },
       });
       expect(repo.countPatients).toHaveBeenNthCalledWith(2, {
         AND: [
@@ -196,10 +204,12 @@ describe('AnalyticsService', () => {
       expect(repo.countBookings).toHaveBeenNthCalledWith(1, {
         doctorId: 'd1',
         date: d('2026-09-15'),
+        status: { notIn: ['cancelled', 'no-show'] },
       });
       expect(repo.countBookings).toHaveBeenNthCalledWith(3, {
         doctorId: 'd1',
         status: 'pending',
+        date: { gte: d('2026-09-15') },
       });
     });
 
@@ -299,6 +309,34 @@ describe('AnalyticsService', () => {
       expect(repo.bookingsBySource).toHaveBeenCalledWith({
         date: { gte: d('2026-10-01'), lte: d('2026-10-31') },
       });
+    });
+  });
+
+  describe('getSources — endDate qoidasi', () => {
+    afterEach(() => jest.useRealTimers());
+
+    it('startDate bor, endDate yo‘q — yuqori chegara bugun (monthly/daily bilan bir xil)', async () => {
+      jest.useFakeTimers({ now: new Date('2026-10-12T08:00:00.000Z') });
+      await service.getSources(admin, 'bookings', { startDate: '2026-10-01' });
+      expect(repo.bookingsBySource).toHaveBeenCalledWith({
+        date: { gte: d('2026-10-01'), lte: d('2026-10-12') },
+      });
+      await service.getSources(admin, 'patients', { startDate: '2026-10-01' });
+      expect(repo.patientsBySource).toHaveBeenCalledWith({
+        AND: [
+          ND,
+          { createdAt: { gte: d('2026-10-01'), lte: d('2026-10-12') } },
+        ],
+      });
+    });
+
+    it('startDate endDate dan keyin — 400', async () => {
+      await expect(
+        service.getSources(admin, 'bookings', {
+          startDate: '2026-10-20',
+          endDate: '2026-10-01',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 

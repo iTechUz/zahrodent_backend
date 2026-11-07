@@ -11,6 +11,7 @@ import {
   Min,
 } from 'class-validator';
 import { DATE_ONLY_REGEX } from '../utils/date.util';
+import { IsRealDateOnly } from '../validators/is-real-date-only';
 
 export const MAX_PAGE_LIMIT = 100;
 export const SORT_ORDERS = ['asc', 'desc'] as const;
@@ -66,6 +67,7 @@ export function DateOnlyQuery(): PropertyDecorator {
     Matches(DATE_ONLY_REGEX, {
       message: `${String(key)} YYYY-MM-DD formatida bo‘lishi kerak`,
     })(target, key);
+    IsRealDateOnly()(target, key);
   };
 }
 

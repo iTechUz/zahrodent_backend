@@ -67,6 +67,9 @@ describe('RemindersService', () => {
     ).toEqual(['rem_ok_b1', 'rem_re_b1']);
     expect(prisma.booking.updateMany.mock.calls[0][0].where).toEqual({
       id: 'b1',
+      status: { in: ['pending', 'confirmed'] },
+      date: new Date('2026-11-02T00:00:00.000Z'),
+      time: '10:00',
       reminder24SentAt: null,
     });
   });
@@ -187,6 +190,33 @@ describe('RemindersService', () => {
       );
       expect(status.onChanged).not.toHaveBeenCalled();
     });
+  });
+
+  it('queries only the next-24h window ordered by start, and pages through >200 rows', async () => {
+    const page1 = Array.from({ length: 200 }, (_, i) =>
+      row({ id: `x${i}`, time: '23:59' }),
+    );
+    prisma.booking.findMany
+      .mockResolvedValueOnce(page1)
+      .mockResolvedValueOnce([row({ id: 'last' })]);
+    await svc.run(at('2026-11-01T09:00:00Z'));
+    expect(prisma.booking.findMany).toHaveBeenCalledTimes(2);
+    const q1 = prisma.booking.findMany.mock.calls[0][0];
+    expect(q1.orderBy).toEqual([
+      { date: 'asc' },
+      { time: 'asc' },
+      { id: 'asc' },
+    ]);
+    expect(q1.take).toBe(200);
+    // 2026-11-01 14:00 Tashkent → window ends 2026-11-02
+    expect(q1.where.date.lte).toEqual(new Date('2026-11-02T00:00:00.000Z'));
+    expect(prisma.booking.findMany.mock.calls[1][0]).toMatchObject({
+      cursor: { id: 'x199' },
+      skip: 1,
+    });
+    expect(
+      outbox.enqueue.mock.calls.some((c: any) => c[0].patientId === 'p1'),
+    ).toBe(true);
   });
 
   it('keyboard helper', () => {

@@ -11,6 +11,10 @@ import { TelegramBotRegistry } from './telegram-bot.registry';
 import { normalizeUzPhone } from '../common/utils/phone.util';
 import { PrismaService } from '../database/prisma.service';
 import { RemindersService } from '../notifications/reminders.service';
+import { NotificationLogService } from '../notifications/notification-log.service';
+import { oneLine } from '../common/utils/text.util';
+import { formatReminderDate } from '../settings/reminder-template';
+import { toDateOnlyString } from '../common/utils/date.util';
 
 /** Max leads one Telegram user can create per window (spam guard). */
 export const TELEGRAM_LEAD_LIMIT = 3;
@@ -36,6 +40,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly registry: TelegramBotRegistry,
     private readonly prisma?: PrismaService,
     private readonly reminders?: RemindersService,
+    private readonly outbox?: NotificationLogService,
   ) {}
 
   onModuleInit() {
@@ -134,7 +139,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       select: {
         status: true,
         feedbackRating: true,
-        patient: { select: { telegramChatId: true } },
+        date: true,
+        time: true,
+        patientId: true,
+        patient: {
+          select: {
+            telegramChatId: true,
+            firstName: true,
+            lastName: true,
+            phone: true,
+          },
+        },
+        doctor: { select: { firstName: true, lastName: true } },
       },
     });
     if (
@@ -150,7 +166,40 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       where: { id: bookingId, feedbackRating: null },
       data: { feedbackRating: rating, feedbackAt: new Date() },
     });
-    return r.count ? 'saved' : 'already';
+    if (!r.count) return 'already';
+    if (rating <= 3) await this.alertLowRating(bookingId, rating, b);
+    return 'saved';
+  }
+
+  /** Low ratings (1-3) are pushed to the staff group so someone follows up. */
+  private async alertLowRating(
+    bookingId: string,
+    rating: number,
+    b: {
+      date: Date;
+      time: string;
+      patientId: string;
+      patient: { firstName: string; lastName: string; phone: string };
+      doctor: { firstName: string; lastName: string };
+    },
+  ) {
+    const group = (
+      process.env.TELEGRAM_STATUS_CHAT_ID || process.env.TELEGRAM_LEADS_CHAT_ID
+    )?.trim();
+    if (!group || !this.outbox) return;
+    await this.outbox.enqueue({
+      kind: 'feedback_low_group',
+      chatId: group,
+      text: [
+        `⭐ Past baho: ${rating}/5`,
+        `👤 ${oneLine(`${b.patient.firstName} ${b.patient.lastName}`, 100)}`,
+        `📞 ${oneLine(b.patient.phone, 30)}`,
+        `🦷 ${oneLine(`${b.doctor.firstName} ${b.doctor.lastName}`, 100)}`,
+        `📅 ${formatReminderDate(toDateOnlyString(b.date))} ${b.time}`,
+        `Qabul: ${bookingId}`,
+      ].join('\n'),
+      patientId: b.patientId,
+    });
   }
 
   /** Sliding-window limit per Telegram user; records the attempt if allowed. */
@@ -335,7 +384,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           this.logger.error('Error creating lead:', error);
           await ctx.reply('Xatolik yuz berdi.');
         }
+      } else {
+        await ctx.reply(
+          "Murojaat qoldirish uchun /start buyrug'ini bosing va telefon raqamingizni yuboring.",
+        );
       }
+    });
+
+    // Never let a handler error (e.g. an expired callback) kill the poller.
+    bot.catch((err) => {
+      this.logger.warn(`Telegram handler xatosi: ${String(err)}`);
     });
   }
 }

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, Service } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { COLLECTED_PAYMENT_STATUSES } from '../patients/patient-balance';
 
 @Injectable()
 export class ServicesRepository {
@@ -17,7 +18,11 @@ export class ServicesRepository {
     const [data, total] = await Promise.all([
       this.prisma.service.findMany({
         where,
-        orderBy: opts?.orderBy ?? [{ category: 'asc' }, { name: 'asc' }],
+        orderBy: opts?.orderBy ?? [
+          { category: 'asc' },
+          { name: 'asc' },
+          { id: 'asc' },
+        ],
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
@@ -48,6 +53,17 @@ export class ServicesRepository {
     return this.prisma.service.findUnique({ where: { id } });
   }
 
+  /** Bookings and payments still pointing at the service. */
+  async countUsage(
+    id: string,
+  ): Promise<{ bookings: number; payments: number }> {
+    const [bookings, payments] = await Promise.all([
+      this.prisma.booking.count({ where: { serviceId: id } }),
+      this.prisma.payment.count({ where: { serviceId: id } }),
+    ]);
+    return { bookings, payments };
+  }
+
   create(data: Prisma.ServiceCreateInput): Promise<Service> {
     return this.prisma.service.create({ data });
   }
@@ -62,14 +78,24 @@ export class ServicesRepository {
     // Actually, Payment has serviceId.
     const paymentStats = await this.prisma.payment.groupBy({
       by: ['serviceId'],
-      where: { status: 'paid', serviceId: { not: null }, ...dateWhere },
+      where: {
+        type: 'INCOME',
+        status: { in: [...COLLECTED_PAYMENT_STATUSES] },
+        serviceId: { not: null },
+        ...dateWhere,
+      },
       _sum: { amount: true },
       _count: { patientId: true }, // Total payments
     });
 
     const patientStatsRaw = await this.prisma.payment.groupBy({
       by: ['serviceId', 'patientId'],
-      where: { serviceId: { not: null }, ...dateWhere },
+      where: {
+        type: 'INCOME',
+        status: { in: [...COLLECTED_PAYMENT_STATUSES] },
+        serviceId: { not: null },
+        ...dateWhere,
+      },
     });
 
     // Manual aggregation due to prisma groupBy limitations on unique count

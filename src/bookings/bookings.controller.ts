@@ -56,8 +56,8 @@ export class BookingsController {
   @Post()
   @Roles('admin', 'receptionist')
   @ApiOperation({ summary: 'Yangi qabul' })
-  create(@Body() dto: CreateBookingDto) {
-    return this.bookingsService.create(dto);
+  create(@Body() dto: CreateBookingDto, @GetUser() user: AuthUserView) {
+    return this.bookingsService.create(dto, user);
   }
 
   @Get(':id/status-log')

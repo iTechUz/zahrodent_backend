@@ -17,7 +17,11 @@ describe('LeadsRepository.updateAndEnsurePatient', () => {
 
   beforeEach(() => {
     tx = {
-      lead: { update: jest.fn().mockResolvedValue({ id: 'l1' }) },
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      lead: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'l1' }),
+      },
       patient: { findFirst: jest.fn(), create: jest.fn() },
     };
     prisma = {
@@ -30,9 +34,13 @@ describe('LeadsRepository.updateAndEnsurePatient', () => {
     tx.patient.findFirst.mockResolvedValue({ id: 'p1' });
     const res = await repo.updateAndEnsurePatient('l1', data, baseLead, date);
     expect(res).toEqual({ id: 'l1' });
-    expect(tx.lead.update).toHaveBeenCalledWith({ where: { id: 'l1' }, data });
+    expect(tx.lead.updateMany).toHaveBeenCalledWith({
+      where: { id: 'l1', status: { not: 'converted' } },
+      data,
+    });
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
     expect(tx.patient.findFirst).toHaveBeenCalledWith({
-      where: { phone: baseLead.phone, deletedAt: null },
+      where: { phone: { in: [baseLead.phone] }, deletedAt: null },
       select: { id: true },
     });
     expect(tx.patient.create).not.toHaveBeenCalled();
@@ -56,6 +64,8 @@ describe('LeadsRepository.updateAndEnsurePatient', () => {
         firstName: 'Ali',
         lastName: 'Karim Valiyev',
         age: 0,
+        birthYear: null,
+        workplace: '',
         phone: baseLead.phone,
         source: 'website',
         notes: 'Xizmat: Tish\nMurojaat: Og‘riq',
@@ -106,6 +116,36 @@ describe('LeadsRepository.updateAndEnsurePatient', () => {
       date,
     );
     expect(tx.patient.create.mock.calls[0][0].data.source).toBe(expected);
+  });
+
+  it('parallel so‘rov holatni allaqachon o‘zgartirgan — bemor yaratilmaydi (idempotent)', async () => {
+    tx.lead.updateMany.mockResolvedValue({ count: 0 });
+    tx.lead.findUniqueOrThrow.mockResolvedValue({
+      id: 'l1',
+      status: 'converted',
+    });
+    const res = await repo.updateAndEnsurePatient('l1', data, baseLead, date);
+    expect(res).toEqual({ id: 'l1', status: 'converted' });
+    expect(tx.patient.findFirst).not.toHaveBeenCalled();
+    expect(tx.patient.create).not.toHaveBeenCalled();
+  });
+
+  it('o‘zbek raqami — bemor kanonik +998 formatida yaratiladi va ikkala format qidiriladi', async () => {
+    tx.patient.findFirst.mockResolvedValue(null);
+    await repo.updateAndEnsurePatient(
+      'l1',
+      data,
+      { ...baseLead, phone: '90 123 45 67' },
+      date,
+    );
+    expect(tx.patient.findFirst).toHaveBeenCalledWith({
+      where: {
+        phone: { in: ['90 123 45 67', '+998901234567'] },
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    expect(tx.patient.create.mock.calls[0][0].data.phone).toBe('+998901234567');
   });
 
   it('bemor yaratish xatosi tranzaksiyadan tashqariga chiqadi', async () => {

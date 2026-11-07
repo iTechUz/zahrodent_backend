@@ -26,9 +26,9 @@ describe('PaymentsController', () => {
     service.getStats.mockResolvedValue({ totalRevenue: 1 });
     service.getDoctorStats.mockResolvedValue([]);
     await expect(controller.getStats()).resolves.toEqual({ totalRevenue: 1 });
-    await expect(controller.getDoctorStats()).resolves.toEqual([]);
+    await expect(controller.getDoctorStats({})).resolves.toEqual([]);
     expect(service.getStats).toHaveBeenCalledWith();
-    expect(service.getDoctorStats).toHaveBeenCalledWith();
+    expect(service.getDoctorStats).toHaveBeenCalledWith({});
   });
 
   it('findAll — query', async () => {

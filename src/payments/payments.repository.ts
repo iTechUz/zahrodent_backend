@@ -27,7 +27,7 @@ export class PaymentsRepository {
       this.prisma.payment.findMany({
         where,
         include: WITH_PATIENT_SUMMARY,
-        orderBy: opts?.orderBy ?? { date: 'desc' },
+        orderBy: opts?.orderBy ?? [{ date: 'desc' }, { id: 'desc' }],
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
@@ -63,13 +63,18 @@ export class PaymentsRepository {
     });
   }
 
-  async getDoctorStats(): Promise<{ doctorId: string; total: number }[]> {
+  /** `range` limits payments by their date (inclusive); omitted → all time. */
+  async getDoctorStats(range?: {
+    gte?: Date;
+    lte?: Date;
+  }): Promise<{ doctorId: string; total: number }[]> {
     const result = await this.prisma.payment.groupBy({
       by: ['visitId'],
       where: {
         type: 'INCOME',
         status: { in: ['paid', 'partial'] },
         visitId: { not: null },
+        ...(range && (range.gte || range.lte) ? { date: range } : {}),
       },
       _sum: { amount: true },
     });

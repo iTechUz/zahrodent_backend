@@ -120,6 +120,27 @@ describe('DTO validation', () => {
       ).toEqual([DATE_MSG]);
     });
 
+    it('mavjud bo‘lmagan sana (2026-02-30) — 400 xabari', () => {
+      expect(
+        errorsOf(CreateBookingDto, { ...ok, date: '2026-02-30' }).date,
+      ).toEqual(['date mavjud bo‘lmagan sana']);
+      expect(
+        errorsOf(CreateBookingDto, { ...ok, date: '2026-13-01' }).date,
+      ).toBeDefined();
+      expect(errorsOf(CreateBookingDto, { ...ok, date: '2028-02-29' })).toEqual(
+        {},
+      );
+    });
+
+    it('notes — 1000 belgidan oshmasligi kerak', () => {
+      expect(
+        errorsOf(CreateBookingDto, { ...ok, notes: 'a'.repeat(1000) }),
+      ).toEqual({});
+      expect(
+        errorsOf(CreateBookingDto, { ...ok, notes: 'a'.repeat(1001) }).notes,
+      ).toBeDefined();
+    });
+
     it('noma’lum source/status', () => {
       const e = errorsOf(CreateBookingDto, {
         ...ok,
@@ -355,6 +376,18 @@ describe('DTO validation', () => {
       description: 'Plomba',
     };
 
+    it('amount > 2 mlrd — 400 (Create va Update)', () => {
+      expect(
+        errorsOf(CreatePaymentDto, { ...ok, amount: 2_000_000_001 }).amount,
+      ).toBeDefined();
+      expect(
+        errorsOf(UpdatePaymentDto, { amount: 2_000_000_001 }).amount,
+      ).toBeDefined();
+      expect(
+        errorsOf(CreatePaymentDto, { ...ok, amount: 2_000_000_000 }),
+      ).toEqual({});
+    });
+
     it('Create — to‘g‘ri', () => {
       expect(errorsOf(CreatePaymentDto, ok)).toEqual({});
       expect(
@@ -392,6 +425,16 @@ describe('DTO validation', () => {
   });
 
   describe('Services', () => {
+    it('price > 2 mlrd — 400 (Create va Update)', () => {
+      const base = { name: 'P', category: 'T', duration: '30' };
+      expect(
+        errorsOf(CreateServiceDto, { ...base, price: 2_000_000_001 }).price,
+      ).toBeDefined();
+      expect(
+        errorsOf(UpdateServiceDto, { price: 2_000_000_001 }).price,
+      ).toBeDefined();
+    });
+
     it('Create — narx va davomiylik >= 1', () => {
       expect(
         errorsOf(CreateServiceDto, {
@@ -425,6 +468,15 @@ describe('DTO validation', () => {
       password: 'secret1',
       role: 'receptionist',
     };
+
+    it('password > 72 belgi — 400 (bcrypt kesadi)', () => {
+      expect(
+        errorsOf(CreateUserDto, { ...ok, password: 'a'.repeat(73) }).password,
+      ).toBeDefined();
+      expect(
+        errorsOf(CreateUserDto, { ...ok, password: 'a'.repeat(72) }),
+      ).toEqual({});
+    });
 
     it('Create — to‘g‘ri va xatolar', () => {
       expect(errorsOf(CreateUserDto, ok)).toEqual({});
@@ -462,6 +514,16 @@ describe('DTO validation', () => {
   });
 
   describe('Visits', () => {
+    it('price > 2 mlrd — 400 (Create va Update)', () => {
+      const base = { patientId: 'p1', doctorId: 'd1', status: 'completed' };
+      expect(
+        errorsOf(CreateVisitDto, { ...base, price: 2_000_000_001 }).price,
+      ).toBeDefined();
+      expect(
+        errorsOf(UpdateVisitDto, { price: 2_000_000_001 }).price,
+      ).toBeDefined();
+    });
+
     it('Create — to‘g‘ri va xatolar', () => {
       expect(
         errorsOf(CreateVisitDto, {

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Doctor, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
+import { parseDateOnlyToUTC, todayInTashkent } from '../common/utils/date.util';
 
 const USER_PHONE = { user: { select: { phone: true } } } as const;
 export type DoctorWithUser = Doctor & { user?: { phone: string } | null };
@@ -20,7 +21,7 @@ export class DoctorsRepository {
     const [data, total] = await Promise.all([
       this.prisma.doctor.findMany({
         where,
-        orderBy: opts?.orderBy ?? { firstName: 'asc' },
+        orderBy: opts?.orderBy ?? [{ firstName: 'asc' }, { id: 'asc' }],
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
@@ -34,16 +35,15 @@ export class DoctorsRepository {
   }
 
   async getActiveCountToday() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(today.getDate() + 1);
+    // DATE column: clinic calendar day (Asia/Tashkent), not the server's TZ.
+    const today = parseDateOnlyToUTC(todayInTashkent());
 
     const count = await this.prisma.doctor.count({
       where: {
         bookings: {
           some: {
-            date: { gte: today, lt: tomorrow },
+            date: today,
+            status: { notIn: ['cancelled', 'no-show'] },
           },
         },
       },
@@ -51,9 +51,22 @@ export class DoctorsRepository {
     return { count };
   }
 
+  /**
+   * Same definition as the efficiency report's `totalVisits`: completed
+   * visits, plus completed bookings that have no completed visit (legacy
+   * bookings completed before they auto-created a visit) — never both.
+   */
   async getTotalVisitsCount() {
-    const count = await this.prisma.visit.count();
-    return { count };
+    const [visits, bookingOnly] = await Promise.all([
+      this.prisma.visit.count({ where: { status: 'completed' } }),
+      this.prisma.booking.count({
+        where: {
+          status: 'completed',
+          visits: { none: { status: 'completed' } },
+        },
+      }),
+    ]);
+    return { count: visits + bookingOnly };
   }
 
   findById(
@@ -99,14 +112,11 @@ export class DoctorsRepository {
       },
     });
 
-    // Get booking stats per doctor
+    // Booking stats per doctor and status (cancelled ones are excluded below).
     const bookingStats = await this.prisma.booking.groupBy({
-      by: ['doctorId'],
+      by: ['doctorId', 'status'],
       _count: { id: true },
-      where: {
-        status: { in: ['pending', 'confirmed', 'completed'] },
-        ...dateWhere,
-      },
+      where: { status: { not: 'cancelled' }, ...dateWhere },
     });
 
     // Get visit stats per doctor
@@ -129,10 +139,15 @@ export class DoctorsRepository {
       where: { status: 'completed', ...dateWhere },
     });
 
-    // Completing a booking does not create a Visit, so a doctor's finished
-    // bookings without a visit must still count as treated patients / visits.
+    // Legacy: bookings completed before they auto-created a Visit. A completed
+    // booking that already has a completed visit is counted through the visit
+    // only (no double count).
     const completedBookings = await this.prisma.booking.findMany({
-      where: { status: 'completed', visits: { none: {} }, ...dateWhere },
+      where: {
+        status: 'completed',
+        visits: { none: { status: 'completed' } },
+        ...dateWhere,
+      },
       select: { doctorId: true, patientId: true },
     });
 
@@ -153,7 +168,12 @@ export class DoctorsRepository {
     });
 
     return doctors.map((d) => {
-      const bStat = bookingStats.find((s) => s.doctorId === d.id);
+      const own = bookingStats.filter((s) => s.doctorId === d.id);
+      // Non-cancelled bookings (pending, confirmed, arrived, completed, no-show).
+      const totalBookings = own.reduce((n, s) => n + s._count.id, 0);
+      const completedCount = own
+        .filter((s) => s.status === 'completed')
+        .reduce((n, s) => n + s._count.id, 0);
       const vStat = visitStats.find((s) => s.doctorId === d.id);
 
       return {
@@ -162,12 +182,30 @@ export class DoctorsRepository {
         lastName: d.lastName,
         specialty: d.specialty,
         phone: d.phone,
-        totalBookings: bStat?._count.id || 0,
+        totalBookings,
+        completedBookings: completedCount,
         totalVisits:
           (vStat?._count.id || 0) + (doctorBookingOnlyVisits.get(d.id) ?? 0),
         uniquePatients: doctorUniquePatients.get(d.id)?.size || 0,
         totalRevenue: vStat?._sum.price || 0,
       };
+    });
+  }
+
+  /** Pending/confirmed bookings from today (Tashkent) on, for schedule-change reports. */
+  findActiveFutureBookings(doctorId: string) {
+    return this.prisma.booking.findMany({
+      where: {
+        doctorId,
+        status: { in: ['pending', 'confirmed'] },
+        date: { gte: parseDateOnlyToUTC(todayInTashkent()) },
+      },
+      select: {
+        date: true,
+        time: true,
+        service: { select: { duration: true } },
+      },
+      take: 5000,
     });
   }
 

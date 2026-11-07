@@ -51,6 +51,8 @@ model Patient {
   firstName      String    @map("first_name")
   lastName       String    @map("last_name")
   age            Int
+  /// Source of truth for age when set (age column = snapshot at last write).
+  birthYear      Int?      @map("birth_year")
   phone          String
   address        String    @default("")
   workplace      String    @default("")

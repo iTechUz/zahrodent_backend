@@ -11,6 +11,8 @@ describe('VisitsRepository', () => {
 
   beforeEach(() => {
     prisma = {
+      patient: { count: jest.fn() },
+      booking: { findUnique: jest.fn() },
       visit: {
         findMany: jest.fn().mockResolvedValue([{ id: 'v1' }]),
         count: jest.fn().mockResolvedValue(1),
@@ -22,6 +24,24 @@ describe('VisitsRepository', () => {
     repo = new VisitsRepository(prisma as PrismaService);
   });
 
+  it('patientInScope — o‘chirilmagan va scope bo‘yicha count', async () => {
+    prisma.patient.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    const scope = { assignedDoctorId: 'd1' };
+    await expect(repo.patientInScope('p1', scope)).resolves.toBe(true);
+    await expect(repo.patientInScope('p1', scope)).resolves.toBe(false);
+    expect(prisma.patient.count).toHaveBeenCalledWith({
+      where: { AND: [{ id: 'p1', deletedAt: null }, scope] },
+    });
+  });
+
+  it('findBookingOwner — id, patientId, doctorId', async () => {
+    await repo.findBookingOwner('b1');
+    expect(prisma.booking.findUnique).toHaveBeenCalledWith({
+      where: { id: 'b1' },
+      select: { id: true, patientId: true, doctorId: true },
+    });
+  });
+
   it('findAll — date desc, data+total', async () => {
     await expect(
       repo.findAll({ doctorId: 'd1' }, { skip: 0, take: 10 }),
@@ -29,7 +49,7 @@ describe('VisitsRepository', () => {
     expect(prisma.visit.findMany).toHaveBeenCalledWith({
       where: { doctorId: 'd1' },
       include: PS,
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
       skip: 0,
       take: 10,
     });
@@ -37,7 +57,7 @@ describe('VisitsRepository', () => {
     expect(prisma.visit.findMany).toHaveBeenLastCalledWith({
       where: undefined,
       include: PS,
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
     });
   });
 

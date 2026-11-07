@@ -32,6 +32,7 @@ export class CreateUserDto {
   @ApiProperty({ example: 'password123', description: 'Kamida 6 belgi' })
   @IsString()
   @MinLength(6)
+  @MaxLength(72)
   password: string;
 
   @ApiProperty({ example: 'receptionist', enum: USER_ROLES })

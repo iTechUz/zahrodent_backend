@@ -3,7 +3,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { dateOnlyColumnRange } from '../common/utils/date.util';
+import {
+  dateOnlyColumnRange,
+  toDateOnlyString,
+} from '../common/utils/date.util';
+import {
+  DEFAULT_DURATION_MIN,
+  scheduleViolation,
+} from '../bookings/schedule-conflict';
 import { Prisma } from '@prisma/client';
 import { DoctorsRepository, DoctorWithUser } from './doctors.repository';
 import { UsersService } from '../users/users.service';
@@ -148,7 +155,14 @@ export class DoctorsService {
     if (userOp && 'update' in userOp) {
       await this.usersService.revokeSessions(userOp.update.id);
     }
-    return this.toResponse(d);
+    if (dto.schedule === undefined && dto.daysOff === undefined) {
+      return this.toResponse(d);
+    }
+    // Existing bookings are not cancelled — just reported to the admin.
+    return {
+      ...this.toResponse(d),
+      scheduleConflicts: await this.countScheduleConflicts(d),
+    };
   }
 
   async remove(id: string) {
@@ -200,9 +214,14 @@ export class DoctorsService {
 
     return rawStats
       .map((s) => {
+        // Completed bookings / non-cancelled bookings (arrived and no-show stay
+        // in the denominator), capped at 100.
         const conversionRate =
           s.totalBookings > 0
-            ? Math.round((s.totalVisits / s.totalBookings) * 100)
+            ? Math.min(
+                100,
+                Math.round((s.completedBookings / s.totalBookings) * 100),
+              )
             : 0;
 
         const avgCheck =
@@ -215,6 +234,24 @@ export class DoctorsService {
         };
       })
       .sort((a, b) => b.totalRevenue - a.totalRevenue); // Sort by revenue by default
+  }
+
+  /** Active future bookings that no longer fit the doctor's schedule/days off. */
+  private async countScheduleConflicts(d: DoctorWithUser): Promise<number> {
+    try {
+      const rows = await this.doctorsRepository.findActiveFutureBookings(d.id);
+      return rows.filter(
+        (b) =>
+          scheduleViolation(
+            d,
+            toDateOnlyString(b.date),
+            b.time,
+            b.service?.duration || DEFAULT_DURATION_MIN,
+          ) !== null,
+      ).length;
+    } catch {
+      return 0;
+    }
   }
 
   private toResponse(d: DoctorWithUser) {

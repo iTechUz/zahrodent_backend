@@ -45,6 +45,12 @@ function daysBetween(a: string, b: string): number {
 /**
  * Clinic dashboard numbers. Doctors see only their own patients/bookings;
  * money fields are admin-only (null for everybody else).
+ *
+ * Period rule shared by every series (dashboard month figures, monthly, daily,
+ * sources): when a period is given and `endDate` is omitted, the upper bound
+ * is today (Asia/Tashkent) — bookings, money and new patients alike. No period
+ * at all: dashboard/monthly/daily use their own default window, sources are
+ * all-time.
  */
 @Injectable()
 export class AnalyticsService {
@@ -98,14 +104,28 @@ export class AnalyticsService {
       this.repo.countPatients({
         AND: [scope.patients, { createdAt: monthRange }],
       }),
-      this.repo.countBookings({ ...scope.bookings, date: day }),
+      // Cancelled / no-show slots are not "today's bookings".
+      this.repo.countBookings({
+        ...scope.bookings,
+        date: day,
+        status: { notIn: ['cancelled', 'no-show'] },
+      }),
       this.repo.countBookings({
         ...scope.bookings,
         date: day,
         status: 'completed',
       }),
-      this.repo.countBookings({ ...scope.bookings, status: 'pending' }),
-      this.repo.countDoctors({ bookings: { some: { date: day } } }),
+      // Only still-upcoming pending bookings (today onwards), not stale ones.
+      this.repo.countBookings({
+        ...scope.bookings,
+        status: 'pending',
+        date: { gte: day },
+      }),
+      this.repo.countDoctors({
+        bookings: {
+          some: { date: day, status: { notIn: ['cancelled', 'no-show'] } },
+        },
+      }),
       this.repo.countDoctors(),
     ]);
 
@@ -333,10 +353,9 @@ export class AnalyticsService {
   ): Promise<SourcePointDto[]> {
     const scope = this.scopes(user);
     const hasPeriod = !!(period.startDate || period.endDate);
-    if (hasPeriod && period.startDate && period.endDate) {
-      this.assertPeriod(period.startDate, period.endDate);
-    }
-    const range = dateOnlyColumnRange(period.startDate, period.endDate);
+    const end = period.endDate ?? todayInTashkent();
+    if (hasPeriod) this.assertPeriod(period.startDate, end);
+    const range = dateOnlyColumnRange(period.startDate, end);
     const rows =
       type === 'patients'
         ? await this.repo.patientsBySource(

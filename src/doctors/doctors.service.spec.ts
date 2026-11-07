@@ -22,6 +22,7 @@ describe('DoctorsService', () => {
       | 'updateWithUser'
       | 'deleteWithUser'
       | 'countHistory'
+      | 'findActiveFutureBookings'
     >
   >;
   let users: jest.Mocked<
@@ -56,6 +57,7 @@ describe('DoctorsService', () => {
       getDetailedEfficiencyStats: jest.fn(),
       createWithUser: jest.fn().mockResolvedValue(doc()),
       updateWithUser: jest.fn().mockResolvedValue(doc()),
+      findActiveFutureBookings: jest.fn().mockResolvedValue([]),
       deleteWithUser: jest.fn().mockResolvedValue(undefined),
       countHistory: jest.fn().mockResolvedValue({ bookings: 0, visits: 0 }),
     };
@@ -238,6 +240,35 @@ describe('DoctorsService', () => {
       expect(repo.updateWithUser).not.toHaveBeenCalled();
     });
 
+    it('jadval/dam olish o‘zgarsa — to‘qnashayotgan faol qabullar soni qaytadi', async () => {
+      repo.findById.mockResolvedValue(doc());
+      repo.updateWithUser.mockResolvedValue(
+        doc({ daysOff: ['2026-06-10'], schedule: null }),
+      );
+      repo.findActiveFutureBookings.mockResolvedValue([
+        {
+          date: new Date('2026-06-10T00:00:00Z'),
+          time: '10:00',
+          service: null,
+        },
+        {
+          date: new Date('2026-06-11T00:00:00Z'),
+          time: '10:00',
+          service: null,
+        },
+      ] as any);
+      const r: any = await service.update('d1', { daysOff: ['2026-06-10'] });
+      expect(r.scheduleConflicts).toBe(1);
+      expect(repo.updateWithUser).toHaveBeenCalled();
+    });
+
+    it('jadval o‘zgarmasa — scheduleConflicts yo‘q', async () => {
+      repo.findById.mockResolvedValue(doc());
+      const r: any = await service.update('d1', { specialty: 'X' });
+      expect(r).not.toHaveProperty('scheduleConflicts');
+      expect(repo.findActiveFutureBookings).not.toHaveBeenCalled();
+    });
+
     it('parolsiz — user tegilmaydi', async () => {
       repo.findById.mockResolvedValue(doc({ userId: 'u5' }));
       await service.update('d1', { specialty: 'Ortoped' });
@@ -391,6 +422,7 @@ describe('DoctorsService', () => {
           ...base,
           id: 'd1',
           totalBookings: 3,
+          completedBookings: 2,
           totalVisits: 2,
           totalRevenue: 300_000,
         },
@@ -398,6 +430,7 @@ describe('DoctorsService', () => {
           ...base,
           id: 'd2',
           totalBookings: 10,
+          completedBookings: 5,
           totalVisits: 5,
           totalRevenue: 1_000_000,
         },
@@ -409,12 +442,28 @@ describe('DoctorsService', () => {
       expect(out[1]).toMatchObject({ conversionRate: 67, avgCheck: 150_000 });
     });
 
+    it('conversionRate tashriflarga emas, completed qabullarga bog‘liq', async () => {
+      repo.getDetailedEfficiencyStats.mockResolvedValue([
+        {
+          ...base,
+          id: 'd1',
+          totalBookings: 4,
+          completedBookings: 1,
+          totalVisits: 4,
+          totalRevenue: 400,
+        },
+      ]);
+      const [s] = await service.getEfficiency();
+      expect(s.conversionRate).toBe(25);
+    });
+
     it('nolga bo‘lish yo‘q — 0 qaytaradi', async () => {
       repo.getDetailedEfficiencyStats.mockResolvedValue([
         {
           ...base,
           id: 'd1',
           totalBookings: 0,
+          completedBookings: 0,
           totalVisits: 0,
           totalRevenue: 0,
         },
@@ -424,12 +473,28 @@ describe('DoctorsService', () => {
       expect(s.avgCheck).toBe(0);
     });
 
+    it('conversionRate — completed / bekor qilinmagan qabullar, 100 dan oshmaydi', async () => {
+      repo.getDetailedEfficiencyStats.mockResolvedValue([
+        {
+          ...base,
+          id: 'd1',
+          totalBookings: 2,
+          completedBookings: 3,
+          totalVisits: 5,
+          totalRevenue: 500,
+        },
+      ]);
+      const [s] = await service.getEfficiency();
+      expect(s.conversionRate).toBe(100);
+    });
+
     it('avgCheck yaxlitlanadi', async () => {
       repo.getDetailedEfficiencyStats.mockResolvedValue([
         {
           ...base,
           id: 'd1',
           totalBookings: 3,
+          completedBookings: 3,
           totalVisits: 3,
           totalRevenue: 100,
         },

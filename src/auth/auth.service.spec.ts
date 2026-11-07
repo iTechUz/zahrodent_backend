@@ -1,7 +1,16 @@
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { AuthService } from './auth.service';
+import {
+  AuthService,
+  LOGIN_LOCK_MS,
+  LOGIN_LOCKED_MESSAGE,
+  LOGIN_MAX_FAILURES,
+} from './auth.service';
 import { UsersRepository } from './users.repository';
 import {
   hashRefreshToken,
@@ -277,6 +286,85 @@ describe('AuthService', () => {
         expect(usersRepository.findAuthById).not.toHaveBeenCalled();
       },
     );
+  });
+
+  describe('login — akkaunt bo‘yicha bloklash', () => {
+    const phone = '+998901234567';
+    let hash: string;
+    beforeEach(async () => {
+      hash = await bcrypt.hash('right', 4);
+      usersRepository.findByPhone.mockResolvedValue(
+        mockUser({ phone, passwordHash: hash }),
+      );
+    });
+    afterEach(() => jest.useRealTimers());
+
+    const fail = async (n: number, p = phone) => {
+      for (let i = 0; i < n; i++) {
+        await expect(
+          service.login({ phone: p, password: 'wrong' }),
+        ).rejects.toBeInstanceOf(UnauthorizedException);
+      }
+    };
+
+    it('10 ta xatodan keyin 429, to‘g‘ri parol ham o‘tmaydi', async () => {
+      await fail(LOGIN_MAX_FAILURES);
+      const err = await service
+        .login({ phone, password: 'right' })
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(HttpException);
+      expect(err.getStatus()).toBe(429);
+      expect(err.message).toBe(LOGIN_LOCKED_MESSAGE);
+      // bloklangan paytda bazaga/bcrypt ga murojaat qilinmaydi
+      expect(usersRepository.findByPhone).toHaveBeenCalledTimes(
+        LOGIN_MAX_FAILURES,
+      );
+    });
+
+    it('9 ta xato — hali bloklanmagan', async () => {
+      await fail(LOGIN_MAX_FAILURES - 1);
+      await expect(
+        service.login({ phone, password: 'right' }),
+      ).resolves.toBeDefined();
+    });
+
+    it('muvaffaqiyatli kirish hisoblagichni nolga qaytaradi', async () => {
+      await fail(LOGIN_MAX_FAILURES - 1);
+      await service.login({ phone, password: 'right' });
+      await fail(LOGIN_MAX_FAILURES - 1);
+      await expect(
+        service.login({ phone, password: 'right' }),
+      ).resolves.toBeDefined();
+    });
+
+    it('15 daqiqadan keyin blok ochiladi', async () => {
+      jest.useFakeTimers({ now: new Date('2026-11-08T10:00:00.000Z') });
+      await fail(LOGIN_MAX_FAILURES);
+      jest.setSystemTime(Date.now() + LOGIN_LOCK_MS - 1000);
+      await expect(
+        service.login({ phone, password: 'right' }),
+      ).rejects.toBeInstanceOf(HttpException);
+      jest.setSystemTime(Date.now() + 2000);
+      await expect(
+        service.login({ phone, password: 'right' }),
+      ).resolves.toBeDefined();
+    });
+
+    it('boshqa telefon ta’sirlanmaydi; noma’lum telefon ham bloklanadi (probing yo‘q)', async () => {
+      await fail(LOGIN_MAX_FAILURES);
+      usersRepository.findByPhone.mockResolvedValue(
+        mockUser({ phone: '+998909999999', passwordHash: hash }),
+      );
+      await expect(
+        service.login({ phone: '+998909999999', password: 'right' }),
+      ).resolves.toBeDefined();
+
+      usersRepository.findByPhone.mockResolvedValue(null);
+      await fail(LOGIN_MAX_FAILURES, '+998900000001');
+      await expect(
+        service.login({ phone: '+998900000001', password: 'x' }),
+      ).rejects.toBeInstanceOf(HttpException);
+    });
   });
 
   describe('login — session', () => {
