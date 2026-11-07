@@ -9,7 +9,8 @@ export const DEV_TELEGRAM_BOT_TOKEN =
   '9055073285:AAE1i1KG4wHfc5y7XPHAwXgHCdZnbyqttN0';
 
 /** Staff test group chat id (negative number). Fill in once known. */
-export const DEV_TELEGRAM_CHAT_ID = '';
+// "Zahro CRM" test group
+export const DEV_TELEGRAM_CHAT_ID = '-1004348351583';
 
 /**
  * Dev only: never when NODE_ENV=production (the main/prod deploy) and never in
