@@ -100,7 +100,11 @@ export class DoctorsRepository {
 
   /** `range` limits bookings/visits by their date (inclusive); omitted → all time. */
   async getDetailedEfficiencyStats(range?: { gte?: Date; lte?: Date }) {
-    const dateWhere = range && (range.gte || range.lte) ? { date: range } : {};
+    // Soft-deleted patients must not inflate a doctor's numbers.
+    const dateWhere = {
+      patient: { deletedAt: null },
+      ...(range && (range.gte || range.lte) ? { date: range } : {}),
+    };
     // Get all doctors first
     const doctors = await this.prisma.doctor.findMany({
       select: {
