@@ -129,11 +129,27 @@ export class DoctorsRepository {
       where: { status: 'completed', ...dateWhere },
     });
 
+    // Completing a booking does not create a Visit, so a doctor's finished
+    // bookings without a visit must still count as treated patients / visits.
+    const completedBookings = await this.prisma.booking.findMany({
+      where: { status: 'completed', visits: { none: {} }, ...dateWhere },
+      select: { doctorId: true, patientId: true },
+    });
+
     const doctorUniquePatients = new Map<string, Set<string>>();
-    uniquePatientStats.forEach((s) => {
-      if (!doctorUniquePatients.has(s.doctorId))
-        doctorUniquePatients.set(s.doctorId, new Set());
-      doctorUniquePatients.get(s.doctorId)!.add(s.patientId);
+    const addPatient = (doctorId: string, patientId: string) => {
+      if (!doctorUniquePatients.has(doctorId))
+        doctorUniquePatients.set(doctorId, new Set());
+      doctorUniquePatients.get(doctorId)!.add(patientId);
+    };
+    uniquePatientStats.forEach((s) => addPatient(s.doctorId, s.patientId));
+    const doctorBookingOnlyVisits = new Map<string, number>();
+    completedBookings.forEach((b) => {
+      addPatient(b.doctorId, b.patientId);
+      doctorBookingOnlyVisits.set(
+        b.doctorId,
+        (doctorBookingOnlyVisits.get(b.doctorId) ?? 0) + 1,
+      );
     });
 
     return doctors.map((d) => {
@@ -147,7 +163,8 @@ export class DoctorsRepository {
         specialty: d.specialty,
         phone: d.phone,
         totalBookings: bStat?._count.id || 0,
-        totalVisits: vStat?._count.id || 0,
+        totalVisits:
+          (vStat?._count.id || 0) + (doctorBookingOnlyVisits.get(d.id) ?? 0),
         uniquePatients: doctorUniquePatients.get(d.id)?.size || 0,
         totalRevenue: vStat?._sum.price || 0,
       };
