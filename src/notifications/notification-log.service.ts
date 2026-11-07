@@ -9,6 +9,7 @@ import { NotificationLog, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
 import { oneLine } from '../common/utils/text.util';
+import { statusChatId } from '../telegram/dev-defaults';
 
 export type NotificationLogStatus = 'pending' | 'sent' | 'failed';
 
@@ -266,9 +267,7 @@ export function clampText(text: string): string {
 }
 
 function groupChatId(): string | undefined {
-  return (
-    process.env.TELEGRAM_STATUS_CHAT_ID || process.env.TELEGRAM_LEADS_CHAT_ID
-  )?.trim();
+  return statusChatId();
 }
 
 function errMsg(e: unknown): string {
