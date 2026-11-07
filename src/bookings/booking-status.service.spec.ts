@@ -13,8 +13,9 @@ describe('BookingStatusService', () => {
     a: process.env.TELEGRAM_LEADS_CHAT_ID,
     b: process.env.TELEGRAM_STATUS_CHAT_ID,
   };
-  const booking = (chat: string | null) => ({
+  const booking = (chat: string | null, status = 'pending') => ({
     id: 'b1',
+    status,
     date: new Date('2026-11-02T00:00:00Z'),
     time: '10:00',
     patient: {
@@ -23,6 +24,7 @@ describe('BookingStatusService', () => {
       lastName: 'Valiyev',
       phone: '+998901234567',
       telegramChatId: chat,
+      deletedAt: null,
     },
     doctor: { firstName: 'Dr', lastName: 'Karimov' },
   });
@@ -156,5 +158,109 @@ describe('BookingStatusService', () => {
     expect(feedbackKeyboard('z').inline_keyboard[0][0].callback_data).toBe(
       'fb_z_1',
     );
+  });
+
+  describe('created / rescheduled / deleted', () => {
+    const kinds = () => outbox.enqueue.mock.calls.map((c) => c[0].kind);
+    const actor = { id: 'u1', name: 'Admin Aziz' };
+
+    it('onCreated: staff group + patient confirmation with Tashkent date', async () => {
+      await svc.onCreated('b1', actor);
+      expect(kinds()).toEqual([
+        'booking_created_group',
+        'patient_booking_created',
+      ]);
+      const patient = outbox.enqueue.mock.calls[1][0];
+      expect(patient.chatId).toBe('555');
+      expect(patient.text).toContain('02.11.2026 10:00');
+      expect(patient.text).toContain('tasdiqlaydi');
+      expect(outbox.enqueue.mock.calls[0][0].text).toContain('Admin Aziz');
+    });
+
+    it('onCreated confirmed → "belgilandi"; completed/cancelled → group only', async () => {
+      prisma.booking.findUnique.mockResolvedValue(booking('555', 'confirmed'));
+      await svc.onCreated('b1');
+      expect(outbox.enqueue.mock.calls[1][0].text).toContain('belgilandi');
+      outbox.enqueue.mockClear();
+      prisma.booking.findUnique.mockResolvedValue(booking('555', 'completed'));
+      await svc.onCreated('b1');
+      expect(kinds()).toEqual(['booking_created_group']);
+    });
+
+    it('patient without Telegram / soft-deleted patient → skipped with a log, no throw', async () => {
+      prisma.booking.findUnique.mockResolvedValue(booking(null));
+      await svc.onCreated('b1');
+      expect(kinds()).toEqual(['booking_created_group']);
+      outbox.enqueue.mockClear();
+      const b: any = booking('555');
+      b.patient.deletedAt = new Date();
+      prisma.booking.findUnique.mockResolvedValue(b);
+      await svc.onCreated('b1');
+      expect(kinds()).toEqual(['booking_created_group']);
+    });
+
+    it('onRescheduled: old → new time to the group; patient only when asked', async () => {
+      await svc.onRescheduled({
+        bookingId: 'b1',
+        previousWhen: '01.11.2026 09:00',
+        actor,
+        notifyPatient: true,
+      });
+      expect(kinds()).toEqual([
+        'booking_rescheduled_group',
+        'patient_rescheduled',
+      ]);
+      expect(outbox.enqueue.mock.calls[0][0].text).toContain(
+        '01.11.2026 09:00 → 02.11.2026 10:00',
+      );
+      expect(outbox.enqueue.mock.calls[1][0].text).toContain(
+        'Yangi vaqt: 02.11.2026 10:00',
+      );
+      outbox.enqueue.mockClear();
+      await svc.onRescheduled({
+        bookingId: 'b1',
+        previousWhen: 'x',
+        actor,
+        notifyPatient: false,
+      });
+      expect(kinds()).toEqual(['booking_rescheduled_group']);
+    });
+
+    it('onDeleted: group audit + patient cancel notice for an active future booking', async () => {
+      jest.useFakeTimers({ now: new Date('2026-11-01T00:00:00Z') });
+      try {
+        const snap = await svc.snapshot('b1');
+        await svc.onDeleted(snap, actor);
+        expect(kinds()).toEqual(['booking_deleted_group', 'patient_status']);
+        expect(outbox.enqueue.mock.calls[0][0].text).toContain(
+          "O'chirdi: Admin Aziz",
+        );
+        expect(outbox.enqueue.mock.calls[1][0].text).toContain('bekor qilindi');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('onDeleted: completed or past booking → no patient message; null snapshot → nothing', async () => {
+      prisma.booking.findUnique.mockResolvedValue(booking('555', 'completed'));
+      await svc.onDeleted(await svc.snapshot('b1'), actor);
+      expect(kinds()).toEqual(['booking_deleted_group']);
+      outbox.enqueue.mockClear();
+      await svc.onDeleted(null, actor);
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('none of them throw on DB/outbox failure', async () => {
+      prisma.booking.findUnique.mockRejectedValue(new Error('db'));
+      await expect(svc.onCreated('b1')).resolves.toBeUndefined();
+      await expect(
+        svc.onRescheduled({
+          bookingId: 'b1',
+          previousWhen: 'x',
+          actor,
+          notifyPatient: true,
+        }),
+      ).resolves.toBeUndefined();
+    });
   });
 });

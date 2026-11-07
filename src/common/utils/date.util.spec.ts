@@ -1,5 +1,7 @@
 import * as dateUtil from './date.util';
 import {
+  isPastInTashkent,
+  isRealDateOnly,
   endOfUTCDayInclusive,
   parseDateOnlyToUTC,
   startOfUTCDay,
@@ -146,5 +148,24 @@ describe('Asia/Tashkent helpers', () => {
   it('TIME_HH_MM_REGEX', () => {
     expect(u.TIME_HH_MM_REGEX.test('23:59')).toBe(true);
     expect(u.TIME_HH_MM_REGEX.test('24:00')).toBe(false);
+  });
+});
+
+describe('isRealDateOnly / isPastInTashkent', () => {
+  it('rejects impossible calendar days', () => {
+    expect(isRealDateOnly('2026-02-30')).toBe(false);
+    expect(isRealDateOnly('2026-02-28')).toBe(true);
+    expect(isRealDateOnly('2028-02-29')).toBe(true);
+    expect(isRealDateOnly('2026-00-10')).toBe(false);
+    expect(isRealDateOnly('10.06.2026')).toBe(false);
+  });
+
+  it('compares in clinic time (UTC+5)', () => {
+    // 10:00Z = 15:00 Tashkent
+    const now = new Date('2026-06-10T10:00:00.000Z');
+    expect(isPastInTashkent('2026-06-10', '14:59', now)).toBe(true);
+    expect(isPastInTashkent('2026-06-10', '15:01', now)).toBe(false);
+    expect(isPastInTashkent('2026-06-09', '23:59', now)).toBe(true);
+    expect(isPastInTashkent('2026-06-11', '00:00', now)).toBe(false);
   });
 });

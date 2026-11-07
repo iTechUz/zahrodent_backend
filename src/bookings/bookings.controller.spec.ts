@@ -45,11 +45,11 @@ describe('BookingsController', () => {
     expect(service.findOne).toHaveBeenCalledWith('b1', user);
   });
 
-  it('create — faqat dto (user uzatilmaydi)', async () => {
+  it('create — dto va user (xabarnoma uchun kim yaratgani)', async () => {
     const dto = { patientId: 'p1' } as any;
     service.create.mockResolvedValue({ id: 'b1' });
-    await expect(controller.create(dto)).resolves.toEqual({ id: 'b1' });
-    expect(service.create).toHaveBeenCalledWith(dto);
+    await expect(controller.create(dto, user)).resolves.toEqual({ id: 'b1' });
+    expect(service.create).toHaveBeenCalledWith(dto, user);
   });
 
   it('update — id, dto, user', async () => {
@@ -70,7 +70,7 @@ describe('BookingsController', () => {
     service.findOne.mockRejectedValue(err);
     await expect(controller.findOne('x', user)).rejects.toBe(err);
     service.create.mockRejectedValue(err);
-    await expect(controller.create({} as any)).rejects.toBe(err);
+    await expect(controller.create({} as any, user)).rejects.toBe(err);
   });
 
   describe('metadata', () => {

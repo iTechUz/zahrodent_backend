@@ -32,7 +32,7 @@ describe('BookingsRepository', () => {
     expect(prisma.booking.findMany).toHaveBeenCalledWith({
       where: { AND: [{ doctorId: 'd1' }, HAS_PATIENT] },
       include: PS,
-      orderBy: [{ date: 'desc' }, { time: 'desc' }],
+      orderBy: [{ date: 'desc' }, { time: 'desc' }, { id: 'desc' }],
       skip: 0,
       take: 10,
     });
@@ -40,7 +40,7 @@ describe('BookingsRepository', () => {
     expect(prisma.booking.findMany).toHaveBeenLastCalledWith({
       where: { AND: [{}, HAS_PATIENT] },
       include: PS,
-      orderBy: [{ date: 'desc' }, { time: 'desc' }],
+      orderBy: [{ date: 'desc' }, { time: 'desc' }, { id: 'desc' }],
     });
     expect(prisma.booking.count).toHaveBeenLastCalledWith({
       where: { AND: [{}, HAS_PATIENT] },
@@ -136,5 +136,82 @@ describe('BookingsRepository', () => {
       where: { id: 'd1' },
       select: { id: true, schedule: true, daysOff: true },
     });
+  });
+
+  it('withLocks — kalitlar saralangan tartibda olinadi (deadlock yo‘q)', async () => {
+    const tx = { $executeRaw: jest.fn().mockResolvedValue(1) };
+    prisma.$transaction = jest.fn(async (cb: any) => cb(tx));
+    await repo.withLocks(['b', 'a', 'b'], async () => 'ok');
+    expect(tx.$executeRaw.mock.calls.map((c: any[]) => c[1])).toEqual([
+      'a',
+      'b',
+    ]);
+  });
+
+  describe('ensureVisitForCompleted', () => {
+    const b = {
+      id: 'b1',
+      patientId: 'p1',
+      doctorId: 'd1',
+      date: new Date('2026-06-10T00:00:00.000Z'),
+      serviceId: 's1' as string | null,
+    };
+    let tx: any;
+    beforeEach(() => {
+      tx = {
+        visit: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({}),
+        },
+        service: {
+          findUnique: jest.fn().mockResolvedValue({ price: 150000 }),
+        },
+      };
+    });
+
+    it('creates a completed visit priced from the service', async () => {
+      await expect(repo.ensureVisitForCompleted(b, tx)).resolves.toEqual({
+        created: true,
+      });
+      expect(tx.visit.create).toHaveBeenCalledWith({
+        data: {
+          patientId: 'p1',
+          doctorId: 'd1',
+          bookingId: 'b1',
+          date: b.date,
+          status: 'completed',
+          price: 150000,
+        },
+      });
+      expect(tx.visit.findFirst.mock.calls[0][0].where.OR).toEqual([
+        { bookingId: 'b1' },
+        { patientId: 'p1', doctorId: 'd1', date: b.date },
+      ]);
+    });
+
+    it('no service → price 0', async () => {
+      await repo.ensureVisitForCompleted({ ...b, serviceId: null }, tx);
+      expect(tx.visit.create.mock.calls[0][0].data.price).toBe(0);
+      expect(tx.service.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('existing visit (linked or same patient+doctor+day) → skipped', async () => {
+      tx.visit.findFirst.mockResolvedValue({ id: 'v1' });
+      await expect(repo.ensureVisitForCompleted(b, tx)).resolves.toEqual({
+        created: false,
+      });
+      expect(tx.visit.create).not.toHaveBeenCalled();
+    });
+  });
+
+  it('findPatientIdsByPhoneDigits — id lar ro‘yxati', async () => {
+    prisma.$queryRaw = jest
+      .fn()
+      .mockResolvedValue([{ id: 'p1' }, { id: 'p2' }]);
+    await expect(repo.findPatientIdsByPhoneDigits('90123')).resolves.toEqual([
+      'p1',
+      'p2',
+    ]);
+    expect(prisma.$queryRaw.mock.calls[0][1]).toBe('%90123%');
   });
 });

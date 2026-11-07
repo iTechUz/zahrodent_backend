@@ -8,6 +8,7 @@ import {
 import { NotificationLog, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
+import { oneLine } from '../common/utils/text.util';
 
 export type NotificationLogStatus = 'pending' | 'sent' | 'failed';
 
@@ -25,6 +26,9 @@ const CLAIM_MS = 2 * 60_000;
 const POLL_MS = 30_000;
 const BATCH = 20;
 const ERROR_MAX = 300;
+/** Telegram rejects messages over 4096 characters. */
+export const TELEGRAM_TEXT_MAX = 4096;
+export const DELIVERY_ALERT_KIND = 'delivery_alert';
 
 export type EnqueueInput = {
   kind: string;
@@ -62,14 +66,19 @@ export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
-  /** Stores the message and tries to send it right away. */
+  /**
+   * Stores the message and tries to send it right away. The row is created
+   * already claimed (next attempt in CLAIM_MS), so the poller can't pick it up
+   * and send it a second time while this call is still talking to Telegram.
+   */
   async enqueue(input: EnqueueInput): Promise<NotificationLog | null> {
     try {
       const row = await this.prisma.notificationLog.create({
         data: {
           kind: input.kind,
           chatId: input.chatId,
-          text: input.text,
+          text: clampText(input.text),
+          nextAttemptAt: new Date(Date.now() + CLAIM_MS),
           replyMarkup: input.replyMarkup,
           leadId: input.leadId,
           patientId: input.patientId,
@@ -125,6 +134,7 @@ export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
     this.logger.warn(
       `Telegram yuborilmadi (${row.kind}, urinish ${attempts}): ${res.error.slice(0, 120)}`,
     );
+    if (giveUp) await this.onGaveUp(row, res.error);
     return this.prisma.notificationLog.update({
       where: { id: row.id },
       data: {
@@ -136,16 +146,65 @@ export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  /** Admin: put a failed row back in the queue. */
+  /**
+   * A message is given up on: stop messaging a chat that is dead (blocked the
+   * bot / chat gone) and tell the staff group so someone calls the patient.
+   * Never throws.
+   */
+  private async onGaveUp(row: NotificationLog, error: string) {
+    try {
+      if (row.patientId && isDeadChatError(error)) {
+        const r = await this.prisma.patient.updateMany({
+          where: { id: row.patientId, telegramChatId: row.chatId },
+          data: { telegramChatId: null },
+        });
+        if (r.count) {
+          this.logger.warn(
+            `Bemor ${row.patientId}: Telegram chat yaroqsiz — bog'lanish olib tashlandi`,
+          );
+        }
+      }
+      const group = groupChatId();
+      if (!group || row.kind === DELIVERY_ALERT_KIND || row.chatId === group) {
+        return;
+      }
+      let who = '';
+      if (row.patientId) {
+        const p = await this.prisma.patient.findUnique({
+          where: { id: row.patientId },
+          select: { firstName: true, lastName: true, phone: true },
+        });
+        if (p) {
+          who = `\n👤 ${oneLine(`${p.firstName} ${p.lastName}`, 100)} ${oneLine(p.phone, 30)}`;
+        }
+      }
+      await this.enqueue({
+        kind: DELIVERY_ALERT_KIND,
+        chatId: group,
+        text: `⚠️ Telegram xabari yetkazilmadi (${row.kind})${who}\nSabab: ${oneLine(error, 150)}\nBemor bilan boshqa yo'l orqali bog'lanish kerak bo'lishi mumkin.`,
+        patientId: row.patientId ?? undefined,
+        leadId: row.leadId ?? undefined,
+      });
+    } catch (e) {
+      this.logger.warn(`Yetkazilmagan xabar ogohlantirishi: ${errMsg(e)}`);
+    }
+  }
+
+  /** Admin: put a failed row back in the queue (atomically claimed). */
   async retry(id: string) {
     const row = await this.prisma.notificationLog.findUnique({ where: { id } });
     if (!row) throw new NotFoundException('Log topilmadi');
-    if (row.status === 'sent') return row;
-    const updated = await this.prisma.notificationLog.update({
-      where: { id },
-      data: { status: 'pending', attempts: 0, nextAttemptAt: new Date() },
+    if (row.status !== 'failed') return row;
+    const claimed = await this.prisma.notificationLog.updateMany({
+      where: { id, status: 'failed' },
+      data: {
+        status: 'pending',
+        attempts: 0,
+        nextAttemptAt: new Date(Date.now() + CLAIM_MS),
+      },
     });
-    return this.attempt(updated);
+    if (claimed.count !== 1) return row;
+    return this.attempt({ ...row, status: 'pending', attempts: 0 });
   }
 
   async findAll(query: {
@@ -191,6 +250,25 @@ export function retryDelayMs(attemptsMade: number): number {
 /** Telegram 400 (bad chat) / 403 (bot blocked) never succeed on retry. */
 export function isPermanentTelegramError(error: string): boolean {
   return /^(400|403)\b/.test(error.trim());
+}
+
+/** Telegram refuses to deliver to this chat for good (blocked / deleted). */
+export function isDeadChatError(error: string): boolean {
+  return /blocked by the user|user is deactivated|chat not found|bot was kicked|PEER_ID_INVALID/i.test(
+    error,
+  );
+}
+
+export function clampText(text: string): string {
+  return text.length > TELEGRAM_TEXT_MAX
+    ? `${text.slice(0, TELEGRAM_TEXT_MAX - 1)}…`
+    : text;
+}
+
+function groupChatId(): string | undefined {
+  return (
+    process.env.TELEGRAM_STATUS_CHAT_ID || process.env.TELEGRAM_LEADS_CHAT_ID
+  )?.trim();
 }
 
 function errMsg(e: unknown): string {

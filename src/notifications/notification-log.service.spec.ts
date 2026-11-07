@@ -1,6 +1,10 @@
 import { NotFoundException } from '@nestjs/common';
 import {
+  DELIVERY_ALERT_KIND,
   MAX_ATTEMPTS,
+  TELEGRAM_TEXT_MAX,
+  clampText,
+  isDeadChatError,
   NotificationLogService,
   isPermanentTelegramError,
   retryDelayMs,
@@ -127,5 +131,123 @@ describe('NotificationLogService', () => {
     );
     expect(isPermanentTelegramError('ETIMEDOUT')).toBe(false);
     expect(retryDelayMs(1)).toBe(60_000);
+  });
+
+  describe('reliability', () => {
+    const saved = {
+      a: process.env.TELEGRAM_LEADS_CHAT_ID,
+      b: process.env.TELEGRAM_STATUS_CHAT_ID,
+    };
+    beforeEach(() => {
+      process.env.TELEGRAM_LEADS_CHAT_ID = '-100';
+      delete process.env.TELEGRAM_STATUS_CHAT_ID;
+      db.patient = {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findUnique: jest.fn().mockResolvedValue({
+          firstName: 'Ali',
+          lastName: 'V',
+          phone: '+998901234567',
+        }),
+      };
+    });
+    afterEach(() => {
+      for (const [k, v] of [
+        ['TELEGRAM_LEADS_CHAT_ID', saved.a],
+        ['TELEGRAM_STATUS_CHAT_ID', saved.b],
+      ] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    });
+
+    it('enqueue creates the row already claimed (poller cannot double-send)', async () => {
+      await svc.enqueue({ kind: 'k', chatId: '1', text: 'x' });
+      const at = db.notificationLog.create.mock.calls[0][0].data.nextAttemptAt;
+      expect(at.getTime()).toBeGreaterThan(Date.now() + 60_000);
+    });
+
+    it('long text is clamped to Telegram limit', async () => {
+      await svc.enqueue({ kind: 'k', chatId: '1', text: 'a'.repeat(5000) });
+      const text = db.notificationLog.create.mock.calls[0][0].data.text;
+      expect(text).toHaveLength(TELEGRAM_TEXT_MAX);
+      expect(clampText('short')).toBe('short');
+    });
+
+    it('patient blocked the bot → chat unlinked + staff alert with patient', async () => {
+      tg.sendMessage
+        .mockResolvedValueOnce({
+          ok: false,
+          error: '403: Forbidden: bot was blocked by the user',
+        })
+        .mockResolvedValue({ ok: true });
+      await svc.enqueue({
+        kind: 'reminder_24h',
+        chatId: '555',
+        text: 'x',
+        patientId: 'p1',
+      });
+      expect(db.patient.updateMany).toHaveBeenCalledWith({
+        where: { id: 'p1', telegramChatId: '555' },
+        data: { telegramChatId: null },
+      });
+      const alert = db.notificationLog.create.mock.calls.find(
+        (c: any) => c[0].data.kind === DELIVERY_ALERT_KIND,
+      )[0].data;
+      expect(alert.chatId).toBe('-100');
+      expect(alert.text).toContain('reminder_24h');
+      expect(alert.text).toContain('Ali V');
+      expect(alert.text).toContain('+998901234567');
+    });
+
+    it('failed alert itself / failure of the group chat → no alert loop', async () => {
+      tg.sendMessage.mockResolvedValue({
+        ok: false,
+        error: '400: Bad Request: chat not found',
+      });
+      await svc.enqueue({
+        kind: DELIVERY_ALERT_KIND,
+        chatId: '-100',
+        text: 'x',
+      });
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'x' });
+      expect(db.notificationLog.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('transient failure → no unlink, no alert', async () => {
+      tg.sendMessage.mockResolvedValue({ ok: false, error: 'ETIMEDOUT' });
+      await svc.enqueue({ kind: 'k', chatId: '5', text: 'x', patientId: 'p1' });
+      expect(db.patient.updateMany).not.toHaveBeenCalled();
+      expect(db.notificationLog.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('retry: failed row is claimed atomically, then sent; lost claim → no send', async () => {
+      db.notificationLog.findUnique.mockResolvedValue(
+        row({ status: 'failed', attempts: 3 }),
+      );
+      await svc.retry('n1');
+      expect(db.notificationLog.updateMany.mock.calls[0][0].where).toEqual({
+        id: 'n1',
+        status: 'failed',
+      });
+      expect(tg.sendMessage).toHaveBeenCalledTimes(1);
+      tg.sendMessage.mockClear();
+      db.notificationLog.updateMany.mockResolvedValue({ count: 0 });
+      await svc.retry('n1');
+      expect(tg.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('retry: pending (in flight) row is not sent a second time', async () => {
+      db.notificationLog.findUnique.mockResolvedValue(row());
+      await svc.retry('n1');
+      expect(tg.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('isDeadChatError', () => {
+      expect(
+        isDeadChatError('403: Forbidden: bot was blocked by the user'),
+      ).toBe(true);
+      expect(isDeadChatError('400: Bad Request: chat not found')).toBe(true);
+      expect(isDeadChatError('429: Too Many Requests')).toBe(false);
+    });
   });
 });

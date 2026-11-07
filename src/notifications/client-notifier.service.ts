@@ -3,17 +3,11 @@ import { Lead } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { PatientsRepository } from '../patients/patients.repository';
 import { normalizeUzPhone } from '../common/utils/phone.util';
+import { oneLine } from '../common/utils/text.util';
 import { EskizService } from './eskiz.service';
 import { NotificationLogService } from './notification-log.service';
 
-/** One line, no control chars, length-capped (messages are plain text). */
-export function oneLine(v: string | null | undefined, max: number): string {
-  const t = (v ?? '')
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
-    .trim();
-  return t.length > max ? `${t.slice(0, max)}…` : t;
-}
+export { oneLine };
 
 /**
  * Messages to the client personally. A phone is only ever mapped to a Telegram

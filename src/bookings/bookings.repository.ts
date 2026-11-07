@@ -20,6 +20,9 @@ const HAS_PATIENT_ROW: Prisma.BookingWhereInput = {
   patient: { is: { id: { not: '' } } },
 };
 
+export const doctorDayLockKey = (doctorId: string, dateOnly: string) =>
+  `booking:${doctorId}:${dateOnly}`;
+
 @Injectable()
 export class BookingsRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -39,7 +42,11 @@ export class BookingsRepository {
       this.prisma.booking.findMany({
         where: listWhere,
         include: WITH_PATIENT_SUMMARY,
-        orderBy: opts?.orderBy ?? [{ date: 'desc' }, { time: 'desc' }],
+        orderBy: opts?.orderBy ?? [
+          { date: 'desc' },
+          { time: 'desc' },
+          { id: 'desc' },
+        ],
         ...(opts?.skip != null ? { skip: opts.skip } : {}),
         ...(opts?.take != null ? { take: opts.take } : {}),
       }),
@@ -64,8 +71,11 @@ export class BookingsRepository {
       .then(() => undefined);
   }
 
-  findById(id: string): Promise<BookingWithPatient | null> {
-    return this.prisma.booking.findFirst({
+  findById(
+    id: string,
+    db: Db = this.prisma,
+  ): Promise<BookingWithPatient | null> {
+    return db.booking.findFirst({
       where: { id, ...HAS_PATIENT_ROW },
       include: WITH_PATIENT_SUMMARY,
     });
@@ -99,11 +109,80 @@ export class BookingsRepository {
     dateOnly: string,
     fn: (tx: Prisma.TransactionClient) => Promise<T>,
   ): Promise<T> {
-    const key = `booking:${doctorId}:${dateOnly}`;
+    return this.withLocks([doctorDayLockKey(doctorId, dateOnly)], fn);
+  }
+
+  /**
+   * Same, for several keys (e.g. the booking row + its doctor/day). Keys are
+   * taken in sorted order so two requests can't deadlock each other.
+   */
+  withLocks<T>(
+    keys: string[],
+    fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    const sorted = [...new Set(keys)].sort();
     return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+      for (const key of sorted) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+      }
       return fn(tx);
     });
+  }
+
+  /**
+   * Visit for a booking that just became "completed": status completed,
+   * price = service price. Skipped when a visit is already linked to the
+   * booking or the same patient+doctor+day already has one.
+   */
+  async ensureVisitForCompleted(
+    b: {
+      id: string;
+      patientId: string;
+      doctorId: string;
+      date: Date;
+      serviceId: string | null;
+    },
+    db: Db = this.prisma,
+  ): Promise<{ created: boolean }> {
+    const existing = await db.visit.findFirst({
+      where: {
+        OR: [
+          { bookingId: b.id },
+          { patientId: b.patientId, doctorId: b.doctorId, date: b.date },
+        ],
+      },
+      select: { id: true },
+    });
+    if (existing) return { created: false };
+    const service = b.serviceId
+      ? await db.service.findUnique({
+          where: { id: b.serviceId },
+          select: { price: true },
+        })
+      : null;
+    await db.visit.create({
+      data: {
+        patientId: b.patientId,
+        doctorId: b.doctorId,
+        bookingId: b.id,
+        date: b.date,
+        status: 'completed',
+        price: service?.price ?? 0,
+      },
+    });
+    return { created: true };
+  }
+
+  /**
+   * Patient ids whose phone contains these digits regardless of formatting
+   * ("+998 (90) 123-45-67"). Capped; callers require >= 3 digits.
+   */
+  async findPatientIdsByPhoneDigits(digits: string): Promise<string[]> {
+    const rows = await this.prisma.$queryRaw<{ id: string }[]>`
+      SELECT id FROM patients
+      WHERE regexp_replace(phone, '[^0-9]', '', 'g') LIKE ${'%' + digits + '%'}
+      LIMIT 1000`;
+    return rows.map((r) => r.id);
   }
 
   create(
