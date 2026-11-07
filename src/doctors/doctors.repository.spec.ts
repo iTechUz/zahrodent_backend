@@ -16,7 +16,7 @@ describe('DoctorsRepository', () => {
         delete: jest.fn(),
       },
       visit: { count: jest.fn(), groupBy: jest.fn() },
-      booking: { groupBy: jest.fn() },
+      booking: { groupBy: jest.fn(), findMany: jest.fn() },
     };
     repo = new DoctorsRepository(prisma as PrismaService);
   });
@@ -97,6 +97,12 @@ describe('DoctorsRepository', () => {
     prisma.booking.groupBy.mockResolvedValue([
       { doctorId: 'd1', _count: { id: 5 } },
     ]);
+    // completed bookings that never got a Visit: still count for the doctor
+    prisma.booking.findMany.mockResolvedValue([
+      { doctorId: 'd1', patientId: 'p3' },
+      { doctorId: 'd2', patientId: 'p4' },
+      { doctorId: 'd2', patientId: 'p4' },
+    ]);
     prisma.visit.groupBy
       .mockResolvedValueOnce([
         { doctorId: 'd1', _count: { id: 3 }, _sum: { price: 600 } },
@@ -115,8 +121,8 @@ describe('DoctorsRepository', () => {
         specialty: 'S',
         phone: '1',
         totalBookings: 5,
-        totalVisits: 3,
-        uniquePatients: 2,
+        totalVisits: 4,
+        uniquePatients: 3,
         totalRevenue: 600,
       },
       {
@@ -126,8 +132,8 @@ describe('DoctorsRepository', () => {
         specialty: 'S',
         phone: '2',
         totalBookings: 0,
-        totalVisits: 0,
-        uniquePatients: 0,
+        totalVisits: 2,
+        uniquePatients: 1,
         totalRevenue: 0,
       },
     ]);
@@ -145,6 +151,7 @@ describe('DoctorsRepository', () => {
   it('getDetailedEfficiencyStats — davr berilsa booking/visit sana bo‘yicha filtrlanadi', async () => {
     prisma.doctor.findMany.mockResolvedValue([]);
     prisma.booking.groupBy.mockResolvedValue([]);
+    prisma.booking.findMany.mockResolvedValue([]);
     prisma.visit.groupBy.mockResolvedValue([]);
     const range = {
       gte: new Date('2026-10-01T00:00:00.000Z'),
@@ -162,11 +169,17 @@ describe('DoctorsRepository', () => {
     for (const call of prisma.visit.groupBy.mock.calls) {
       expect(call[0].where).toEqual({ status: 'completed', date: range });
     }
+    expect(prisma.booking.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { status: 'completed', visits: { none: {} }, date: range },
+      }),
+    );
   });
 
   it('getDetailedEfficiencyStats — _sum.price null → 0', async () => {
     prisma.doctor.findMany.mockResolvedValue([{ id: 'd1' }]);
     prisma.booking.groupBy.mockResolvedValue([]);
+    prisma.booking.findMany.mockResolvedValue([]);
     prisma.visit.groupBy
       .mockResolvedValueOnce([
         { doctorId: 'd1', _count: { id: 1 }, _sum: { price: null } },
