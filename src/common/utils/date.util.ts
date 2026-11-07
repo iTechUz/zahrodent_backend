@@ -152,3 +152,20 @@ export function relativeDateRange(
 export function scheduleWeekday(dateOnly: string): number {
   return (parseDateOnlyToUTC(dateOnly).getUTCDay() + 6) % 7;
 }
+
+/** True for an existing calendar day (rejects `2026-02-30`, `2026-13-01`). */
+export function isRealDateOnly(value: string): boolean {
+  if (!DATE_ONLY_REGEX.test(value)) return false;
+  const d = parseDateOnlyToUTC(value);
+  return !Number.isNaN(d.getTime()) && toDateOnlyString(d) === value;
+}
+
+/** True when `dateOnly` + `HH:mm` (clinic time, UTC+5) is already behind `now`. */
+export function isPastInTashkent(
+  dateOnly: string,
+  time: string,
+  now: Date = new Date(),
+): boolean {
+  const start = new Date(`${dateOnly}T${time}:00+05:00`).getTime();
+  return Number.isNaN(start) ? false : start < now.getTime();
+}

@@ -192,6 +192,23 @@ export class DoctorsRepository {
     });
   }
 
+  /** Pending/confirmed bookings from today (Tashkent) on, for schedule-change reports. */
+  findActiveFutureBookings(doctorId: string) {
+    return this.prisma.booking.findMany({
+      where: {
+        doctorId,
+        status: { in: ['pending', 'confirmed'] },
+        date: { gte: parseDateOnlyToUTC(todayInTashkent()) },
+      },
+      select: {
+        date: true,
+        time: true,
+        service: { select: { duration: true } },
+      },
+      take: 5000,
+    });
+  }
+
   delete(id: string): Promise<Doctor> {
     return this.prisma.doctor.delete({ where: { id } });
   }

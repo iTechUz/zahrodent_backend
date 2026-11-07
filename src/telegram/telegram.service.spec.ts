@@ -10,6 +10,7 @@ const handlers: {
   start?: Handler;
   on: Record<string, Handler>;
   action?: { re: RegExp; fn: Handler };
+  catch?: (err: unknown) => void;
 } = { on: {} };
 const launch = jest.fn();
 const stop = jest.fn();
@@ -29,6 +30,9 @@ jest.mock('telegraf', () => {
     }
     action(re: RegExp, fn: Handler) {
       handlers.action = { re, fn };
+    }
+    catch(fn: (err: unknown) => void) {
+      handlers.catch = fn;
     }
     launch() {
       return launch();
@@ -400,11 +404,18 @@ describe('TelegramService', () => {
       );
     });
 
-    it('text — kontaktsiz e’tiborsiz', async () => {
+    it('text — kontaktsiz lead yaratilmaydi, /start eslatiladi', async () => {
       const c = ctx({ message: { text: 'salom' } });
       await handlers.on.text(c);
       expect(leads.create).not.toHaveBeenCalled();
-      expect(c.reply).not.toHaveBeenCalled();
+      expect(c.reply).toHaveBeenCalledWith(expect.stringContaining('/start'));
+    });
+
+    it('bot.catch — handler xatosi log qilinadi, crash yo‘q', () => {
+      process.env.TELEGRAM_BOT_TOKEN = 'tok';
+      service.onModuleInit();
+      expect(() => handlers.catch?.(new Error('boom'))).not.toThrow();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('boom'));
     });
 
     it('text — "/" bilan boshlangan buyruqlar e’tiborsiz', async () => {

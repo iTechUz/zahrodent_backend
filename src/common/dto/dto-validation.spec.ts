@@ -120,6 +120,27 @@ describe('DTO validation', () => {
       ).toEqual([DATE_MSG]);
     });
 
+    it('mavjud bo‘lmagan sana (2026-02-30) — 400 xabari', () => {
+      expect(
+        errorsOf(CreateBookingDto, { ...ok, date: '2026-02-30' }).date,
+      ).toEqual(['date mavjud bo‘lmagan sana']);
+      expect(
+        errorsOf(CreateBookingDto, { ...ok, date: '2026-13-01' }).date,
+      ).toBeDefined();
+      expect(errorsOf(CreateBookingDto, { ...ok, date: '2028-02-29' })).toEqual(
+        {},
+      );
+    });
+
+    it('notes — 1000 belgidan oshmasligi kerak', () => {
+      expect(
+        errorsOf(CreateBookingDto, { ...ok, notes: 'a'.repeat(1000) }),
+      ).toEqual({});
+      expect(
+        errorsOf(CreateBookingDto, { ...ok, notes: 'a'.repeat(1001) }).notes,
+      ).toBeDefined();
+    });
+
     it('noma’lum source/status', () => {
       const e = errorsOf(CreateBookingDto, {
         ...ok,

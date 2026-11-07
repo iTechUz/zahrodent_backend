@@ -22,6 +22,7 @@ describe('DoctorsService', () => {
       | 'updateWithUser'
       | 'deleteWithUser'
       | 'countHistory'
+      | 'findActiveFutureBookings'
     >
   >;
   let users: jest.Mocked<
@@ -56,6 +57,7 @@ describe('DoctorsService', () => {
       getDetailedEfficiencyStats: jest.fn(),
       createWithUser: jest.fn().mockResolvedValue(doc()),
       updateWithUser: jest.fn().mockResolvedValue(doc()),
+      findActiveFutureBookings: jest.fn().mockResolvedValue([]),
       deleteWithUser: jest.fn().mockResolvedValue(undefined),
       countHistory: jest.fn().mockResolvedValue({ bookings: 0, visits: 0 }),
     };
@@ -236,6 +238,35 @@ describe('DoctorsService', () => {
         NotFoundException,
       );
       expect(repo.updateWithUser).not.toHaveBeenCalled();
+    });
+
+    it('jadval/dam olish o‘zgarsa — to‘qnashayotgan faol qabullar soni qaytadi', async () => {
+      repo.findById.mockResolvedValue(doc());
+      repo.updateWithUser.mockResolvedValue(
+        doc({ daysOff: ['2026-06-10'], schedule: null }),
+      );
+      repo.findActiveFutureBookings.mockResolvedValue([
+        {
+          date: new Date('2026-06-10T00:00:00Z'),
+          time: '10:00',
+          service: null,
+        },
+        {
+          date: new Date('2026-06-11T00:00:00Z'),
+          time: '10:00',
+          service: null,
+        },
+      ] as any);
+      const r: any = await service.update('d1', { daysOff: ['2026-06-10'] });
+      expect(r.scheduleConflicts).toBe(1);
+      expect(repo.updateWithUser).toHaveBeenCalled();
+    });
+
+    it('jadval o‘zgarmasa — scheduleConflicts yo‘q', async () => {
+      repo.findById.mockResolvedValue(doc());
+      const r: any = await service.update('d1', { specialty: 'X' });
+      expect(r).not.toHaveProperty('scheduleConflicts');
+      expect(repo.findActiveFutureBookings).not.toHaveBeenCalled();
     });
 
     it('parolsiz — user tegilmaydi', async () => {

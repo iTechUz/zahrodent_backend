@@ -13,9 +13,8 @@ import {
 import { ACTIVE_BOOKING_STATUSES } from '../bookings/bookings.service';
 import { BookingStatusService } from '../bookings/booking-status.service';
 import { NotificationLogService } from './notification-log.service';
-import { oneLine } from './client-notifier.service';
+import { oneLine } from '../common/utils/text.util';
 import {
-  addDaysToDateOnly,
   parseDateOnlyToUTC,
   toDateOnlyString,
   todayInTashkent,
@@ -25,7 +24,24 @@ export const REMINDER_CALLBACK_CONFIRM = 'rem_ok_';
 export const REMINDER_CALLBACK_RESCHEDULE = 'rem_re_';
 const HOUR_MS = 3_600_000;
 const POLL_MS = 5 * 60_000;
+const PAGE_SIZE = 200;
+const MAX_PAGES = 25;
 const FIRST_RUN_DELAY_MS = 90_000;
+
+type ReminderRow = {
+  id: string;
+  date: Date;
+  time: string;
+  reminder24SentAt: Date | null;
+  reminder2SentAt: Date | null;
+  patientId: string;
+  patient: {
+    firstName: string;
+    lastName: string;
+    telegramChatId: string | null;
+  };
+  doctor: { firstName: string; lastName: string };
+};
 
 export type ReminderAnswer = 'confirmed' | 'reschedule' | 'already' | 'denied';
 
@@ -91,93 +107,42 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     try {
       const today = todayInTashkent(now);
       const cs = await this.settings.get();
-      const rows = await this.prisma.booking.findMany({
-        where: {
-          status: { in: ACTIVE_BOOKING_STATUSES },
-          date: {
-            gte: parseDateOnlyToUTC(today),
-            lte: parseDateOnlyToUTC(addDaysToDateOnly(today, 2)),
-          },
-          OR: [{ reminder24SentAt: null }, { reminder2SentAt: null }],
-          patient: { deletedAt: null, telegramChatId: { not: null } },
-        },
-        select: {
-          id: true,
-          date: true,
-          time: true,
-          reminder24SentAt: true,
-          reminder2SentAt: true,
-          patientId: true,
-          patient: {
-            select: { firstName: true, lastName: true, telegramChatId: true },
-          },
-          doctor: { select: { firstName: true, lastName: true } },
-        },
-        take: 200,
-      });
+      // Only bookings starting within the next 24h can be due: today and
+      // tomorrow (Tashkent). Ordered by start, claimed page by page, so a big
+      // backlog never starves the reminders that are closest to starting.
+      const horizon = todayInTashkent(new Date(now.getTime() + 24 * HOUR_MS));
       let queued = 0;
-      for (const b of rows) {
-        const diff = bookingStart(b.date, b.time).getTime() - now.getTime();
-        if (!(diff > 0)) continue;
-        const kind: '2h' | '24h' | null =
-          diff <= 2 * HOUR_MS
-            ? b.reminder2SentAt
-              ? null
-              : '2h'
-            : diff <= 24 * HOUR_MS
-              ? b.reminder24SentAt
-                ? null
-                : '24h'
-              : null;
-        if (!kind || !b.patient.telegramChatId) continue;
-
-        const claim = await this.prisma.booking.updateMany({
-          where:
-            kind === '2h'
-              ? { id: b.id, reminder2SentAt: null }
-              : { id: b.id, reminder24SentAt: null },
-          data:
-            kind === '2h'
-              ? {
-                  reminder2SentAt: now,
-                  reminder24SentAt: b.reminder24SentAt ?? now,
-                }
-              : { reminder24SentAt: now },
+      let cursor: string | undefined;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const rows = await this.prisma.booking.findMany({
+          where: {
+            status: { in: ACTIVE_BOOKING_STATUSES },
+            date: {
+              gte: parseDateOnlyToUTC(today),
+              lte: parseDateOnlyToUTC(horizon),
+            },
+            OR: [{ reminder24SentAt: null }, { reminder2SentAt: null }],
+            patient: { deletedAt: null, telegramChatId: { not: null } },
+          },
+          select: {
+            id: true,
+            date: true,
+            time: true,
+            reminder24SentAt: true,
+            reminder2SentAt: true,
+            patientId: true,
+            patient: {
+              select: { firstName: true, lastName: true, telegramChatId: true },
+            },
+            doctor: { select: { firstName: true, lastName: true } },
+          },
+          orderBy: [{ date: 'asc' }, { time: 'asc' }, { id: 'asc' }],
+          take: PAGE_SIZE,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         });
-        if (claim.count !== 1) continue;
-
-        const text = renderReminderTemplate(cs.telegramReminderTemplate, {
-          name: oneLine(`${b.patient.firstName} ${b.patient.lastName}`, 100),
-          date: formatReminderDate(toDateOnlyString(b.date)),
-          time: b.time,
-          doctor:
-            oneLine(`${b.doctor.firstName} ${b.doctor.lastName}`, 100) ||
-            'shifokor',
-          clinic: cs.clinicName,
-        });
-        const row = await this.outbox.enqueue({
-          kind: kind === '2h' ? 'reminder_2h' : 'reminder_24h',
-          chatId: b.patient.telegramChatId,
-          text:
-            kind === '2h'
-              ? `⏰ Qabulingizga 2 soatdan kam qoldi.\n${text}`
-              : `⏰ ${text}`,
-          replyMarkup: reminderKeyboard(b.id),
-          patientId: b.patientId,
-        });
-        if (row) queued += 1;
-        else {
-          // Could not even store it → release the claim so the next run retries.
-          await this.prisma.booking
-            .updateMany({
-              where: { id: b.id },
-              data:
-                kind === '2h'
-                  ? { reminder2SentAt: null }
-                  : { reminder24SentAt: null },
-            })
-            .catch(() => undefined);
-        }
+        queued += await this.queueDue(rows, now, cs);
+        if (rows.length < PAGE_SIZE) break;
+        cursor = rows[rows.length - 1].id;
       }
       if (queued) this.logger.log(`Eslatmalar navbatga qo'yildi: ${queued}`);
       return queued;
@@ -187,6 +152,85 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
       );
       return 0;
     }
+  }
+
+  private async queueDue(
+    rows: ReminderRow[],
+    now: Date,
+    cs: { telegramReminderTemplate: string; clinicName: string },
+  ): Promise<number> {
+    // Claim only if the booking was not cancelled/moved since it was read.
+    const stillSame = (b: ReminderRow) => ({
+      id: b.id,
+      status: { in: ACTIVE_BOOKING_STATUSES },
+      date: b.date,
+      time: b.time,
+    });
+    let queued = 0;
+    for (const b of rows) {
+      const diff = bookingStart(b.date, b.time).getTime() - now.getTime();
+      if (!(diff > 0)) continue;
+      const kind: '2h' | '24h' | null =
+        diff <= 2 * HOUR_MS
+          ? b.reminder2SentAt
+            ? null
+            : '2h'
+          : diff <= 24 * HOUR_MS
+            ? b.reminder24SentAt
+              ? null
+              : '24h'
+            : null;
+      if (!kind || !b.patient.telegramChatId) continue;
+
+      const claim = await this.prisma.booking.updateMany({
+        where:
+          kind === '2h'
+            ? { ...stillSame(b), reminder2SentAt: null }
+            : { ...stillSame(b), reminder24SentAt: null },
+        data:
+          kind === '2h'
+            ? {
+                reminder2SentAt: now,
+                reminder24SentAt: b.reminder24SentAt ?? now,
+              }
+            : { reminder24SentAt: now },
+      });
+      if (claim.count !== 1) continue;
+
+      const text = renderReminderTemplate(cs.telegramReminderTemplate, {
+        name: oneLine(`${b.patient.firstName} ${b.patient.lastName}`, 100),
+        date: formatReminderDate(toDateOnlyString(b.date)),
+        time: b.time,
+        doctor:
+          oneLine(`${b.doctor.firstName} ${b.doctor.lastName}`, 100) ||
+          'shifokor',
+        clinic: cs.clinicName,
+      });
+      const row = await this.outbox.enqueue({
+        kind: kind === '2h' ? 'reminder_2h' : 'reminder_24h',
+        chatId: b.patient.telegramChatId,
+        text:
+          kind === '2h'
+            ? `⏰ Qabulingizga 2 soatdan kam qoldi.\n${text}`
+            : `⏰ ${text}`,
+        replyMarkup: reminderKeyboard(b.id),
+        patientId: b.patientId,
+      });
+      if (row) queued += 1;
+      else {
+        // Could not even store it → release the claim so the next run retries.
+        await this.prisma.booking
+          .updateMany({
+            where: { id: b.id },
+            data:
+              kind === '2h'
+                ? { reminder2SentAt: null }
+                : { reminder24SentAt: null },
+          })
+          .catch(() => undefined);
+      }
+    }
+    return queued;
   }
 
   /**
@@ -258,7 +302,11 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
     const groupChat = (
       process.env.TELEGRAM_STATUS_CHAT_ID || process.env.TELEGRAM_LEADS_CHAT_ID
     )?.trim();
-    if (groupChat) {
+    if (!groupChat) {
+      this.logger.warn(
+        `Ko'chirish so'rovi (qabul ${b.id}) — TELEGRAM_STATUS_CHAT_ID/TELEGRAM_LEADS_CHAT_ID sozlanmagan, xodimlarga xabar ketmadi`,
+      );
+    } else {
       await this.outbox.enqueue({
         kind: 'booking_reschedule_request',
         chatId: groupChat,
@@ -267,7 +315,7 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
           `👤 ${oneLine(`${b.patient.firstName} ${b.patient.lastName}`, 100)}`,
           `📞 ${oneLine(b.patient.phone, 30)}`,
           `🦷 ${oneLine(`${b.doctor.firstName} ${b.doctor.lastName}`, 100)}`,
-          `📅 ${toDateOnlyString(b.date)} ${b.time}`,
+          `📅 ${formatReminderDate(toDateOnlyString(b.date))} ${b.time}`,
           "Iltimos, bemor bilan bog'lanib yangi vaqt kelishing.",
         ].join('\n'),
         patientId: b.patientId,

@@ -2,10 +2,12 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  MaxLength,
   MinLength,
   Matches,
 } from 'class-validator';
 import { TIME_HH_MM_REGEX } from '../../common/utils/date.util';
+import { IsRealDateOnly } from '../../common/validators/is-real-date-only';
 
 export const BOOKING_SOURCES = [
   'walk-in',
@@ -37,6 +39,7 @@ export class CreateBookingDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'date YYYY-MM-DD formatida bo‘lishi kerak',
   })
+  @IsRealDateOnly()
   date: string;
 
   @IsString()
@@ -53,6 +56,7 @@ export class CreateBookingDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   notes?: string;
 
   @IsOptional()

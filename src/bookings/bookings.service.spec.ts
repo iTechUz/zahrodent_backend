@@ -27,6 +27,9 @@ describe('BookingsService', () => {
       | 'findManyWithService'
       | 'findDoctorAvailability'
       | 'withDoctorDayLock'
+      | 'withLocks'
+      | 'ensureVisitForCompleted'
+      | 'findPatientIdsByPhoneDigits'
     >
   >;
   const user: AuthUserView = {
@@ -35,6 +38,7 @@ describe('BookingsService', () => {
     phone: '+998901234567',
     role: 'receptionist',
   };
+  const admin: AuthUserView = { ...user, id: 'u0', role: 'admin' };
   const doctor: AuthUserView = {
     id: 'u2',
     name: 'Dr',
@@ -72,6 +76,11 @@ describe('BookingsService', () => {
       findDoctorAvailability: jest
         .fn()
         .mockResolvedValue({ id: 'd1', schedule: null, daysOff: null }),
+      withLocks: jest.fn(async (_k: string[], fn: (tx: any) => Promise<any>) =>
+        fn('tx'),
+      ) as any,
+      ensureVisitForCompleted: jest.fn().mockResolvedValue({ created: true }),
+      findPatientIdsByPhoneDigits: jest.fn().mockResolvedValue([]),
       withDoctorDayLock: jest.fn(
         async (_d: string, _date: string, fn: (tx: any) => Promise<any>) =>
           fn('tx'),
@@ -140,12 +149,45 @@ describe('BookingsService', () => {
       await service.findAll({ search: '  ali ' }, user);
       expect(where()).toEqual({
         patient: {
-          OR: [
-            { firstName: { contains: 'ali', mode: 'insensitive' } },
-            { lastName: { contains: 'ali', mode: 'insensitive' } },
+          AND: [
+            {
+              OR: [
+                { firstName: { contains: 'ali', mode: 'insensitive' } },
+                { lastName: { contains: 'ali', mode: 'insensitive' } },
+              ],
+            },
           ],
         },
       });
+    });
+
+    it('search — "Ali Valiyev": har bir so‘z ism yoki familiyaga mos (AND)', async () => {
+      await service.findAll({ search: 'Ali  Valiyev' }, user);
+      const and = where().patient.AND;
+      expect(and).toHaveLength(2);
+      expect(and[1].OR[0]).toEqual({
+        firstName: { contains: 'Valiyev', mode: 'insensitive' },
+      });
+      expect(repo.findPatientIdsByPhoneDigits).not.toHaveBeenCalled();
+    });
+
+    it('search — telefon raqami raqamlar bo‘yicha (formatdan qat’i nazar)', async () => {
+      repo.findPatientIdsByPhoneDigits.mockResolvedValue(['p1', 'p2']);
+      await service.findAll({ search: '+998 (90) 123' }, user);
+      expect(repo.findPatientIdsByPhoneDigits).toHaveBeenCalledWith('99890123');
+      expect(where().patient.AND).toEqual([{ id: { in: ['p1', 'p2'] } }]);
+    });
+
+    it('search — ism + telefon birga; 3 tadan kam raqam hech narsa topmaydi', async () => {
+      repo.findPatientIdsByPhoneDigits.mockResolvedValue(['p1']);
+      await service.findAll({ search: 'ali 901234' }, user);
+      expect(where().patient.AND).toHaveLength(2);
+      expect(where().patient.AND[1]).toEqual({ id: { in: ['p1'] } });
+      repo.findAll.mockClear();
+      repo.findPatientIdsByPhoneDigits.mockClear();
+      await service.findAll({ search: '12' }, user);
+      expect(repo.findPatientIdsByPhoneDigits).not.toHaveBeenCalled();
+      expect(where().patient.AND).toEqual([{ id: { in: [] } }]);
     });
 
     it('startDate/endDate — UTC date-only', async () => {
@@ -212,11 +254,21 @@ describe('BookingsService', () => {
       });
     });
 
-    it('faqat order — standart maydon (date) ga qo‘llanadi', async () => {
+    it('faqat order — standart maydon (date) ga qo‘llanadi: date, time, id', async () => {
       await service.findAll({ order: 'asc' }, user);
       expect(repo.findAll.mock.calls[0][1].orderBy).toEqual([
         { date: 'asc' },
+        { time: 'asc' },
         { id: 'asc' },
+      ]);
+    });
+
+    it('sortBy=date — date, time, id tartibi', async () => {
+      await service.findAll({ sortBy: 'date', order: 'desc' }, user);
+      expect(repo.findAll.mock.calls[0][1].orderBy).toEqual([
+        { date: 'desc' },
+        { time: 'desc' },
+        { id: 'desc' },
       ]);
     });
 
@@ -571,6 +623,10 @@ describe('BookingsService', () => {
   });
 
   describe('update — status log', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({ now: new Date('2026-06-01T00:00:00.000Z') });
+    });
+
     it('status really changed → onChanged with actor and reason', async () => {
       const statusService = {
         onChanged: jest.fn().mockResolvedValue(undefined),
@@ -603,6 +659,10 @@ describe('BookingsService', () => {
   });
 
   describe('update', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({ now: new Date('2026-06-01T00:00:00.000Z') });
+    });
+
     it('topilmasa 404', async () => {
       repo.findById.mockResolvedValue(null);
       await expect(service.update('x', {}, user)).rejects.toBeInstanceOf(
@@ -622,16 +682,20 @@ describe('BookingsService', () => {
       repo.findById.mockResolvedValue(booking());
       await service.update('b1', { status: 'confirmed', notes: 'ok' }, user);
       expect(repo.findManyWithService).not.toHaveBeenCalled();
-      expect(repo.update).toHaveBeenCalledWith('b1', {
-        date: undefined,
-        time: undefined,
-        source: undefined,
-        status: 'confirmed',
-        notes: 'ok',
-        patient: undefined,
-        doctor: undefined,
-        service: undefined,
-      });
+      expect(repo.update).toHaveBeenCalledWith(
+        'b1',
+        {
+          date: undefined,
+          time: undefined,
+          source: undefined,
+          status: 'confirmed',
+          notes: 'ok',
+          patient: undefined,
+          doctor: undefined,
+          service: undefined,
+        },
+        'tx',
+      );
     });
 
     it.each([
@@ -745,15 +809,15 @@ describe('BookingsService', () => {
         booking({ id: 'b9', time: '10:00', service: null }),
       ]);
       await expect(
-        service.update('b1', { status: 'pending' }, user),
+        service.update('b1', { status: 'pending' }, admin),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(repo.findManyWithService).toHaveBeenCalledWith(
         expect.objectContaining({ id: { not: 'b1' }, doctorId: 'd1' }),
         'tx',
       );
       expect(repo.update).not.toHaveBeenCalled();
-      // slot unchanged → schedule is not re-checked
-      expect(repo.findDoctorAvailability).not.toHaveBeenCalled();
+      // reactivation re-checks the doctor's schedule too
+      expect(repo.findDoctorAvailability).toHaveBeenCalledWith('d1');
     });
 
     it('update — faol → faol (pending → confirmed) qayta tekshirilmaydi', async () => {
@@ -767,7 +831,11 @@ describe('BookingsService', () => {
       repo.findManyWithService.mockResolvedValue([
         booking({ id: 'b9', time: '11:00', service: null }),
       ]);
-      await service.update('b1', { status: 'cancelled', time: '11:00' }, user);
+      await service.update(
+        'b1',
+        { status: 'cancelled', time: '11:00', statusReason: 'Bemor so‘radi' },
+        user,
+      );
       expect(repo.findManyWithService).not.toHaveBeenCalled();
       expect(repo.update).toHaveBeenCalled();
     });
@@ -786,6 +854,287 @@ describe('BookingsService', () => {
       expect(repo.findAll).not.toHaveBeenCalled();
       expect(repo.findById).not.toHaveBeenCalled();
       expect(repo.count).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('status qoidalari', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({ now: new Date('2026-06-10T12:00:00.000Z') });
+    });
+
+    it.each([
+      ['completed', 'cancelled'],
+      ['completed', 'no-show'],
+      ['cancelled', 'arrived'],
+      ['no-show', 'completed'],
+    ])('%s → %s taqiqlangan (admin uchun ham)', async (from, to) => {
+      repo.findById.mockResolvedValue(booking({ status: from }));
+      await expect(
+        service.update('b1', { status: to as any, statusReason: 'x' }, admin),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('yakunlangan qabulni bekor qilish — aniq xabar', async () => {
+      repo.findById.mockResolvedValue(booking({ status: 'completed' }));
+      await expect(
+        service.update('b1', { status: 'cancelled', statusReason: 'x' }, admin),
+      ).rejects.toThrow("Yakunlangan qabulni bekor qilib bo'lmaydi");
+    });
+
+    it('terminal holatni faqat admin qayta ochadi', async () => {
+      repo.findById.mockResolvedValue(booking({ status: 'cancelled' }));
+      await expect(
+        service.update('b1', { status: 'pending' }, user),
+      ).rejects.toThrow('faqat administrator');
+      await expect(
+        service.update('b1', { status: 'confirmed' }, admin),
+      ).resolves.toBeDefined();
+    });
+
+    it('terminal holatda holat o‘zgarmasa (izoh tahriri) ruxsat', async () => {
+      repo.findById.mockResolvedValue(booking({ status: 'completed' }));
+      await expect(
+        service.update('b1', { status: 'completed', notes: 'n' }, user),
+      ).resolves.toBeDefined();
+      expect(repo.ensureVisitForCompleted).not.toHaveBeenCalled();
+    });
+
+    it('kelajakdagi qabul "completed" bo‘la olmaydi; bugungi bo‘ladi', async () => {
+      repo.findById.mockResolvedValue(
+        booking({ date: new Date('2026-06-11T00:00:00.000Z') }),
+      );
+      await expect(
+        service.update('b1', { status: 'completed' }, user),
+      ).rejects.toThrow('Kelajakdagi qabul');
+      repo.findById.mockResolvedValue(
+        booking({ date: new Date('2026-06-10T00:00:00.000Z') }),
+      );
+      await expect(
+        service.update('b1', { status: 'completed' }, user),
+      ).resolves.toBeDefined();
+    });
+
+    it('bekor qilish sababsiz — 400; sabab bilan o‘tadi', async () => {
+      repo.findById.mockResolvedValue(booking());
+      await expect(
+        service.update('b1', { status: 'cancelled' }, user),
+      ).rejects.toThrow('sababini kiriting');
+      await expect(
+        service.update('b1', { status: 'cancelled', statusReason: '  ' }, user),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        service.update(
+          'b1',
+          { status: 'cancelled', statusReason: 'Kasal' },
+          user,
+        ),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  describe('completed → Visit', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({ now: new Date('2026-06-10T12:00:00.000Z') });
+    });
+
+    it('update completed — visit shu tranzaksiyada yaratiladi', async () => {
+      repo.findById.mockResolvedValue(booking({ status: 'confirmed' }));
+      repo.update.mockResolvedValue(booking({ status: 'completed' }));
+      await service.update('b1', { status: 'completed' }, user);
+      expect(repo.ensureVisitForCompleted).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'b1' }),
+        'tx',
+      );
+    });
+
+    it('visit yaratish xatosi — butun update xato (tranzaksiya qaytadi)', async () => {
+      repo.findById.mockResolvedValue(booking());
+      repo.ensureVisitForCompleted.mockRejectedValue(new Error('db'));
+      await expect(
+        service.update('b1', { status: 'completed' }, user),
+      ).rejects.toThrow('db');
+    });
+
+    it('create status=completed (bugun) — visit yaratiladi', async () => {
+      repo.create.mockResolvedValue(booking({ status: 'completed' }));
+      await service.create(
+        {
+          patientId: 'p1',
+          doctorId: 'd1',
+          date: '2026-06-10',
+          time: '18:00',
+          source: 'walk-in',
+          status: 'completed',
+        },
+        user,
+      );
+      expect(repo.ensureVisitForCompleted).toHaveBeenCalled();
+    });
+  });
+
+  describe('o‘tgan vaqt', () => {
+    beforeEach(() => {
+      // 2026-06-10 15:00 Toshkent
+      jest.useFakeTimers({ now: new Date('2026-06-10T10:00:00.000Z') });
+    });
+    const base = {
+      patientId: 'p1',
+      doctorId: 'd1',
+      date: '2026-06-10',
+      source: 'phone' as const,
+    };
+
+    it('create — bugun, vaqti o‘tib ketgan (pending) — 400', async () => {
+      await expect(
+        service.create({ ...base, time: '14:00', status: 'pending' }),
+      ).rejects.toThrow("o'tib ketgan vaqt");
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    it('create — bugun, kelasi vaqt — ruxsat', async () => {
+      await service.create({ ...base, time: '15:30', status: 'pending' });
+      expect(repo.create).toHaveBeenCalled();
+    });
+
+    it('update — sana/vaqt o‘tmishga ko‘chirilsa (faol) — 400', async () => {
+      repo.findById.mockResolvedValue(
+        booking({ date: new Date('2026-06-12T00:00:00.000Z') }),
+      );
+      await expect(
+        service.update('b1', { date: '2026-06-09' }, user),
+      ).rejects.toThrow("O'tib ketgan");
+      await expect(
+        service.update('b1', { date: '2026-06-10', time: '09:00' }, user),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('update — vaqt o‘zgarmasa o‘tmishdagi qabul tahrirlanadi', async () => {
+      repo.findById.mockResolvedValue(
+        booking({ date: new Date('2026-06-01T00:00:00.000Z') }),
+      );
+      await expect(
+        service.update('b1', { notes: 'x' }, user),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  describe('update — poyga va xabarlar', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({ now: new Date('2026-06-01T00:00:00.000Z') });
+    });
+
+    it('current qulf ichida qayta o‘qiladi (tx bilan)', async () => {
+      repo.findById.mockResolvedValue(booking());
+      await service.update('b1', { notes: 'x' }, user);
+      expect(repo.withLocks).toHaveBeenCalledWith(
+        ['booking-row:b1', 'booking:d1:2026-06-10'],
+        expect.any(Function),
+      );
+      expect(repo.findById).toHaveBeenLastCalledWith('b1', 'tx');
+    });
+
+    it('qulf ichida boshqa so‘rov sanani o‘zgartirgan bo‘lsa — 409', async () => {
+      repo.findById
+        .mockResolvedValueOnce(booking())
+        .mockResolvedValueOnce(
+          booking({ date: new Date('2026-06-20T00:00:00.000Z') }),
+        );
+      await expect(
+        service.update('b1', { notes: 'x' }, user),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('qulf ichida qabul o‘chirilgan bo‘lsa — 404', async () => {
+      repo.findById
+        .mockResolvedValueOnce(booking())
+        .mockResolvedValueOnce(null);
+      await expect(
+        service.update('b1', { notes: 'x' }, user),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('from-status qulf ichida o‘qilgan current dan olinadi', async () => {
+      const statusService = {
+        onChanged: jest.fn(),
+        onRescheduled: jest.fn(),
+      };
+      const svc = new BookingsService(repo as never, statusService as never);
+      repo.findById
+        .mockResolvedValueOnce(booking({ status: 'pending' }))
+        .mockResolvedValueOnce(booking({ status: 'confirmed' }));
+      await svc.update('b1', { status: 'arrived' }, user);
+      expect(statusService.onChanged).toHaveBeenCalledWith(
+        expect.objectContaining({ from: 'confirmed', to: 'arrived' }),
+      );
+    });
+
+    it('ko‘chirish — bemorga reschedule xabari; status xabari bo‘lsa takrorlanmaydi', async () => {
+      const statusService = {
+        onChanged: jest.fn(),
+        onRescheduled: jest.fn(),
+      };
+      const svc = new BookingsService(repo as never, statusService as never);
+      repo.findById.mockResolvedValue(booking());
+      await svc.update('b1', { time: '11:00' }, user);
+      expect(statusService.onRescheduled).toHaveBeenCalledWith(
+        expect.objectContaining({
+          previousWhen: '10.06.2026 10:00',
+          notifyPatient: true,
+        }),
+      );
+      await svc.update('b1', { time: '11:00', status: 'confirmed' }, user);
+      expect(statusService.onRescheduled).toHaveBeenLastCalledWith(
+        expect.objectContaining({ notifyPatient: false }),
+      );
+    });
+
+    it('create — onCreated chaqiriladi', async () => {
+      jest.useFakeTimers({ now: new Date('2026-06-01T00:00:00.000Z') });
+      const statusService = { onCreated: jest.fn() };
+      const svc = new BookingsService(repo as never, statusService as never);
+      await svc.create(
+        {
+          patientId: 'p1',
+          doctorId: 'd1',
+          date: '2026-06-10',
+          time: '10:00',
+          source: 'phone',
+          status: 'pending',
+        },
+        user,
+      );
+      expect(statusService.onCreated).toHaveBeenCalledWith('b1', {
+        id: 'u1',
+        name: 'Test',
+      });
+    });
+
+    it('remove — snapshot oldin, onDeleted keyin', async () => {
+      const calls: string[] = [];
+      const statusService = {
+        snapshot: jest.fn(async () => {
+          calls.push('snapshot');
+          return { id: 'b1' };
+        }),
+        onDeleted: jest.fn(async () => {
+          calls.push('onDeleted');
+        }),
+      };
+      repo.delete.mockImplementation((async () => {
+        calls.push('delete');
+      }) as any);
+      const svc = new BookingsService(repo as never, statusService as never);
+      repo.findById.mockResolvedValue(booking());
+      await svc.remove('b1', user);
+      await Promise.resolve();
+      expect(calls).toEqual(['snapshot', 'delete', 'onDeleted']);
+      expect(statusService.onDeleted).toHaveBeenCalledWith(
+        { id: 'b1' },
+        { id: 'u1', name: 'Test' },
+      );
     });
   });
 
@@ -827,8 +1176,14 @@ describe('BookingsService', () => {
         completedToday: 2,
       });
       const today = new Date('2026-06-18T00:00:00.000Z');
-      expect(repo.count).toHaveBeenNthCalledWith(1, { date: today });
-      expect(repo.count).toHaveBeenNthCalledWith(2, { status: 'pending' });
+      expect(repo.count).toHaveBeenNthCalledWith(1, {
+        date: today,
+        status: { notIn: ['cancelled', 'no-show'] },
+      });
+      expect(repo.count).toHaveBeenNthCalledWith(2, {
+        status: 'pending',
+        date: { gte: today },
+      });
       expect(repo.count).toHaveBeenNthCalledWith(3, {
         status: 'completed',
         date: today,
