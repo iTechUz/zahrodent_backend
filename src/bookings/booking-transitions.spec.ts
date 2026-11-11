@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
-import { assertStatusTransition } from './booking-transitions';
+import {
+  assertServiceForCompletion,
+  assertStatusTransition,
+} from './booking-transitions';
 
 const run = (
   from: string,

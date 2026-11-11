@@ -9,6 +9,7 @@ import {
   BookingsService,
   SLOT_OCCUPYING_STATUSES,
 } from './bookings.service';
+import { COMPLETE_NEEDS_SERVICE_MESSAGE } from './booking-transitions';
 import { BookingsRepository } from './bookings.repository';
 import type { AuthUserView } from '../auth/auth.service';
 
@@ -902,13 +903,19 @@ describe('BookingsService', () => {
 
     it('kelajakdagi qabul "completed" bo‘la olmaydi; bugungi bo‘ladi', async () => {
       repo.findById.mockResolvedValue(
-        booking({ date: new Date('2026-06-11T00:00:00.000Z') }),
+        booking({
+          date: new Date('2026-06-11T00:00:00.000Z'),
+          serviceId: 's1',
+        }),
       );
       await expect(
         service.update('b1', { status: 'completed' }, user),
       ).rejects.toThrow('Kelajakdagi qabul');
       repo.findById.mockResolvedValue(
-        booking({ date: new Date('2026-06-10T00:00:00.000Z') }),
+        booking({
+          date: new Date('2026-06-10T00:00:00.000Z'),
+          serviceId: 's1',
+        }),
       );
       await expect(
         service.update('b1', { status: 'completed' }, user),
@@ -939,8 +946,12 @@ describe('BookingsService', () => {
     });
 
     it('update completed — visit shu tranzaksiyada yaratiladi', async () => {
-      repo.findById.mockResolvedValue(booking({ status: 'confirmed' }));
-      repo.update.mockResolvedValue(booking({ status: 'completed' }));
+      repo.findById.mockResolvedValue(
+        booking({ status: 'confirmed', serviceId: 's1' }),
+      );
+      repo.update.mockResolvedValue(
+        booking({ status: 'completed', serviceId: 's1' }),
+      );
       await service.update('b1', { status: 'completed' }, user);
       expect(repo.ensureVisitForCompleted).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'b1' }),
@@ -949,7 +960,7 @@ describe('BookingsService', () => {
     });
 
     it('visit yaratish xatosi — butun update xato (tranzaksiya qaytadi)', async () => {
-      repo.findById.mockResolvedValue(booking());
+      repo.findById.mockResolvedValue(booking({ serviceId: 's1' }));
       repo.ensureVisitForCompleted.mockRejectedValue(new Error('db'));
       await expect(
         service.update('b1', { status: 'completed' }, user),
@@ -966,10 +977,60 @@ describe('BookingsService', () => {
           time: '18:00',
           source: 'walk-in',
           status: 'completed',
+          serviceId: 's1',
         },
         user,
       );
       expect(repo.ensureVisitForCompleted).toHaveBeenCalled();
+    });
+
+    it('create status=completed xizmatsiz — 400, hech narsa yozilmaydi', async () => {
+      await expect(
+        service.create(
+          {
+            patientId: 'p1',
+            doctorId: 'd1',
+            date: '2026-06-10',
+            time: '18:00',
+            source: 'walk-in',
+            status: 'completed',
+          },
+          user,
+        ),
+      ).rejects.toThrow(
+        new BadRequestException(COMPLETE_NEEDS_SERVICE_MESSAGE),
+      );
+      expect(repo.create).not.toHaveBeenCalled();
+      expect(repo.ensureVisitForCompleted).not.toHaveBeenCalled();
+    });
+
+    it('update completed xizmatsiz — 400; shu so‘rovda xizmat berilsa o‘tadi', async () => {
+      repo.findById.mockResolvedValue(booking({ status: 'confirmed' }));
+      await expect(
+        service.update('b1', { status: 'completed' }, user),
+      ).rejects.toThrow('Yakunlash uchun xizmat tanlang');
+      expect(repo.update).not.toHaveBeenCalled();
+      repo.update.mockResolvedValue(
+        booking({ status: 'completed', serviceId: 's1' }),
+      );
+      await service.update(
+        'b1',
+        { status: 'completed', serviceId: 's1' },
+        user,
+      );
+      expect(repo.ensureVisitForCompleted).toHaveBeenCalled();
+    });
+
+    it('xizmatsiz boshqa o‘tishlar o‘zgarmaydi (arrived, cancelled, no-show)', async () => {
+      repo.findById.mockResolvedValue(booking({ status: 'confirmed' }));
+      await service.update('b1', { status: 'arrived' }, user);
+      await service.update('b1', { status: 'no-show' }, user);
+      await service.update(
+        'b1',
+        { status: 'cancelled', statusReason: 'x' },
+        user,
+      );
+      expect(repo.update).toHaveBeenCalledTimes(3);
     });
   });
 

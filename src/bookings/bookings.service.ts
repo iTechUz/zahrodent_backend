@@ -29,7 +29,10 @@ import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
 import { AuthUserView } from '../auth/auth.service';
 import { doctorScopeId } from '../common/auth/doctor-scope';
 import { BookingStatusService } from './booking-status.service';
-import { assertStatusTransition } from './booking-transitions';
+import {
+  assertServiceForCompletion,
+  assertStatusTransition,
+} from './booking-transitions';
 import {
   DEFAULT_DURATION_MIN,
   minutesToTime,
@@ -179,6 +182,7 @@ export class BookingsService {
       bookingDate: dto.date,
       today,
     });
+    assertServiceForCompletion(dto.status, dto.serviceId);
     const duration = await this.getDuration(dto.serviceId);
     await this.checkDoctorSchedule(dto.doctorId, dto.date, dto.time, duration);
 
@@ -275,6 +279,7 @@ export class BookingsService {
             bookingDate: next.date,
             today: todayInTashkent(),
           });
+          assertServiceForCompletion(next.status, next.serviceId);
           if (next.status === 'cancelled' && !dto.statusReason?.trim()) {
             throw new BadRequestException(
               'Bekor qilish sababini kiriting (statusReason)',

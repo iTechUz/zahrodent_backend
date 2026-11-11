@@ -15,6 +15,22 @@ const STATUS_UZ: Record<string, string> = {
 
 export const label = (s: string) => STATUS_UZ[s] ?? s;
 
+export const COMPLETE_NEEDS_SERVICE_MESSAGE = 'Yakunlash uchun xizmat tanlang';
+
+/**
+ * A booking can only become "completed" with a service: the auto-created
+ * visit takes its price from it (no service → a free visit, silent loss).
+ * Call wherever a booking is created as / moved to completed.
+ */
+export function assertServiceForCompletion(
+  to: string,
+  serviceId: string | null | undefined,
+): void {
+  if (to === 'completed' && !serviceId) {
+    throw new BadRequestException(COMPLETE_NEEDS_SERVICE_MESSAGE);
+  }
+}
+
 /**
  * Single place for booking status rules. Throws a 400 with an Uzbek message.
  *  - completed / cancelled / no-show are final; only an admin may reopen them
