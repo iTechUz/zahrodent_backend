@@ -152,7 +152,7 @@ Namuna fayllar: [.env.example](.env.example) (dev) va [.env.production.example](
 
 | O'zgaruvchi | Majburiy | Standart | Tavsif | Misol |
 |---|---|---|---|---|
-| `NODE_ENV` | prod'da ha | — | `production` qat'iy tekshiruvlarni yoqadi, Swagger'ni o'chiradi, JSON log | `production` |
+| `NODE_ENV` | prod'da ha | — (Docker image: `production`) | `production` qat'iy tekshiruvlarni yoqadi, Swagger'ni o'chiradi, JSON log | `production` |
 | `PORT` | yo'q | `3000` (image'da `7878`) | Tinglash porti | `7878` |
 | `HOST` | yo'q | `0.0.0.0` | Tinglash manzili | `0.0.0.0` |
 | `TZ` | tavsiya | image'da `Asia/Tashkent` | Jarayon vaqt zonasi (sana mantiqi baribir Asia/Tashkent) | `Asia/Tashkent` |
@@ -265,7 +265,7 @@ POST /auth/logout {refresh_token} → { success: true }   (idempotent)
 
 **Telegram bot** (`TELEGRAM_BOT_TOKEN`):
 
-1. @BotFather → `/newbot` → token. Production va lokal uchun **alohida** botlar ishlating.
+1. @BotFather → `/newbot` → token. Production va lokal uchun **alohida** botlar ishlating. Repoda default token/chat id yo'q (dev'da ham): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_LEADS_CHAT_ID` faqat env'dan o'qiladi.
 2. Bot long polling bilan ishlaydi — webhook va ochiq port kerak emas. Bitta token bilan faqat **bitta** instansiya
    polling qilishi mumkin (aks holda Telegram `409 Conflict`); qo'shimcha replikalarda `TELEGRAM_BOT_ENABLED=false`.
 3. Oqim: `/start` → foydalanuvchi telefon raqamini yuboradi → xizmat tanlaydi yoki xabar yozadi → **lid** yaratiladi
