@@ -38,3 +38,15 @@ export function leadsChatId(): string | undefined {
 export function statusChatId(): string | undefined {
   return process.env.TELEGRAM_STATUS_CHAT_ID?.trim() || leadsChatId();
 }
+
+/**
+ * Forum topic (`message_thread_id`) of the staff group where booking messages go
+ * (status changes, new/moved/deleted bookings, reschedule requests, low ratings).
+ * Unset or not a positive integer → those messages go to the group's General chat.
+ */
+export function bookingsTopicId(): number | undefined {
+  const raw = process.env.TELEGRAM_BOOKINGS_TOPIC_ID?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return undefined;
+  const id = Number(raw);
+  return id > 0 ? id : undefined;
+}

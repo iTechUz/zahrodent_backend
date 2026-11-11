@@ -50,7 +50,7 @@ export class PatientsQueryDto extends ListQueryDto {
 
   @ApiPropertyOptional({
     description:
-      "Shifokorning barcha bemorlari: biriktirilgan, qabulga yozilgan yoki tashrif qilgan (shifokor profili uchun)",
+      'Shifokorning barcha bemorlari: biriktirilgan, qabulga yozilgan yoki tashrif qilgan (shifokor profili uchun)',
   })
   @IdQuery()
   relatedDoctorId?: string;

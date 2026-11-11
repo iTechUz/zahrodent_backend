@@ -61,8 +61,15 @@ export class PatientsService {
     query: PatientsQueryDto,
     user: AuthUserView,
   ): Promise<PaginatedResponse<ReturnType<PatientsService['toResponse']>>> {
-    const { search, source, startDate, endDate, debtOnly, doctorId, relatedDoctorId } =
-      query;
+    const {
+      search,
+      source,
+      startDate,
+      endDate,
+      debtOnly,
+      doctorId,
+      relatedDoctorId,
+    } = query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
