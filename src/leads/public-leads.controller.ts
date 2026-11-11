@@ -4,29 +4,37 @@ import { Throttle } from '@nestjs/throttler';
 import {
   IsNotEmpty,
   IsOptional,
+  IsIn,
   IsString,
   Matches,
   MaxLength,
 } from 'class-validator';
+import { LEAD_LANGS } from './dto/create-lead.dto';
 import { LeadsService } from './leads.service';
 import { normalizeUzPhone } from '../common/utils/phone.util';
 
 export class PublicLeadDto {
   @IsString() @IsNotEmpty() @MaxLength(100) name: string;
   @IsString()
-  @Matches(/^\+?[\d\s()-]{7,20}$/, { message: 'Invalid phone' })
+  @Matches(/^\+?[\d\s()-]{7,20}$/, {
+    message: "Telefon raqami noto'g'ri formatda",
+  })
   phone: string;
   @IsOptional() @IsString() @MaxLength(100) service?: string;
   /** Preferred date (YYYY-MM-DD) and the visitor's note, stored together in `message`. */
   @IsOptional()
   @IsString()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date must be YYYY-MM-DD' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: "Sana noto'g'ri (YYYY-MM-DD)" })
   date?: string;
   @IsOptional() @IsString() @MaxLength(1000) note?: string;
   @IsOptional() @IsString() @MaxLength(100) doctor?: string;
   @IsOptional()
-  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'time must be HH:mm' })
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "Vaqt noto'g'ri (HH:mm)" })
   time?: string;
+  /** Language of the form the visitor used (shown to staff). */
+  @IsOptional()
+  @IsIn(LEAD_LANGS, { message: "Til noto'g'ri (uz, ru yoki en)" })
+  lang?: string;
   /** Honeypot: hidden in the form, humans leave it empty, bots fill it. */
   @IsOptional() @IsString() @MaxLength(200) website?: string;
 }
@@ -44,7 +52,8 @@ export class PublicLeadsController {
     // Bot filled the hidden field: pretend success, store nothing.
     if (dto.website) return { ok: true };
     const phone = normalizeUzPhone(dto.phone);
-    if (!phone) throw new BadRequestException('phone: Invalid phone');
+    if (!phone)
+      throw new BadRequestException("phone: Telefon raqami noto'g'ri formatda");
     const message =
       [dto.date && `Sana: ${dto.date}`, dto.note].filter(Boolean).join('\n') ||
       undefined;
@@ -57,6 +66,7 @@ export class PublicLeadsController {
         dto.date && (dto.time ? `${dto.date} ${dto.time}` : dto.date),
       message,
       source: 'website',
+      lang: dto.lang,
     });
     return { ok: true };
   }

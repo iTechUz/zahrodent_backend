@@ -9,9 +9,13 @@ import { NotificationLog, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
 import { oneLine } from '../common/utils/text.util';
-import { bookingsTopicId, statusChatId } from '../telegram/dev-defaults';
+import {
+  bookingsTopicId,
+  leadsChatId,
+  statusChatId,
+} from '../telegram/dev-defaults';
 
-export type NotificationLogStatus = 'pending' | 'sent' | 'failed';
+export type NotificationLogStatus = 'pending' | 'sent' | 'failed' | 'expired';
 
 export const MAX_ATTEMPTS = 6;
 /** Delay before attempt N+1 (index = attempts made so far − 1). */
@@ -29,6 +33,10 @@ const BATCH = 20;
 const ERROR_MAX = 300;
 /** Telegram rejects messages over 4096 characters. */
 export const TELEGRAM_TEXT_MAX = 4096;
+/** Delivered/dead rows hold PII (names, phones, texts) — kept this long, then deleted. */
+export const LOG_RETENTION_DAYS = 90;
+const CLEANUP_FIRST_DELAY_MS = 10 * 60_000;
+const CLEANUP_EVERY_MS = 24 * 60 * 60_000;
 export const DELIVERY_ALERT_KIND = 'delivery_alert';
 
 export type EnqueueInput = {
@@ -38,6 +46,8 @@ export type EnqueueInput = {
   replyMarkup?: Prisma.InputJsonValue;
   leadId?: string;
   patientId?: string;
+  /** Stale after this instant (e.g. appointment start): never sent late, marked 'expired'. */
+  expiresAt?: Date;
 };
 
 /**
@@ -51,6 +61,7 @@ export type EnqueueInput = {
 export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NotificationLogService.name);
   private timer?: NodeJS.Timeout;
+  private cleanupTimers: NodeJS.Timeout[] = [];
 
   constructor(
     private readonly prisma: PrismaService,
@@ -61,10 +72,41 @@ export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
     if (process.env.NODE_ENV === 'test') return;
     this.timer = setInterval(() => void this.processDue(), POLL_MS);
     this.timer.unref();
+    // Daily retention cleanup (same timer approach as the reminders).
+    const first = setTimeout(
+      () => void this.cleanupOld(),
+      CLEANUP_FIRST_DELAY_MS,
+    );
+    const every = setInterval(() => void this.cleanupOld(), CLEANUP_EVERY_MS);
+    first.unref();
+    every.unref();
+    this.cleanupTimers = [first, every];
   }
 
   onModuleDestroy() {
     if (this.timer) clearInterval(this.timer);
+    for (const t of this.cleanupTimers) clearTimeout(t);
+    this.cleanupTimers = [];
+  }
+
+  /** Deletes finished (sent/failed/expired) rows older than LOG_RETENTION_DAYS. Never throws. */
+  async cleanupOld(now: Date = new Date()): Promise<number> {
+    try {
+      const before = new Date(now.getTime() - LOG_RETENTION_DAYS * 86_400_000);
+      const r = await this.prisma.notificationLog.deleteMany({
+        where: {
+          createdAt: { lt: before },
+          status: { in: ['sent', 'failed', 'expired'] },
+        },
+      });
+      if (r.count) {
+        this.logger.log(`Eski xabar loglari o'chirildi: ${r.count} ta`);
+      }
+      return r.count;
+    } catch (e) {
+      this.logger.warn(`Eski loglarni tozalashda xato: ${errMsg(e)}`);
+      return 0;
+    }
   }
 
   /**
@@ -83,6 +125,7 @@ export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
           replyMarkup: input.replyMarkup,
           leadId: input.leadId,
           patientId: input.patientId,
+          expiresAt: input.expiresAt,
         },
       });
       return await this.attempt(row);
@@ -119,17 +162,39 @@ export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async attempt(row: NotificationLog): Promise<NotificationLog> {
+    // Retried too late: "2 soatdan kam qoldi" after the visit began is a lie.
+    if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) {
+      this.logger.log(`Xabar (${row.kind}) muddati o'tdi — yuborilmadi`);
+      return this.prisma.notificationLog.update({
+        where: { id: row.id },
+        data: { status: 'expired', lastError: "muddati o'tgan" },
+      });
+    }
     const topic = bookingTopicFor(row);
-    const extra: Record<string, unknown> | undefined =
-      row.replyMarkup || topic
-        ? {
-            ...(row.replyMarkup
-              ? { reply_markup: row.replyMarkup as Record<string, unknown> }
-              : {}),
-            ...(topic ? { message_thread_id: topic } : {}),
-          }
-        : undefined;
-    let res = await this.telegram.sendMessage(row.chatId, row.text, extra);
+    const group = isGroupChat(row.chatId);
+    const build = (withTopic: boolean): Record<string, unknown> | undefined => {
+      const extra: Record<string, unknown> = {
+        ...(row.replyMarkup
+          ? { reply_markup: row.replyMarkup as Record<string, unknown> }
+          : {}),
+        ...(withTopic && topic ? { message_thread_id: topic } : {}),
+        // Group texts carry visitor-typed text: never auto-preview links.
+        ...(group ? { link_preview_options: { is_disabled: true } } : {}),
+      };
+      return Object.keys(extra).length ? extra : undefined;
+    };
+    let res = await this.telegram.sendMessage(
+      row.chatId,
+      row.text,
+      build(true),
+    );
+    if ('error' in res && res.migrateToChatId) {
+      // Group became a supergroup: the registry now redirects → retry once.
+      this.logger.error(
+        `Telegram chat ${row.chatId} supergroup'ga ko'chirilgan → ${res.migrateToChatId}. TELEGRAM_*_CHAT_ID ni yangilang! Xabar yangi id'ga qayta yuborilmoqda`,
+      );
+      res = await this.telegram.sendMessage(row.chatId, row.text, build(true));
+    }
     if (
       'error' in res &&
       topic &&
@@ -139,16 +204,11 @@ export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `Topic ${topic} topilmadi — xabar (${row.kind}) General chatga yuborildi`,
       );
-      res = await this.telegram.sendMessage(
-        row.chatId,
-        row.text,
-        row.replyMarkup
-          ? { reply_markup: row.replyMarkup as Record<string, unknown> }
-          : undefined,
-      );
+      res = await this.telegram.sendMessage(row.chatId, row.text, build(false));
     }
     const attempts = row.attempts + 1;
     if (!('error' in res)) {
+      if (group) this.telegram.reportGroupSuccess();
       return this.prisma.notificationLog.update({
         where: { id: row.id },
         data: { status: 'sent', attempts, sentAt: new Date(), lastError: null },
@@ -159,7 +219,10 @@ export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
     this.logger.warn(
       `Telegram yuborilmadi (${row.kind}, urinish ${attempts}): ${res.error.slice(0, 120)}`,
     );
-    if (giveUp) await this.onGaveUp(row, res.error);
+    if (giveUp) {
+      if (group && permanent) this.telegram.reportGroupFailure();
+      await this.onGaveUp(row, res.error);
+    }
     return this.prisma.notificationLog.update({
       where: { id: row.id },
       data: {
@@ -190,9 +253,14 @@ export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
         }
       }
       const group = groupChatId();
-      if (!group || row.kind === DELIVERY_ALERT_KIND || row.chatId === group) {
+      if (group && row.chatId === group) {
+        // The alert would go to the very chat that is failing → shout in the log instead.
+        this.logger.error(
+          `Xodimlar guruhiga (${row.kind}) xabar yetkazilmadi: ${oneLine(error, 150)} — guruh/bot sozlamasini tekshiring (/health/deps: telegramGroup)`,
+        );
         return;
       }
+      if (!group || row.kind === DELIVERY_ALERT_KIND) return;
       let who = '';
       if (row.patientId) {
         const p = await this.prisma.patient.findUnique({
@@ -308,6 +376,11 @@ export function bookingTopicFor(row: {
   if (!BOOKING_GROUP_KINDS.includes(row.kind)) return undefined;
   if (row.chatId !== statusChatId()) return undefined;
   return bookingsTopicId();
+}
+
+/** Staff group / leads group: messages there may contain visitor-typed text. */
+function isGroupChat(chatId: string): boolean {
+  return chatId === statusChatId() || chatId === leadsChatId();
 }
 
 function groupChatId(): string | undefined {

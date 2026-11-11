@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 import {
   DELIVERY_ALERT_KIND,
   MAX_ATTEMPTS,
@@ -10,9 +10,15 @@ import {
   retryDelayMs,
 } from './notification-log.service';
 
+const NO_PREVIEW = { link_preview_options: { is_disabled: true } };
+
 describe('NotificationLogService', () => {
   let db: any;
-  let tg: { sendMessage: jest.Mock };
+  let tg: {
+    sendMessage: jest.Mock;
+    reportGroupSuccess: jest.Mock;
+    reportGroupFailure: jest.Mock;
+  };
   let svc: NotificationLogService;
   const row = (o: object = {}) => ({
     id: 'n1',
@@ -34,10 +40,15 @@ describe('NotificationLogService', () => {
         findMany: jest.fn().mockResolvedValue([]),
         findUnique: jest.fn(),
         count: jest.fn().mockResolvedValue(0),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
       $transaction: jest.fn((x) => Promise.all(x)),
     };
-    tg = { sendMessage: jest.fn().mockResolvedValue({ ok: true }) };
+    tg = {
+      sendMessage: jest.fn().mockResolvedValue({ ok: true }),
+      reportGroupSuccess: jest.fn(),
+      reportGroupFailure: jest.fn(),
+    };
     svc = new NotificationLogService(db, tg as never);
   });
 
@@ -68,6 +79,7 @@ describe('NotificationLogService', () => {
       });
       expect(tg.sendMessage).toHaveBeenCalledWith('-100', 'hi', {
         message_thread_id: 77,
+        link_preview_options: { is_disabled: true },
       });
     });
 
@@ -78,7 +90,7 @@ describe('NotificationLogService', () => {
         chatId: '-100',
         text: 'hi',
       });
-      expect(tg.sendMessage).toHaveBeenCalledWith('-100', 'hi', undefined);
+      expect(tg.sendMessage).toHaveBeenCalledWith('-100', 'hi', NO_PREVIEW);
     });
 
     it('an invalid topic id is ignored', async () => {
@@ -88,7 +100,7 @@ describe('NotificationLogService', () => {
         chatId: '-100',
         text: 'hi',
       });
-      expect(tg.sendMessage).toHaveBeenCalledWith('-100', 'hi', undefined);
+      expect(tg.sendMessage).toHaveBeenCalledWith('-100', 'hi', NO_PREVIEW);
     });
 
     it('other kinds (leads) and patient chats are not moved to the topic', async () => {
@@ -99,7 +111,12 @@ describe('NotificationLogService', () => {
         chatId: '555',
         text: 'b',
       });
-      expect(tg.sendMessage).toHaveBeenNthCalledWith(1, '-100', 'a', undefined);
+      expect(tg.sendMessage).toHaveBeenNthCalledWith(
+        1,
+        '-100',
+        'a',
+        NO_PREVIEW,
+      );
       expect(tg.sendMessage).toHaveBeenNthCalledWith(2, '555', 'b', undefined);
     });
 
@@ -120,7 +137,7 @@ describe('NotificationLogService', () => {
         2,
         '-100',
         'hi',
-        undefined,
+        NO_PREVIEW,
       );
       expect(db.notificationLog.update.mock.calls[0][0].data).toMatchObject({
         status: 'sent',
@@ -326,6 +343,146 @@ describe('NotificationLogService', () => {
       ).toBe(true);
       expect(isDeadChatError('400: Bad Request: chat not found')).toBe(true);
       expect(isDeadChatError('429: Too Many Requests')).toBe(false);
+    });
+  });
+
+  describe('expiry, preview, migration, health signal, cleanup', () => {
+    const saved = {
+      a: process.env.TELEGRAM_LEADS_CHAT_ID,
+      b: process.env.TELEGRAM_STATUS_CHAT_ID,
+    };
+    beforeEach(() => {
+      process.env.TELEGRAM_LEADS_CHAT_ID = '-100';
+      delete process.env.TELEGRAM_STATUS_CHAT_ID;
+    });
+    afterEach(() => {
+      for (const [k, v] of [
+        ['TELEGRAM_LEADS_CHAT_ID', saved.a],
+        ['TELEGRAM_STATUS_CHAT_ID', saved.b],
+      ] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    });
+
+    it('expiresAt saqlanadi; muddati o‘tmagan xabar yuboriladi', async () => {
+      const expiresAt = new Date(Date.now() + 3600_000);
+      await svc.enqueue({
+        kind: 'reminder_2h',
+        chatId: '5',
+        text: 'x',
+        expiresAt,
+      });
+      expect(db.notificationLog.create.mock.calls[0][0].data.expiresAt).toBe(
+        expiresAt,
+      );
+      expect(tg.sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('muddati o‘tgan xabar yuborilmaydi — "expired"', async () => {
+      await svc.enqueue({
+        kind: 'reminder_2h',
+        chatId: '5',
+        text: 'x',
+        expiresAt: new Date(Date.now() - 1000),
+      });
+      expect(tg.sendMessage).not.toHaveBeenCalled();
+      expect(db.notificationLog.update.mock.calls[0][0].data.status).toBe(
+        'expired',
+      );
+    });
+
+    it('poller: kutib qolgan eskirgan qator yuborilmaydi, muddatsiz turlar o‘zgarmaydi', async () => {
+      db.notificationLog.findMany.mockResolvedValue([
+        row({ id: 'a', chatId: '5', expiresAt: new Date(Date.now() - 5) }),
+        row({ id: 'b', chatId: '5', expiresAt: null }),
+      ]);
+      await svc.processDue();
+      expect(tg.sendMessage).toHaveBeenCalledTimes(1);
+      const statuses = db.notificationLog.update.mock.calls.map(
+        (c: any) => c[0].data.status,
+      );
+      expect(statuses).toEqual(['expired', 'sent']);
+    });
+
+    it('guruh xabarlarida link preview o‘chiriladi; bemor chatida ta’sir yo‘q', async () => {
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'a' });
+      await svc.enqueue({ kind: 'reminder', chatId: '5', text: 'b' });
+      expect(tg.sendMessage).toHaveBeenNthCalledWith(
+        1,
+        '-100',
+        'a',
+        NO_PREVIEW,
+      );
+      expect(tg.sendMessage).toHaveBeenNthCalledWith(2, '5', 'b', undefined);
+    });
+
+    it('guruh supergroup bo‘ldi (migrate_to_chat_id) — baland ovozda log + bir marta qayta yuboriladi', async () => {
+      const err = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      tg.sendMessage
+        .mockResolvedValueOnce({
+          ok: false,
+          error:
+            '400: Bad Request: group chat was upgraded to a supergroup chat',
+          migrateToChatId: '-1009',
+        })
+        .mockResolvedValueOnce({ ok: true });
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'a' });
+      expect(tg.sendMessage).toHaveBeenCalledTimes(2);
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('-1009'));
+      expect(db.notificationLog.update.mock.calls[0][0].data.status).toBe(
+        'sent',
+      );
+      err.mockRestore();
+    });
+
+    it('migratsiya qayta urinishi ham xato bersa — ikkinchi qayta urinish yo‘q', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      tg.sendMessage.mockResolvedValue({
+        ok: false,
+        error: '400: Bad Request: upgraded',
+        migrateToChatId: '-1009',
+      });
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'a' });
+      expect(tg.sendMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('guruh: muvaffaqiyat → reportGroupSuccess; doimiy xato → reportGroupFailure + log.error (alert sikli yo‘q)', async () => {
+      const err = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'a' });
+      expect(tg.reportGroupSuccess).toHaveBeenCalledTimes(1);
+      tg.sendMessage.mockResolvedValue({
+        ok: false,
+        error: '403: Forbidden: bot was kicked from the supergroup chat',
+      });
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'a' });
+      expect(tg.reportGroupFailure).toHaveBeenCalledTimes(1);
+      expect(err).toHaveBeenCalledWith(expect.stringContaining('guruhiga'));
+      err.mockRestore();
+    });
+
+    it('bemor chatidagi xato guruh signaliga ta’sir qilmaydi', async () => {
+      tg.sendMessage.mockResolvedValueOnce({
+        ok: false,
+        error: '403: blocked',
+      });
+      await svc.enqueue({ kind: 'reminder', chatId: '5', text: 'a' });
+      expect(tg.reportGroupFailure).not.toHaveBeenCalled();
+    });
+
+    it('cleanupOld — 90 kundan eski sent/failed/expired o‘chiriladi, pending tegilmaydi', async () => {
+      db.notificationLog.deleteMany.mockResolvedValue({ count: 4 });
+      const now = new Date('2026-11-12T00:00:00Z');
+      await expect(svc.cleanupOld(now)).resolves.toBe(4);
+      const where = db.notificationLog.deleteMany.mock.calls[0][0].where;
+      expect(where.status).toEqual({ in: ['sent', 'failed', 'expired'] });
+      expect(where.createdAt.lt).toEqual(new Date('2026-08-14T00:00:00Z'));
+    });
+
+    it('cleanupOld — DB xatosi yutiladi', async () => {
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      db.notificationLog.deleteMany.mockRejectedValue(new Error('db'));
+      await expect(svc.cleanupOld()).resolves.toBe(0);
     });
   });
 });

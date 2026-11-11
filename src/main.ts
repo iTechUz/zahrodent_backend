@@ -1,11 +1,12 @@
 import 'dotenv/config';
-import { BadRequestException, Logger, ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { validationExceptionFactory } from './common/validation-messages';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { requestIdMiddleware } from './common/middleware/request-id.middleware';
 import { AppLogger, useJsonLogs } from './common/logging/app-logger';
@@ -56,12 +57,7 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
       transform: true,
       transformOptions: { enableImplicitConversion: true },
-      exceptionFactory: (errors) => {
-        const messages = errors.map((err) => {
-          return `${err.property}: ${Object.values(err.constraints || {}).join(', ')}`;
-        });
-        return new BadRequestException(messages);
-      },
+      exceptionFactory: validationExceptionFactory,
     }),
   );
   app.useGlobalFilters(new AllExceptionsFilter());

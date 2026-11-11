@@ -1,4 +1,7 @@
-import { TelegramBotRegistry } from './telegram-bot.registry';
+import {
+  GROUP_FAILURE_THRESHOLD,
+  TelegramBotRegistry,
+} from './telegram-bot.registry';
 
 describe('TelegramBotRegistry', () => {
   it('bot yo‘q — mavjud emas, sendMessage ok:false', async () => {
@@ -82,6 +85,46 @@ describe('TelegramBotRegistry', () => {
       await expect(r.health()).resolves.toBe('ok');
       r.register(null);
       await expect(r.health()).resolves.toBe('disabled');
+    });
+  });
+
+  describe('supergroup migration and group health', () => {
+    it('migrate_to_chat_id xatodan olinadi, keyingi xabarlar yangi id ga yo‘naltiriladi', async () => {
+      const r = new TelegramBotRegistry();
+      const err = Object.assign(new Error('400: group chat was upgraded'), {
+        response: { parameters: { migrate_to_chat_id: -1009 } },
+      });
+      const sender = {
+        sendMessage: jest.fn().mockRejectedValueOnce(err).mockResolvedValue({}),
+      };
+      r.register(sender);
+      await expect(r.sendMessage('-100', 'a')).resolves.toMatchObject({
+        ok: false,
+        migrateToChatId: '-1009',
+      });
+      expect(r.migratedTo('-100')).toBe('-1009');
+      await expect(r.sendMessage('-100', 'a')).resolves.toEqual({ ok: true });
+      expect(sender.sendMessage).toHaveBeenLastCalledWith('-1009', 'a');
+      expect(r.groupHealth()).toBe('migrated');
+    });
+
+    it('oddiy xatoda migrateToChatId yo‘q', async () => {
+      const r = new TelegramBotRegistry();
+      r.register({ sendMessage: jest.fn().mockRejectedValue(new Error('x')) });
+      const res = await r.sendMessage('1', 'a');
+      expect(res).toEqual({ ok: false, error: 'x' });
+    });
+
+    it('ketma-ket doimiy xatolar → failing; bitta muvaffaqiyat tiklaydi', () => {
+      const r = new TelegramBotRegistry();
+      expect(r.groupHealth()).toBe('ok');
+      for (let i = 0; i < GROUP_FAILURE_THRESHOLD - 1; i++)
+        r.reportGroupFailure();
+      expect(r.groupHealth()).toBe('ok');
+      r.reportGroupFailure();
+      expect(r.groupHealth()).toBe('failing');
+      r.reportGroupSuccess();
+      expect(r.groupHealth()).toBe('ok');
     });
   });
 });

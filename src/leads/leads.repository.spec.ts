@@ -55,4 +55,69 @@ describe('LeadsRepository', () => {
     await repo.delete('l1');
     expect(prisma.lead.delete).toHaveBeenCalledWith({ where: { id: 'l1' } });
   });
+
+  describe('createOrMerge', () => {
+    let tx: any;
+    const since = new Date('2026-01-01T00:00:00Z');
+    beforeEach(() => {
+      tx = {
+        $executeRaw: jest.fn().mockResolvedValue(0),
+        lead: {
+          findFirst: jest.fn(),
+          create: jest.fn().mockResolvedValue({ id: 'new' }),
+          update: jest.fn().mockImplementation(async ({ data }) => ({
+            id: 'old',
+            ...data,
+          })),
+        },
+      };
+      prisma.$transaction = jest.fn(async (fn: (t: unknown) => unknown) =>
+        fn(tx),
+      );
+    });
+
+    it('locks per phone, then creates when no open lead exists', async () => {
+      tx.lead.findFirst.mockResolvedValue(null);
+      const merge = jest.fn();
+      const r = await repo.createOrMerge(
+        '+998901',
+        since,
+        { name: 'A' } as any,
+        merge,
+      );
+      expect(r).toEqual({ lead: { id: 'new' }, created: true });
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(tx.lead.findFirst.mock.calls[0][0].where).toEqual({
+        phone: '+998901',
+        createdAt: { gte: since },
+        status: { notIn: ['converted', 'cancelled'] },
+      });
+      expect(merge).not.toHaveBeenCalled();
+    });
+
+    it('existing open lead → merge patch applied, no second row', async () => {
+      tx.lead.findFirst.mockResolvedValue({ id: 'old' });
+      const r = await repo.createOrMerge('+998901', since, {} as any, () => ({
+        message: 'x',
+      }));
+      expect(r.created).toBe(false);
+      expect(tx.lead.update).toHaveBeenCalledWith({
+        where: { id: 'old' },
+        data: { message: 'x' },
+      });
+      expect(tx.lead.create).not.toHaveBeenCalled();
+    });
+
+    it('existing lead, null patch → untouched', async () => {
+      tx.lead.findFirst.mockResolvedValue({ id: 'old' });
+      const r = await repo.createOrMerge(
+        '+998901',
+        since,
+        {} as any,
+        () => null,
+      );
+      expect(r).toEqual({ lead: { id: 'old' }, created: false });
+      expect(tx.lead.update).not.toHaveBeenCalled();
+    });
+  });
 });

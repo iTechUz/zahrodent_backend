@@ -48,6 +48,38 @@ export class LeadsRepository {
     });
   }
 
+  /**
+   * Atomic "one open lead per phone in the window": under a per-phone advisory
+   * lock either creates the lead, or (when a recent open lead exists) lets
+   * `merge` turn the new details into an update of that lead. A double-click
+   * or two parallel requests therefore never make two leads / two staff pings.
+   * `merge` returns null when there is nothing to write.
+   */
+  async createOrMerge(
+    phone: string,
+    since: Date,
+    data: Prisma.LeadCreateInput,
+    merge: (existing: Lead) => Prisma.LeadUpdateInput | null,
+  ): Promise<{ lead: Lead; created: boolean }> {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${phone}))`;
+      const dup = await tx.lead.findFirst({
+        where: {
+          phone,
+          createdAt: { gte: since },
+          status: { notIn: ['converted', 'cancelled'] },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!dup) return { lead: await tx.lead.create({ data }), created: true };
+      const patch = merge(dup);
+      const lead = patch
+        ? await tx.lead.update({ where: { id: dup.id }, data: patch })
+        : dup;
+      return { lead, created: false };
+    });
+  }
+
   async update(id: string, data: Prisma.LeadUpdateInput): Promise<Lead> {
     return this.prisma.lead.update({
       where: { id },
@@ -66,7 +98,9 @@ export class LeadsRepository {
   async updateAndEnsurePatient(
     id: string,
     data: Prisma.LeadUpdateInput,
-    lead: Pick<Lead, 'name' | 'phone' | 'source' | 'service' | 'message'>,
+    lead: Pick<Lead, 'name' | 'phone' | 'source' | 'service' | 'message'> & {
+      telegramChatId?: string | null;
+    },
     patientDate: Date,
   ): Promise<Lead> {
     return this.prisma.$transaction(async (tx) => {
@@ -81,14 +115,15 @@ export class LeadsRepository {
       const updated = await tx.lead.findUniqueOrThrow({ where: { id } });
       if (claimed.count === 0) return updated;
       const canonical = normalizeUzPhone(lead.phone);
-      const existing = await tx.patient.findFirst({
-        where: {
-          phone: { in: [...new Set([lead.phone, canonical ?? lead.phone])] },
-          deletedAt: null,
-        },
-        select: { id: true },
-      });
-      if (!existing) {
+      // Same digit-based match as the bot/linking code (any phone formatting in the DB).
+      const digits = (canonical ?? lead.phone).replace(/\D/g, '');
+      const matches = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM patients
+        WHERE deleted_at IS NULL
+          AND regexp_replace(phone, '[^0-9]', '', 'g') IN (${digits}, ${digits.slice(-9)})
+      `;
+      const chat = lead.telegramChatId;
+      if (matches.length === 0) {
         // "Ali Valiyev" → Ali / Valiyev; a single word is the first name.
         const [firstName, ...rest] = lead.name.trim().split(/\s+/);
         const notes = [
@@ -109,8 +144,16 @@ export class LeadsRepository {
             phone: canonical ?? lead.phone,
             source: patientSourceFromLead(lead.source),
             notes,
+            // Reminders reach the person right away (status text promises it).
+            telegramChatId: chat ?? null,
             createdAt: patientDate,
           },
+        });
+      } else if (chat) {
+        // Matched card(s) without a chat get the lead's own-contact chat.
+        await tx.patient.updateMany({
+          where: { id: { in: matches.map((m) => m.id) }, telegramChatId: null },
+          data: { telegramChatId: chat },
         });
       }
       return updated;

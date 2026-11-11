@@ -44,6 +44,9 @@ describe('BookingStatusService', () => {
       },
       booking: { findUnique: jest.fn().mockResolvedValue(booking('555')) },
       doctor: { findMany: jest.fn() },
+      clinicSettings: {
+        findUnique: jest.fn().mockResolvedValue({ phone: '+998712000000' }),
+      },
     };
     outbox = { enqueue: jest.fn().mockResolvedValue({}) };
     svc = new BookingStatusService(prisma, outbox as never);
@@ -88,14 +91,45 @@ describe('BookingStatusService', () => {
     expect(group.text).toContain('Admin Aziz');
   });
 
-  it('cancelled → patient gets the reason', async () => {
+  it('cancelled → patient does NOT get the staff-typed reason, gets the clinic phone', async () => {
     await svc.onChanged(change('cancelled', 'Shifokor kasal'));
     const c = outbox.enqueue.mock.calls.find(
       (x) => x[0].kind === 'patient_status',
     )[0];
     expect(c.chatId).toBe('555');
-    expect(c.text).toContain('Sababi: Shifokor kasal');
+    expect(c.text).not.toContain('Shifokor kasal');
+    expect(c.text).not.toContain('Sabab');
+    expect(c.text).toContain('klinikaga murojaat qiling');
+    expect(c.text).toContain('+998712000000');
     expect(c.replyMarkup).toBeUndefined();
+    // the reason stays for staff: group message + status log
+    const g = outbox.enqueue.mock.calls.find(
+      (x) => x[0].kind === 'booking_status_group',
+    )[0];
+    expect(g.text).toContain('Sabab: Shifokor kasal');
+  });
+
+  it('cancelled, clinic phone not set → message without a phone', async () => {
+    prisma.clinicSettings.findUnique.mockResolvedValue({ phone: '  ' });
+    await svc.onChanged(change('cancelled'));
+    const c = outbox.enqueue.mock.calls.find(
+      (x) => x[0].kind === 'patient_status',
+    )[0];
+    expect(c.text).toMatch(/klinikaga murojaat qiling\.$/);
+  });
+
+  it('confirmed message expires at the appointment start; others never expire', async () => {
+    await svc.onChanged(change('confirmed'));
+    const conf = outbox.enqueue.mock.calls.find(
+      (x) => x[0].kind === 'patient_status',
+    )[0];
+    expect(conf.expiresAt).toBeInstanceOf(Date);
+    outbox.enqueue.mockClear();
+    await svc.onChanged(change('cancelled'));
+    const canc = outbox.enqueue.mock.calls.find(
+      (x) => x[0].kind === 'patient_status',
+    )[0];
+    expect(canc.expiresAt).toBeUndefined();
   });
 
   it('completed → patient message with rating buttons', async () => {
@@ -143,16 +177,15 @@ describe('BookingStatusService', () => {
       formatClientStatusMessage('pending', {
         doctor: 'x',
         when: 'y',
-        reason: null,
       }),
     ).toBeNull();
     expect(
       formatClientStatusMessage('cancelled', {
         doctor: 'x',
         when: 'y',
-        reason: null,
+        clinicPhone: '+998 71',
       }),
-    ).toContain("ko'rsatilmagan");
+    ).toContain('+998 71');
     expect(
       formatGroupStatusMessage({
         to: 'confirmed',

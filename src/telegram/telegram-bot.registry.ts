@@ -14,6 +14,12 @@ export type TelegramSender = {
 /** `disabled` — bot not configured/off; `ok` — reachable; `down` — failed. */
 export type TelegramHealth = 'disabled' | 'ok' | 'down';
 
+/** Consecutive permanent staff-group failures after which the group is reported as failing. */
+export const GROUP_FAILURE_THRESHOLD = 3;
+
+/** `ok` — fine; `failing` — group messages keep failing for good; `migrated` — group became a supergroup (update the env id). */
+export type TelegramGroupHealth = 'ok' | 'failing' | 'migrated';
+
 /** How long a `getMe` result is reused (keeps /health/deps cheap). */
 export const TELEGRAM_HEALTH_TTL_MS = 60_000;
 export const TELEGRAM_PROBE_TIMEOUT_MS = 5_000;
@@ -30,6 +36,9 @@ export class TelegramBotRegistry {
   private failure: string | null = null;
   private cache: { at: number; value: 'ok' | 'down' } | null = null;
   private inflight: Promise<'ok' | 'down'> | null = null;
+  /** old chat id → new id after Telegram's migrate_to_chat_id (in-memory until the env is fixed). */
+  private redirects = new Map<string, string>();
+  private groupFailures = 0;
 
   register(sender: TelegramSender | null) {
     this.sender = sender;
@@ -50,20 +59,53 @@ export class TelegramBotRegistry {
     return this.sender !== null;
   }
 
-  /** `{ ok: false }` when the bot isn't running or Telegram rejects it. */
+  /**
+   * `{ ok: false }` when the bot isn't running or Telegram rejects it. When the
+   * chat was upgraded to a supergroup, Telegram answers 400 with
+   * `migrate_to_chat_id`: it is remembered and returned as `migrateToChatId`.
+   */
   async sendMessage(
     chatId: string,
     text: string,
     extra?: Record<string, unknown>,
-  ): Promise<{ ok: true } | { ok: false; error: string }> {
+  ): Promise<
+    { ok: true } | { ok: false; error: string; migrateToChatId?: string }
+  > {
     if (!this.sender) return { ok: false, error: 'bot not running' };
+    const target = this.redirects.get(chatId) ?? chatId;
     try {
-      if (extra) await this.sender.sendMessage(chatId, text, extra);
-      else await this.sender.sendMessage(chatId, text);
+      if (extra) await this.sender.sendMessage(target, text, extra);
+      else await this.sender.sendMessage(target, text);
       return { ok: true };
     } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      const migrated = migrateTargetOf(e);
+      if (migrated) this.redirects.set(chatId, migrated);
+      return {
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+        ...(migrated ? { migrateToChatId: migrated } : {}),
+      };
     }
+  }
+
+  /** New id the chat was migrated to (this process), if any. */
+  migratedTo(chatId: string): string | undefined {
+    return this.redirects.get(chatId);
+  }
+
+  /** A staff-group message was given up on for good (400/403/migrated). */
+  reportGroupFailure() {
+    this.groupFailures += 1;
+  }
+
+  /** A staff-group message was delivered → the group works again. */
+  reportGroupSuccess() {
+    this.groupFailures = 0;
+  }
+
+  groupHealth(): TelegramGroupHealth {
+    if (this.redirects.size > 0) return 'migrated';
+    return this.groupFailures >= GROUP_FAILURE_THRESHOLD ? 'failing' : 'ok';
   }
 
   /** Bot health for /health/deps; the Telegram probe is cached ~60s. */
@@ -102,4 +144,16 @@ export class TelegramBotRegistry {
       clearTimeout(timer);
     }
   }
+}
+
+/** Telegram's `parameters.migrate_to_chat_id` from a failed API call. */
+function migrateTargetOf(e: unknown): string | undefined {
+  const err = e as {
+    response?: { parameters?: { migrate_to_chat_id?: number | string } };
+    parameters?: { migrate_to_chat_id?: number | string };
+  };
+  const id =
+    err?.response?.parameters?.migrate_to_chat_id ??
+    err?.parameters?.migrate_to_chat_id;
+  return id === undefined || id === null || id === '' ? undefined : String(id);
 }

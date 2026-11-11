@@ -4,13 +4,16 @@ import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
 
 describe('HealthController', () => {
   let prisma: { $queryRaw: jest.Mock };
-  let tg: { health: jest.Mock };
+  let tg: { health: jest.Mock; groupHealth: jest.Mock };
   let res: { status: jest.Mock };
   let controller: HealthController;
 
   beforeEach(() => {
     prisma = { $queryRaw: jest.fn() };
-    tg = { health: jest.fn().mockResolvedValue('disabled') };
+    tg = {
+      health: jest.fn().mockResolvedValue('disabled'),
+      groupHealth: jest.fn().mockReturnValue('ok'),
+    };
     res = { status: jest.fn() };
     controller = new HealthController(
       prisma as unknown as PrismaService,
@@ -67,5 +70,26 @@ describe('HealthController', () => {
     expect(controller.getHealth().status).toBe('ok');
     expect(tg.health).not.toHaveBeenCalled();
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('staff guruhi ketma-ket muvaffaqiyatsiz — degraded + telegramGroup=failing (200)', async () => {
+    prisma.$queryRaw.mockResolvedValue([1]);
+    tg.health.mockResolvedValue('ok');
+    tg.groupHealth.mockReturnValue('failing');
+    await expect(deps()).resolves.toMatchObject({
+      status: 'degraded',
+      telegram: 'ok',
+      telegramGroup: 'failing',
+    });
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('guruh ok — telegramGroup=ok va status ok', async () => {
+    prisma.$queryRaw.mockResolvedValue([1]);
+    tg.health.mockResolvedValue('ok');
+    await expect(deps()).resolves.toMatchObject({
+      status: 'ok',
+      telegramGroup: 'ok',
+    });
   });
 });

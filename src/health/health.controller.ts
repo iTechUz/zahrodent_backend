@@ -35,14 +35,20 @@ export class HealthController {
       dbOk = false;
     }
     const telegram = await this.telegram.health();
+    // Staff group: repeated permanent failures / migrated to a supergroup → admin banner.
+    const telegramGroup = this.telegram.groupHealth();
     // Only the DB makes the API unusable → 503 (uptime monitors). A dead bot
     // is reported in the body but keeps 200, and never touches /health
     // (Docker HEALTHCHECK must not restart the container because of it).
     if (!dbOk) res.status(503);
     return {
-      status: dbOk && telegram !== 'down' ? 'ok' : 'degraded',
+      status:
+        dbOk && telegram !== 'down' && telegramGroup === 'ok'
+          ? 'ok'
+          : 'degraded',
       db: dbOk ? 'ok' : 'down',
       telegram,
+      telegramGroup,
       timestamp: new Date().toISOString(),
       latencyMs: Date.now() - startedAt,
     };
