@@ -141,6 +141,7 @@ describe('AnalyticsService', () => {
         status: 'pending',
         date: { gte: d('2026-09-15') },
       });
+      expect(repo.countDoctors).toHaveBeenNthCalledWith(2, { isActive: true });
       expect(repo.countDoctors).toHaveBeenNthCalledWith(1, {
         bookings: {
           some: {

@@ -34,7 +34,7 @@ export type AuthUserView = {
 export const INVALID_CREDENTIALS_MESSAGE =
   "Telefon raqami yoki parol noto'g'ri";
 export const ACCOUNT_DEACTIVATED_MESSAGE =
-  "Hisobingiz faolsizlantirilgan — administratorga murojaat qiling";
+  'Hisobingiz faolsizlantirilgan — administratorga murojaat qiling';
 export const TOKEN_REFRESH_MESSAGE = 'Token yangilanishi kerak — qayta kiring';
 export const SESSION_EXPIRED_MESSAGE = 'Sessiya muddati tugagan, qayta kiring';
 export const LOGIN_LOCKED_MESSAGE =

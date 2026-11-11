@@ -126,7 +126,8 @@ export class AnalyticsService {
           some: { date: day, status: { notIn: ['cancelled', 'no-show'] } },
         },
       }),
-      this.repo.countDoctors(),
+      // Nofaol (ishlamayotgan) shifokorlar jami songa kirmaydi.
+      this.repo.countDoctors({ isActive: true }),
     ]);
 
     let money: Pick<

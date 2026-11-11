@@ -1,6 +1,9 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { DOCTOR_PROFILE_MISSING_MESSAGE } from '../common/auth/doctor-scope';
-import { PatientsService } from './patients.service';
+import {
+  DOCTOR_NO_DEBT_FILTER_MESSAGE,
+  PatientsService,
+} from './patients.service';
 import { PatientsRepository } from './patients.repository';
 import type { AuthUserView } from '../auth/auth.service';
 
@@ -242,6 +245,36 @@ describe('PatientsService', () => {
         service.findAll({ debtOnly: 'true' }, admin),
       ).resolves.toEqual({ data: [], total: 0 });
       expect(repo.findAll).not.toHaveBeenCalled();
+    });
+
+    it('debtOnly — doctor roli uchun 403, DB ga bormaydi', async () => {
+      await expect(
+        service.findAll({ debtOnly: 'true' }, doctor),
+      ).rejects.toThrow(DOCTOR_NO_DEBT_FILTER_MESSAGE);
+      expect(repo.findDebtors).not.toHaveBeenCalled();
+      expect(repo.findAll).not.toHaveBeenCalled();
+    });
+
+    it('doctor roli — ro‘yxat va findOne javobida pul maydonlari yo‘q; admin da bor', async () => {
+      repo.findAll.mockResolvedValue({ data: [row()], total: 1 } as any);
+      repo.findById.mockResolvedValue(row() as any);
+      repo.count.mockResolvedValue(1);
+      const list = await service.findAll({}, doctor);
+      const one = await service.findOne('p1', doctor);
+      for (const o of [list.data[0], one]) {
+        for (const f of [
+          'balance',
+          'totalPaid',
+          'totalRefunded',
+          'totalOwed',
+        ]) {
+          expect(o).not.toHaveProperty(f);
+        }
+        expect(o.firstName).toBe('Ali');
+      }
+      const adminOne = await service.findOne('p1', admin);
+      expect(adminOne).toHaveProperty('balance');
+      expect(adminOne).toHaveProperty('totalOwed');
     });
 
     it('debtOnly=false — filtr yo‘q', async () => {
@@ -503,6 +536,76 @@ describe('PatientsService', () => {
         service.update('p1', { notes: 'x' }, doctor),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    describe('doctor — faqat klinik maydonlar', () => {
+      beforeEach(() => {
+        repo.findById.mockResolvedValue(row({ assignedDoctorId: 'd1' }) as any);
+        repo.count.mockResolvedValue(1);
+        repo.update.mockResolvedValue(row({ assignedDoctorId: 'd1' }) as any);
+      });
+
+      it.each([
+        [{ assignedDoctorId: 'd9' }, 'assignedDoctorId'],
+        [{ assignedDoctorId: null }, 'assignedDoctorId'],
+        [{ phone: '+998909998877' }, 'phone'],
+        [{ firstName: 'Boshqa' }, 'firstName'],
+        [{ address: 'Yangi manzil' }, 'address'],
+        [{ source: 'phone' as const }, 'source'],
+      ])('%j — 403 va yozilmaydi', async (dto, field) => {
+        await expect(service.update('p1', dto as any, doctor)).rejects.toThrow(
+          ForbiddenException,
+        );
+        await expect(service.update('p1', dto as any, doctor)).rejects.toThrow(
+          field,
+        );
+        expect(repo.update).not.toHaveBeenCalled();
+      });
+
+      it('notes + toothChart o‘tadi', async () => {
+        await service.update(
+          'p1',
+          { notes: 'Karies', toothChart: { 11: { condition: 'caries' } } },
+          doctor,
+        );
+        expect(repo.update).toHaveBeenCalledTimes(1);
+      });
+
+      it('to‘liq forma yuborilsa ham, o‘zgarmagan qiymatlar rad etilmaydi', async () => {
+        await service.update(
+          'p1',
+          {
+            firstName: 'Ali',
+            lastName: 'Valiyev',
+            age: 30,
+            phone: '+998901112233',
+            address: 'Toshkent',
+            workplace: 'IT',
+            source: 'walk-in',
+            assignedDoctorId: 'd1',
+            notes: 'yangi izoh',
+          },
+          doctor,
+        );
+        expect(repo.update).toHaveBeenCalledTimes(1);
+      });
+
+      it('javobda pul maydonlari yo‘q', async () => {
+        const out = await service.update('p1', { notes: 'x' }, doctor);
+        for (const f of [
+          'balance',
+          'totalPaid',
+          'totalRefunded',
+          'totalOwed',
+        ]) {
+          expect(out).not.toHaveProperty(f);
+        }
+      });
+
+      it('admin/receptionist assignedDoctorId ni o‘zgartira oladi', async () => {
+        await service.update('p1', { assignedDoctorId: 'd9' }, admin);
+        expect(repo.update).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('qisman update — faqat berilgan maydonlar, notes default yo‘q', async () => {

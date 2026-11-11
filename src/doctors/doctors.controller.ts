@@ -24,6 +24,8 @@ import { PeriodQueryDto } from '../analytics/dto/analytics-query.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
 
 @ApiTags('doctors')
 @ApiBearerAuth('JWT')
@@ -54,18 +56,19 @@ export class DoctorsController {
   @Roles('admin', 'receptionist', 'doctor')
   @ApiOperation({
     summary: "Shifokorlar ro'yxati",
-    description: 'doctor roli uchun faqat o‘qish',
+    description:
+      "doctor roli uchun faqat o'qish (telefonlarsiz). Standart: faqat faol shifokorlar; ?includeInactive=true — nofaollar ham",
   })
-  findAll(@Query() query: DoctorsQueryDto) {
-    return this.doctorsService.findAll(query);
+  findAll(@Query() query: DoctorsQueryDto, @GetUser() user: AuthUserView) {
+    return this.doctorsService.findAll(query, user);
   }
 
   @Get(':id')
   @Roles('admin', 'receptionist', 'doctor')
   @ApiOperation({ summary: 'Bitta shifokor' })
   @ApiParam({ name: 'id' })
-  findOne(@Param('id') id: string) {
-    return this.doctorsService.findOne(id);
+  findOne(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.doctorsService.findOne(id, user);
   }
 
   @Post()
