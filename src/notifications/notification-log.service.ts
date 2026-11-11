@@ -9,7 +9,7 @@ import { NotificationLog, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
 import { oneLine } from '../common/utils/text.util';
-import { statusChatId } from '../telegram/dev-defaults';
+import { bookingsTopicId, statusChatId } from '../telegram/dev-defaults';
 
 export type NotificationLogStatus = 'pending' | 'sent' | 'failed';
 
@@ -119,10 +119,34 @@ export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async attempt(row: NotificationLog): Promise<NotificationLog> {
-    const extra = row.replyMarkup
-      ? { reply_markup: row.replyMarkup as Record<string, unknown> }
-      : undefined;
-    const res = await this.telegram.sendMessage(row.chatId, row.text, extra);
+    const topic = bookingTopicFor(row);
+    const extra: Record<string, unknown> | undefined =
+      row.replyMarkup || topic
+        ? {
+            ...(row.replyMarkup
+              ? { reply_markup: row.replyMarkup as Record<string, unknown> }
+              : {}),
+            ...(topic ? { message_thread_id: topic } : {}),
+          }
+        : undefined;
+    let res = await this.telegram.sendMessage(row.chatId, row.text, extra);
+    if (
+      'error' in res &&
+      topic &&
+      /message thread not found/i.test(res.error)
+    ) {
+      // The topic was deleted/renamed — never lose the message, fall back to General.
+      this.logger.warn(
+        `Topic ${topic} topilmadi — xabar (${row.kind}) General chatga yuborildi`,
+      );
+      res = await this.telegram.sendMessage(
+        row.chatId,
+        row.text,
+        row.replyMarkup
+          ? { reply_markup: row.replyMarkup as Record<string, unknown> }
+          : undefined,
+      );
+    }
     const attempts = row.attempts + 1;
     if (!('error' in res)) {
       return this.prisma.notificationLog.update({
@@ -264,6 +288,26 @@ export function clampText(text: string): string {
   return text.length > TELEGRAM_TEXT_MAX
     ? `${text.slice(0, TELEGRAM_TEXT_MAX - 1)}…`
     : text;
+}
+
+/** Group message kinds about bookings — they go to TELEGRAM_BOOKINGS_TOPIC_ID when it is set. */
+export const BOOKING_GROUP_KINDS: readonly string[] = [
+  'booking_status_group',
+  'booking_created_group',
+  'booking_rescheduled_group',
+  'booking_deleted_group',
+  'booking_reschedule_request',
+  'feedback_low_group',
+];
+
+/** Topic for a row, only when it is a booking message to the staff group. */
+export function bookingTopicFor(row: {
+  kind: string;
+  chatId: string;
+}): number | undefined {
+  if (!BOOKING_GROUP_KINDS.includes(row.kind)) return undefined;
+  if (row.chatId !== statusChatId()) return undefined;
+  return bookingsTopicId();
 }
 
 function groupChatId(): string | undefined {

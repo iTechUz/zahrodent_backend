@@ -50,6 +50,84 @@ describe('NotificationLogService', () => {
     });
   });
 
+  describe('bookings topic', () => {
+    const OLD = { ...process.env };
+    beforeEach(() => {
+      process.env.TELEGRAM_STATUS_CHAT_ID = '-100';
+    });
+    afterEach(() => {
+      process.env = { ...OLD };
+    });
+
+    it('booking group message goes to TELEGRAM_BOOKINGS_TOPIC_ID', async () => {
+      process.env.TELEGRAM_BOOKINGS_TOPIC_ID = '77';
+      await svc.enqueue({
+        kind: 'booking_status_group',
+        chatId: '-100',
+        text: 'hi',
+      });
+      expect(tg.sendMessage).toHaveBeenCalledWith('-100', 'hi', {
+        message_thread_id: 77,
+      });
+    });
+
+    it('without the env var it stays in General (no thread id)', async () => {
+      delete process.env.TELEGRAM_BOOKINGS_TOPIC_ID;
+      await svc.enqueue({
+        kind: 'booking_status_group',
+        chatId: '-100',
+        text: 'hi',
+      });
+      expect(tg.sendMessage).toHaveBeenCalledWith('-100', 'hi', undefined);
+    });
+
+    it('an invalid topic id is ignored', async () => {
+      process.env.TELEGRAM_BOOKINGS_TOPIC_ID = 'abc';
+      await svc.enqueue({
+        kind: 'booking_status_group',
+        chatId: '-100',
+        text: 'hi',
+      });
+      expect(tg.sendMessage).toHaveBeenCalledWith('-100', 'hi', undefined);
+    });
+
+    it('other kinds (leads) and patient chats are not moved to the topic', async () => {
+      process.env.TELEGRAM_BOOKINGS_TOPIC_ID = '77';
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'a' });
+      await svc.enqueue({
+        kind: 'booking_status_group',
+        chatId: '555',
+        text: 'b',
+      });
+      expect(tg.sendMessage).toHaveBeenNthCalledWith(1, '-100', 'a', undefined);
+      expect(tg.sendMessage).toHaveBeenNthCalledWith(2, '555', 'b', undefined);
+    });
+
+    it('a deleted topic falls back to General instead of losing the message', async () => {
+      process.env.TELEGRAM_BOOKINGS_TOPIC_ID = '77';
+      tg.sendMessage
+        .mockResolvedValueOnce({
+          ok: false,
+          error: '400: Bad Request: message thread not found',
+        })
+        .mockResolvedValueOnce({ ok: true });
+      await svc.enqueue({
+        kind: 'booking_status_group',
+        chatId: '-100',
+        text: 'hi',
+      });
+      expect(tg.sendMessage).toHaveBeenNthCalledWith(
+        2,
+        '-100',
+        'hi',
+        undefined,
+      );
+      expect(db.notificationLog.update.mock.calls[0][0].data).toMatchObject({
+        status: 'sent',
+      });
+    });
+  });
+
   it('passes inline keyboard as reply_markup', async () => {
     const kb = { inline_keyboard: [[{ text: 'a', callback_data: 'b' }]] };
     db.notificationLog.create.mockResolvedValue(
