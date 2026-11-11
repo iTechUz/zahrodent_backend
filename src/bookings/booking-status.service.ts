@@ -110,6 +110,44 @@ export class BookingStatusService {
     }
   }
 
+  /**
+   * Doctor reassigned: written to the same log (status unchanged) so the
+   * history shows who moved the booking and from/to whom. Never throws.
+   */
+  async onDoctorChanged(c: {
+    bookingId: string;
+    status: string;
+    fromDoctorId: string;
+    toDoctorId: string;
+    actor: { id: string | null; name: string };
+  }): Promise<void> {
+    try {
+      const doctors = await this.prisma.doctor.findMany({
+        where: { id: { in: [c.fromDoctorId, c.toDoctorId] } },
+        select: { id: true, firstName: true, lastName: true },
+      });
+      const name = (id: string) => {
+        const d = doctors.find((x) => x.id === id);
+        return d ? `${d.firstName} ${d.lastName}`.trim() : id;
+      };
+      await this.prisma.bookingStatusLog.create({
+        data: {
+          bookingId: c.bookingId,
+          fromStatus: c.status,
+          toStatus: c.status,
+          reason: oneLine(
+            `Shifokor o'zgartirildi: ${name(c.fromDoctorId)} → ${name(c.toDoctorId)}`,
+            300,
+          ),
+          changedById: c.actor.id,
+          changedByName: oneLine(c.actor.name, 100),
+        },
+      });
+    } catch (e) {
+      this.logger.warn(`Shifokor o'zgarishi logga yozilmadi: ${errMsg(e)}`);
+    }
+  }
+
   /** New booking: staff group + (pending/confirmed) the patient. Never throws. */
   async onCreated(
     bookingId: string,

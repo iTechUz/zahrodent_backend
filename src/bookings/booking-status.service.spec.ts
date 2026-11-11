@@ -43,6 +43,7 @@ describe('BookingStatusService', () => {
         findMany: jest.fn(),
       },
       booking: { findUnique: jest.fn().mockResolvedValue(booking('555')) },
+      doctor: { findMany: jest.fn() },
     };
     outbox = { enqueue: jest.fn().mockResolvedValue({}) };
     svc = new BookingStatusService(prisma, outbox as never);
@@ -261,6 +262,39 @@ describe('BookingStatusService', () => {
           notifyPatient: true,
         }),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('onDoctorChanged', () => {
+    const args = {
+      bookingId: 'b1',
+      status: 'confirmed',
+      fromDoctorId: 'd1',
+      toDoctorId: 'd2',
+      actor: { id: 'u1', name: 'Admin Aziz' },
+    };
+
+    it('status logiga shifokor almashuvi yoziladi (status o‘zgarmaydi)', async () => {
+      prisma.doctor.findMany.mockResolvedValue([
+        { id: 'd1', firstName: 'Ali', lastName: 'Karimov' },
+        { id: 'd2', firstName: 'Vali', lastName: 'Aliyev' },
+      ]);
+      await svc.onDoctorChanged(args);
+      expect(prisma.bookingStatusLog.create).toHaveBeenCalledWith({
+        data: {
+          bookingId: 'b1',
+          fromStatus: 'confirmed',
+          toStatus: 'confirmed',
+          reason: "Shifokor o'zgartirildi: Ali Karimov → Vali Aliyev",
+          changedById: 'u1',
+          changedByName: 'Admin Aziz',
+        },
+      });
+    });
+
+    it('xato bo‘lsa throw qilmaydi', async () => {
+      prisma.doctor.findMany.mockRejectedValue(new Error('db'));
+      await expect(svc.onDoctorChanged(args)).resolves.toBeUndefined();
     });
   });
 });

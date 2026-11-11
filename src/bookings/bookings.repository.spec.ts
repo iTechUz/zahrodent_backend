@@ -134,7 +134,7 @@ describe('BookingsRepository', () => {
     await repo.findDoctorAvailability('d1');
     expect(prisma.doctor.findUnique).toHaveBeenCalledWith({
       where: { id: 'd1' },
-      select: { id: true, schedule: true, daysOff: true },
+      select: { id: true, schedule: true, daysOff: true, isActive: true },
     });
   });
 

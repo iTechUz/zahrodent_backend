@@ -88,7 +88,7 @@ export class BookingsRepository {
   findDoctorAvailability(doctorId: string) {
     return this.prisma.doctor.findUnique({
       where: { id: doctorId },
-      select: { id: true, schedule: true, daysOff: true },
+      select: { id: true, schedule: true, daysOff: true, isActive: true },
     });
   }
 
