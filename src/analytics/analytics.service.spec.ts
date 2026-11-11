@@ -36,6 +36,8 @@ describe('AnalyticsService', () => {
     doctorId: 'd1',
   };
   // Soft-deleted patients are always excluded.
+  /** Bookings of archived patients never count. */
+  const PND = { patient: { deletedAt: null } };
   const ND = { deletedAt: null };
   const doctorPatients = {
     AND: [
@@ -130,14 +132,17 @@ describe('AnalyticsService', () => {
         AND: [ND, { createdAt: month }],
       });
       expect(repo.countBookings).toHaveBeenNthCalledWith(1, {
+        ...PND,
         date: d('2026-09-15'),
         status: { notIn: ['cancelled', 'no-show'] },
       });
       expect(repo.countBookings).toHaveBeenNthCalledWith(2, {
+        ...PND,
         date: d('2026-09-15'),
         status: 'completed',
       });
       expect(repo.countBookings).toHaveBeenNthCalledWith(3, {
+        ...PND,
         status: 'pending',
         date: { gte: d('2026-09-15') },
       });
@@ -146,6 +151,7 @@ describe('AnalyticsService', () => {
           some: {
             date: d('2026-09-15'),
             status: { notIn: ['cancelled', 'no-show'] },
+            ...PND,
           },
         },
       });
@@ -171,6 +177,7 @@ describe('AnalyticsService', () => {
       jest.useFakeTimers({ now: new Date('2026-09-30T20:00:00.000Z') });
       await service.getDashboard(admin);
       expect(repo.countBookings).toHaveBeenNthCalledWith(1, {
+        ...PND,
         date: d('2026-10-01'),
         status: { notIn: ['cancelled', 'no-show'] },
       });
@@ -202,11 +209,13 @@ describe('AnalyticsService', () => {
       await service.getDashboard(doctor, '2026-09-15');
       expect(repo.countPatients).toHaveBeenNthCalledWith(1, doctorPatients);
       expect(repo.countBookings).toHaveBeenNthCalledWith(1, {
+        ...PND,
         doctorId: 'd1',
         date: d('2026-09-15'),
         status: { notIn: ['cancelled', 'no-show'] },
       });
       expect(repo.countBookings).toHaveBeenNthCalledWith(3, {
+        ...PND,
         doctorId: 'd1',
         status: 'pending',
         date: { gte: d('2026-09-15') },
@@ -254,6 +263,7 @@ describe('AnalyticsService', () => {
       });
       expect(out[2].revenue).toBe(700);
       expect(repo.bookingsPerDayAndStatus).toHaveBeenCalledWith({
+        ...PND,
         date: { gte: d('2026-10-01'), lte: d('2026-10-03') },
       });
     });
@@ -307,6 +317,7 @@ describe('AnalyticsService', () => {
         endDate: '2026-10-31',
       });
       expect(repo.bookingsBySource).toHaveBeenCalledWith({
+        ...PND,
         date: { gte: d('2026-10-01'), lte: d('2026-10-31') },
       });
     });
@@ -319,6 +330,7 @@ describe('AnalyticsService', () => {
       jest.useFakeTimers({ now: new Date('2026-10-12T08:00:00.000Z') });
       await service.getSources(admin, 'bookings', { startDate: '2026-10-01' });
       expect(repo.bookingsBySource).toHaveBeenCalledWith({
+        ...PND,
         date: { gte: d('2026-10-01'), lte: d('2026-10-12') },
       });
       await service.getSources(admin, 'patients', { startDate: '2026-10-01' });
@@ -392,6 +404,7 @@ describe('AnalyticsService', () => {
         AND: [ND, { createdAt: range }],
       });
       expect(repo.bookingsPerDayAndStatus).toHaveBeenCalledWith({
+        ...PND,
         date: range,
       });
       expect(repo.paymentsPerDayAndType).toHaveBeenCalledWith({
@@ -429,7 +442,7 @@ describe('AnalyticsService', () => {
         AND: [doctorPatients, expect.any(Object)],
       });
       expect(repo.bookingsPerDayAndStatus).toHaveBeenCalledWith(
-        expect.objectContaining({ doctorId: 'd1' }),
+        expect.objectContaining({ doctorId: 'd1', ...PND }),
       );
       expect(repo.paymentsPerDayAndType).not.toHaveBeenCalled();
     });
@@ -453,13 +466,16 @@ describe('AnalyticsService', () => {
         { source: 'phone', count: 3 },
         { source: 'walk-in', count: 3 },
       ]);
-      expect(repo.bookingsBySource).toHaveBeenCalledWith({});
+      expect(repo.bookingsBySource).toHaveBeenCalledWith(PND);
       expect(repo.patientsBySource).not.toHaveBeenCalled();
     });
 
     it('doctor — faqat o‘z qabullari', async () => {
       await service.getSources(doctor);
-      expect(repo.bookingsBySource).toHaveBeenCalledWith({ doctorId: 'd1' });
+      expect(repo.bookingsBySource).toHaveBeenCalledWith({
+        doctorId: 'd1',
+        ...PND,
+      });
     });
 
     it('type=patients — bemorlar manbasi (doctor scope bilan)', async () => {

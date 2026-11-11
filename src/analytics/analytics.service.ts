@@ -43,6 +43,20 @@ function daysBetween(a: string, b: string): number {
 }
 
 /**
+ * Definitions used by every dashboard number (keep screens consistent):
+ *  - "bookings" (load: dashboard todayBookings, active doctors) = bookings
+ *    that are not cancelled / no-show; the funnel series (monthly/daily
+ *    `bookings`, sources) count ALL statuses next to `completedBookings`.
+ *  - Bookings of soft-deleted (archived) patients never count anywhere.
+ *  - "revenue" = collected (paid|partial) INCOME payments by payment date,
+ *    including payments of archived patients (the money really came in);
+ *    EXPENSE is reported separately and is never mixed into revenue.
+ *  - "unpaid" = debt of non-deleted patients only (patient-balance.ts); the
+ *    debt of an archived patient leaves it, which is why archiving a debtor
+ *    needs an explicit confirmation (DELETE /patients/:id?force=true).
+ */
+
+/**
  * Clinic dashboard numbers. Doctors see only their own patients/bookings;
  * money fields are admin-only (null for everybody else).
  *
@@ -63,7 +77,11 @@ export class AnalyticsService {
       patients: (doctorId
         ? { AND: [{ deletedAt: null }, doctorPatientsWhere(doctorId)] }
         : { deletedAt: null }) as Prisma.PatientWhereInput,
-      bookings: (doctorId ? { doctorId } : {}) as Prisma.BookingWhereInput,
+      // Bookings of archived patients are excluded, like the patients themselves.
+      bookings: {
+        ...(doctorId ? { doctorId } : {}),
+        patient: { deletedAt: null },
+      } as Prisma.BookingWhereInput,
       canSeeMoney: user.role === 'admin',
     };
   }
@@ -123,7 +141,11 @@ export class AnalyticsService {
       }),
       this.repo.countDoctors({
         bookings: {
-          some: { date: day, status: { notIn: ['cancelled', 'no-show'] } },
+          some: {
+            date: day,
+            status: { notIn: ['cancelled', 'no-show'] },
+            patient: { deletedAt: null },
+          },
         },
       }),
       this.repo.countDoctors(),

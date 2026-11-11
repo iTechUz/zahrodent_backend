@@ -45,7 +45,12 @@ Manba: `backend/src` dagi **haqiqiy** controller, DTO va guard kodlari. Base URL
 
 ### Balans / qarz
 
-`balance = Σ INCOME to‘lovlar (paid|partial) + Σ INCOME chegirmalar − Σ yakunlangan tashriflar narxi`. `balance < 0` — qarzdor (`debtOnly=true`, `payments/stats.pendingAmount`, `analytics.unpaidTotal/unpaidCount`). EXPENSE to‘lovlar balansga va daromadga kirmaydi.
+`balance = Σ INCOME to‘lovlar (paid|partial) + Σ INCOME chegirmalar − Σ yakunlangan tashriflar narxi`. `balance < 0` — qarzdor (`debtOnly=true`, `payments/stats.pendingAmount`, `analytics.unpaidTotal/unpaidCount`). EXPENSE to‘lovlar (klinika chiqimi) hech qaysi bemorning balansiga va daromadga kirmaydi.
+
+**Yagona ta’riflar** (dashboard, analitika, to‘lovlar sahifasi):
+- *Daromad* = yig‘ilgan (`paid|partial`) INCOME to‘lovlar, to‘lov sanasi bo‘yicha (arxivlangan bemorlarning to‘lovlari ham — pul haqiqatan tushgan). Chiqim alohida.
+- *Qabullar (yuklama)* = `cancelled` / `no-show` bo‘lmagan qabullar (dashboard `todayBookings`, faol shifokorlar); *voronka* (`monthly`/`daily` `bookings`, `sources`) — barcha holatlar, yoniga `completedBookings`.
+- Arxivlangan (soft delete) bemorlarning qabullari hech qaysi dashboard raqamida hisoblanmaydi; ularning qarzi `unpaid*` dan chiqib ketadi — shu sabab qarzdorni arxivlash tasdiq talab qiladi.
 
 ### JWT payload
 
@@ -204,9 +209,10 @@ o‘sha foydalanuvchining refresh tokenlari bekor qilinadi. `DELETE /users/:id` 
 
 ### DELETE /patients/:id — soft delete → 200 `{ "id": "<id>" }`
 
-- `deleted_at` qo‘yiladi (409 endi qaytmaydi — tarixli bemor ham o‘chiriladi).
+- `balance < 0` (qarzi bor) bo‘lsa **409** — xabarda qarz summasi; tasdiqlangach `DELETE /patients/:id?force=true` bilan qayta yuboriladi.
+- `deleted_at` qo‘yiladi (tarixli bemor ham o‘chiriladi).
 - Bemor barcha ro‘yxat, statistika, qidiruv, qarzdorlar, analitika, eslatma va SMS qabul qiluvchilar ro‘yxatidan chiqadi.
-- Bugundan boshlab (Asia/Tashkent) `pending`/`confirmed` qabullari `cancelled` qilinadi.
+- Bugundan boshlab (Asia/Tashkent) `pending`/`confirmed` qabullari `cancelled` qilinadi: har biriga status logi (sabab `Bemor arxivlandi`) yoziladi va xodimlar guruhiga xabar ketadi. `POST /:id/restore` ularni qayta ochmaydi.
 - Tashriflar, to‘lovlar va o‘tgan qabullar saqlanadi; ularda `patient.deletedAt` to‘ldirilgan holda ism ko‘rinadi.
 - O‘chirilgan bemorga yangi qabul/tashrif/to‘lov bog‘lab bo‘lmaydi — **404** `So'ralgan yoki bog'langan yozuv topilmadi`.
 - O‘chirilgan bemor uchun `GET /:id`, `PATCH`, izohlar, qayta `DELETE` — **404** `Bemor topilmadi`.
@@ -323,6 +329,10 @@ ish joyi yuboriladi, qolganini keyin `PATCH /patients/:id` bilan to‘ldiriladi.
 | `status` | `not-started` \| `in-progress` \| `completed` |
 | `diagnosis`, `treatment`, `notes` | ixtiyoriy |
 
+- Bitta qabulga bitta tashrif: `bookingId` bo‘yicha tashrif allaqachon bo‘lsa (qabulni yakunlash avtomatik yaratadi) → **409** `Bu qabul uchun tashrif allaqachon mavjud`.
+- `completed` tashrif kelajak sanasida bo‘lolmaydi (400). `PATCH` da `price` ni faqat admin o‘zgartiradi (doctor → 403; o‘zgarmagan qiymat mumkin).
+- Qabulni `completed` qilish xizmat (`serviceId`) talab qiladi: `PATCH /bookings/:id` va `POST /bookings` → 400 `Yakunlash uchun xizmat tanlang`.
+
 ---
 
 ## Modul: Services
@@ -360,19 +370,23 @@ ish joyi yuboriladi, qolganini keyin `PATCH /patients/:id` bilan to‘ldiriladi.
 | POST | `/payments` | — |
 | PATCH | `/payments/:id` | — |
 | DELETE | `/payments/:id` | — |
+| GET | `/payments/:id/audit` | — (create/update/delete tarixi, o‘chirilgan to‘lov uchun ham) |
 
 ### POST /payments — Body (`CreatePaymentDto`)
 
 | Maydon | Qoidalar |
 |--------|----------|
-| `patientId` | string, min 1 |
+| `patientId` | INCOME uchun majburiy (400), `type: EXPENSE` (klinika chiqimi) uchun ixtiyoriy — javobda `patientId: null`, `patient` yo‘q |
 | `amount` | int ≥ 1 |
 | `method` | `cash` \| `card` \| `transfer` \| `insurance` |
 | `status` | `paid` \| `partial` \| `unpaid` |
 | `description` | string, min 3 |
 | `discount` | ixtiyoriy int ≥ 0 |
 | `serviceId` | ixtiyoriy |
-| `date` | ixtiyoriy YYYY-MM-DD |
+| `date` | ixtiyoriy YYYY-MM-DD; 2020-01-01 dan oldin emas, paid yoki partial uchun kelajakda emas |
+
+- `discount` tashrif narxidan oshmasligi kerak (`visitId` berilganda).
+- Javobda `createdAt`, `createdById`. Har create/update/delete `payment_audits` ga (kim, qachon, avval/keyin) shu tranzaksiyada yoziladi; o‘chirishda to‘liq qator saqlanadi.
 
 ---
 
