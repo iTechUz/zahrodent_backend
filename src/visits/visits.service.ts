@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -27,6 +29,11 @@ import {
 export const VISIT_NOT_FOUND = 'Tashrif topilmadi';
 export const PATIENT_NOT_FOUND = 'Bemor topilmadi';
 export const BOOKING_NOT_FOUND = 'Qabul topilmadi';
+export const VISIT_ALREADY_EXISTS = 'Bu qabul uchun tashrif allaqachon mavjud';
+export const VISIT_PRICE_ADMIN_ONLY =
+  "Tashrif narxini faqat administrator o'zgartira oladi";
+export const VISIT_COMPLETED_IN_FUTURE =
+  "Kelajakdagi sanali tashrifni yakunlangan deb belgilab bo'lmaydi";
 export const VISIT_PATIENT_IMMUTABLE =
   "Tashrifning bemorini o'zgartirib bo'lmaydi (to'lovlar shu bemorga bog'langan) — yangi tashrif yarating";
 export const BOOKING_OTHER_PATIENT =
@@ -97,7 +104,8 @@ export class VisitsService {
         scopedDoctorId,
       );
     }
-    const v = await this.visitsRepository.create({
+    this.assertNotFutureCompleted(dto.status, dateStr);
+    const data: Prisma.VisitCreateInput = {
       patient: connectActivePatient(dto.patientId),
       doctor: { connect: { id: doctorId } },
       booking: dto.bookingId ? { connect: { id: dto.bookingId } } : undefined,
@@ -107,7 +115,13 @@ export class VisitsService {
       treatment: dto.treatment ?? '',
       notes: dto.notes ?? '',
       price: dto.price ?? 0,
-    });
+    };
+    // A booking gets ONE visit: completing it already auto-creates one, a
+    // second would bill the patient twice. Checked under a per-booking lock.
+    const v = dto.bookingId
+      ? await this.visitsRepository.createForBooking(dto.bookingId, data)
+      : await this.visitsRepository.create(data);
+    if (!v) throw new ConflictException(VISIT_ALREADY_EXISTS);
     return this.toResponse(v);
   }
 
@@ -125,9 +139,22 @@ export class VisitsService {
         scopedDoctorId,
       );
     }
+    // The price decides the patient's debt: only an admin may change it
+    // (re-sending the same value is fine).
+    if (
+      dto.price !== undefined &&
+      dto.price !== (current.price || 0) &&
+      user.role !== 'admin'
+    ) {
+      throw new ForbiddenException(VISIT_PRICE_ADMIN_ONLY);
+    }
+    this.assertNotFutureCompleted(
+      dto.status ?? current.status,
+      dto.date ?? toDateOnlyString(current.date),
+    );
     // A doctor can't hand a visit over to another doctor.
     const doctorId = scopedDoctorId ? undefined : dto.doctorId;
-    const v = await this.visitsRepository.update(id, {
+    const data: Prisma.VisitUpdateInput = {
       date: dto.date === undefined ? undefined : parseDateOnlyToUTC(dto.date),
       status: dto.status,
       diagnosis: dto.diagnosis,
@@ -142,8 +169,24 @@ export class VisitsService {
           : dto.bookingId
             ? { connect: { id: dto.bookingId } }
             : { disconnect: true },
-    });
+    };
+    const relinked = dto.bookingId && dto.bookingId !== current.bookingId;
+    const v = relinked
+      ? await this.visitsRepository.updateLinkingBooking(
+          id,
+          dto.bookingId as string,
+          data,
+        )
+      : await this.visitsRepository.update(id, data);
+    if (!v) throw new ConflictException(VISIT_ALREADY_EXISTS);
     return this.toResponse(v);
+  }
+
+  /** A visit that hasn't happened yet can't be "completed" (it would bill the patient). */
+  private assertNotFutureCompleted(status: string, dateStr: string) {
+    if (status === 'completed' && dateStr > todayInTashkent()) {
+      throw new BadRequestException(VISIT_COMPLETED_IN_FUTURE);
+    }
   }
 
   /** A doctor only records visits for patients in their own scope. */

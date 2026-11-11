@@ -13,6 +13,8 @@ describe('VisitsRepository', () => {
     prisma = {
       patient: { count: jest.fn() },
       booking: { findUnique: jest.fn() },
+      $executeRaw: jest.fn(),
+      $transaction: jest.fn(),
       visit: {
         findMany: jest.fn().mockResolvedValue([{ id: 'v1' }]),
         count: jest.fn().mockResolvedValue(1),
@@ -21,6 +23,7 @@ describe('VisitsRepository', () => {
         update: jest.fn(),
       },
     };
+    prisma.$transaction.mockImplementation((fn: any) => fn(prisma));
     repo = new VisitsRepository(prisma as PrismaService);
   });
 
@@ -77,6 +80,42 @@ describe('VisitsRepository', () => {
       where: { id: 'v1' },
       data: { price: 1 },
       include: PS,
+    });
+  });
+  describe('createForBooking / updateLinkingBooking', () => {
+    it('qabulda tashrif yo‘q — qulf olinadi va yaratiladi', async () => {
+      prisma.visit.count.mockResolvedValue(0);
+      prisma.visit.create.mockResolvedValue({ id: 'v2' });
+      await expect(
+        repo.createForBooking('b1', { status: 'completed' } as any),
+      ).resolves.toEqual({ id: 'v2' });
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.$executeRaw.mock.calls[0][1]).toBe('booking-row:b1');
+      expect(prisma.visit.count).toHaveBeenCalledWith({
+        where: { bookingId: 'b1' },
+      });
+    });
+
+    it('qabulda tashrif bor — null, create chaqirilmaydi', async () => {
+      prisma.visit.count.mockResolvedValue(1);
+      await expect(repo.createForBooking('b1', {} as any)).resolves.toBeNull();
+      expect(prisma.visit.create).not.toHaveBeenCalled();
+    });
+
+    it('updateLinkingBooking — o‘zidan boshqa tashrif bo‘lsa null', async () => {
+      prisma.visit.count.mockResolvedValue(1);
+      await expect(
+        repo.updateLinkingBooking('v1', 'b2', {}),
+      ).resolves.toBeNull();
+      expect(prisma.visit.count).toHaveBeenCalledWith({
+        where: { bookingId: 'b2', id: { not: 'v1' } },
+      });
+      expect(prisma.visit.update).not.toHaveBeenCalled();
+      prisma.visit.count.mockResolvedValue(0);
+      prisma.visit.update.mockResolvedValue({ id: 'v1' });
+      await expect(
+        repo.updateLinkingBooking('v1', 'b2', { price: 1 }),
+      ).resolves.toEqual({ id: 'v1' });
     });
   });
 });

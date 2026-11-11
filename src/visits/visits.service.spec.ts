@@ -1,9 +1,15 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { VisitsService } from './visits.service';
+import {
+  VISIT_ALREADY_EXISTS,
+  VISIT_COMPLETED_IN_FUTURE,
+  VISIT_PRICE_ADMIN_ONLY,
+  VisitsService,
+} from './visits.service';
 import { VisitsRepository } from './visits.repository';
 import type { AuthUserView } from '../auth/auth.service';
 
@@ -16,6 +22,8 @@ describe('VisitsService', () => {
       | 'findById'
       | 'create'
       | 'update'
+      | 'createForBooking'
+      | 'updateLinkingBooking'
       | 'patientInScope'
       | 'findBookingOwner'
     >
@@ -56,6 +64,8 @@ describe('VisitsService', () => {
       findById: jest.fn(),
       create: jest.fn().mockResolvedValue(visit()),
       update: jest.fn().mockResolvedValue(visit()),
+      createForBooking: jest.fn().mockResolvedValue(visit()),
+      updateLinkingBooking: jest.fn().mockResolvedValue(visit()),
       patientInScope: jest.fn().mockResolvedValue(true),
       findBookingOwner: jest
         .fn()
@@ -188,7 +198,9 @@ describe('VisitsService', () => {
         },
         admin,
       );
-      expect(repo.create).toHaveBeenCalledWith(
+      expect(repo.create).not.toHaveBeenCalled();
+      expect(repo.createForBooking).toHaveBeenCalledWith(
+        'b1',
         expect.objectContaining({
           booking: { connect: { id: 'b1' } },
           date: new Date('2026-06-10T00:00:00.000Z'),
@@ -389,7 +401,7 @@ describe('VisitsService', () => {
         },
         admin,
       );
-      expect(repo.update.mock.calls[0][1]).toMatchObject({
+      expect(repo.updateLinkingBooking.mock.calls[0][2]).toMatchObject({
         date: new Date('2026-07-01T00:00:00.000Z'),
         doctor: { connect: { id: 'd2' } },
         booking: { connect: { id: 'b2' } },
@@ -409,6 +421,100 @@ describe('VisitsService', () => {
       expect(repo.update.mock.calls[0][1].booking).toEqual({
         disconnect: true,
       });
+    });
+  });
+  describe('bitta qabulga bitta tashrif (qo‘sh qarz himoyasi)', () => {
+    const dto = {
+      patientId: 'p1',
+      doctorId: 'd1',
+      bookingId: 'b1',
+      date: '2026-06-10',
+      status: 'completed' as const,
+      price: 100,
+    };
+
+    it('qabulda tashrif bor — 409, yozilmaydi', async () => {
+      repo.createForBooking.mockResolvedValue(null);
+      await expect(service.create(dto, admin)).rejects.toThrow(
+        new ConflictException(VISIT_ALREADY_EXISTS),
+      );
+      expect(VISIT_ALREADY_EXISTS).toBe(
+        'Bu qabul uchun tashrif allaqachon mavjud',
+      );
+    });
+
+    it('bookingId siz — oddiy create (qulf yo‘q)', async () => {
+      await service.create({ ...dto, bookingId: undefined }, admin);
+      expect(repo.create).toHaveBeenCalled();
+      expect(repo.createForBooking).not.toHaveBeenCalled();
+    });
+
+    it('update — boshqa qabulga ulashda u yerda tashrif bo‘lsa 409', async () => {
+      repo.findById.mockResolvedValue(visit({ bookingId: 'b1' }));
+      repo.updateLinkingBooking.mockResolvedValue(null);
+      await expect(
+        service.update('v1', { bookingId: 'b2' }, admin),
+      ).rejects.toThrow(new ConflictException(VISIT_ALREADY_EXISTS));
+    });
+
+    it('update — o‘sha qabul qayta yuborilsa tekshiruv kerak emas', async () => {
+      repo.findById.mockResolvedValue(visit({ bookingId: 'b1' }));
+      await service.update('v1', { bookingId: 'b1' }, admin);
+      expect(repo.update).toHaveBeenCalled();
+      expect(repo.updateLinkingBooking).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('narxni faqat admin o‘zgartiradi', () => {
+    it('doctor narxni o‘zgartirsa — 403, yozilmaydi', async () => {
+      repo.findById.mockResolvedValue(visit({ price: 200_000 }));
+      await expect(service.update('v1', { price: 0 }, doctor)).rejects.toThrow(
+        new ForbiddenException(VISIT_PRICE_ADMIN_ONLY),
+      );
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('doctor — o‘zgarmagan narx yuborilsa mumkin', async () => {
+      repo.findById.mockResolvedValue(visit({ price: 200_000 }));
+      await service.update('v1', { price: 200_000, notes: 'x' }, doctor);
+      expect(repo.update).toHaveBeenCalled();
+    });
+
+    it('admin narxni o‘zgartiradi', async () => {
+      repo.findById.mockResolvedValue(visit({ price: 200_000 }));
+      await service.update('v1', { price: 0 }, admin);
+      expect(repo.update.mock.calls[0][1]).toMatchObject({ price: 0 });
+    });
+  });
+
+  describe('kelajak sanasidagi tashrif yakunlanmaydi', () => {
+    const dto = {
+      patientId: 'p1',
+      doctorId: 'd1',
+      status: 'completed' as const,
+    };
+
+    it('create — completed + ertangi sana 400', async () => {
+      jest.useFakeTimers({ now: new Date('2026-11-11T05:00:00.000Z') });
+      await expect(
+        service.create({ ...dto, date: '2026-11-12' }, admin),
+      ).rejects.toThrow(new BadRequestException(VISIT_COMPLETED_IN_FUTURE));
+      await service.create({ ...dto, date: '2026-11-11' }, admin);
+      await service.create(
+        { ...dto, status: 'not-started', date: '2026-11-12' },
+        admin,
+      );
+    });
+
+    it('update — sana yoki status o‘zgarishi birga tekshiriladi', async () => {
+      jest.useFakeTimers({ now: new Date('2026-11-11T05:00:00.000Z') });
+      repo.findById.mockResolvedValue(
+        visit({ status: 'in-progress', date: new Date('2026-11-20') }),
+      );
+      await expect(
+        service.update('v1', { status: 'completed' }, admin),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await service.update('v1', { notes: 'ok' }, admin);
     });
   });
 });

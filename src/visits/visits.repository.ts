@@ -62,6 +62,47 @@ export class VisitsRepository {
     return this.prisma.visit.create({ data, include: WITH_PATIENT_SUMMARY });
   }
 
+  /**
+   * Creates a visit for a booking only if the booking has no visit yet
+   * (null → already has one). Serialized per booking with the same advisory
+   * key bookings use ("booking-row:<id>"), so a doctor's POST can't race the
+   * auto-visit made when the booking is completed.
+   */
+  createForBooking(
+    bookingId: string,
+    data: Prisma.VisitCreateInput,
+  ): Promise<VisitWithPatient | null> {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockBooking(tx, bookingId);
+      if (await tx.visit.count({ where: { bookingId } })) return null;
+      return tx.visit.create({ data, include: WITH_PATIENT_SUMMARY });
+    });
+  }
+
+  /** Same guard when an existing visit is re-linked to another booking. */
+  updateLinkingBooking(
+    id: string,
+    bookingId: string,
+    data: Prisma.VisitUpdateInput,
+  ): Promise<VisitWithPatient | null> {
+    return this.prisma.$transaction(async (tx) => {
+      await this.lockBooking(tx, bookingId);
+      if (await tx.visit.count({ where: { bookingId, id: { not: id } } })) {
+        return null;
+      }
+      return tx.visit.update({
+        where: { id },
+        data,
+        include: WITH_PATIENT_SUMMARY,
+      });
+    });
+  }
+
+  private async lockBooking(tx: Prisma.TransactionClient, bookingId: string) {
+    const key = `booking-row:${bookingId}`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+  }
+
   update(id: string, data: Prisma.VisitUpdateInput): Promise<VisitWithPatient> {
     return this.prisma.visit.update({
       where: { id },
