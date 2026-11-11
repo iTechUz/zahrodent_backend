@@ -313,7 +313,11 @@ Oyiga kamida bir marta restore'ni alohida bazaga sinab ko'ring.
   variables `SITE_URL` (frontend public URL), `API_URL` (`https://api.<domen>`, oxirida `/`siz);
   secrets `TG_ALERT_BOT_TOKEN`, `TG_ALERT_CHAT_ID` (admin chat). O'chirish: Actions → Uptime monitor → Disable.
   Qo'lda sinash: `SITE_URL=… API_URL=… ./scripts/uptime-monitor.sh` (token bo'lmasa faqat konsolga chiqaradi).
-- Lidlar guruhi: `.env` da `TELEGRAM_LEADS_CHAT_ID` (README → Telegram bot, 5-band).
+- Lidlar guruhi: `TELEGRAM_LEADS_CHAT_ID` (README → Telegram bot, 5-band). `.env` har deploy'da CD tomonidan
+  qayta yoziladi, shuning uchun bu qiymatlar **GitHub → Settings → Secrets and variables → Actions → Variables**
+  (environment: production) da turishi shart: `TELEGRAM_LEADS_CHAT_ID`, `TELEGRAM_STATUS_CHAT_ID` (ixtiyoriy),
+  `TELEGRAM_BOOKINGS_TOPIC_ID` (ixtiyoriy), `TELEGRAM_BOT_USERNAME`. Aks holda landing formadan kelgan murojaat
+  bazaga tushadi, lekin guruhga xabar ketmaydi.
 - Konteyner holati: `docker ps`, `docker inspect --format '{{.State.Health.Status}}' zahrodent_backend`.
 - Loglar: `docker logs -f --tail 200 zahrodent_backend`; production'da har qator JSON —
   `docker logs zahrodent_backend 2>&1 | jq -c 'select(.level=="error")'`, bitta so'rov: `grep '<requestId>'`.
