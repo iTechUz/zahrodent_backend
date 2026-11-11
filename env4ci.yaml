@@ -34,6 +34,10 @@ rules:
   - { pattern: "ESKIZ_BASE_URL", type: variable }
   - { pattern: "ESKIZ_HTTP_TIMEOUT_MS", type: variable }
   - { pattern: "TELEGRAM_BOT_ENABLED", type: variable }
+  - { pattern: "TELEGRAM_LEADS_CHAT_ID", type: variable }
+  - { pattern: "TELEGRAM_STATUS_CHAT_ID", type: variable }
+  - { pattern: "TELEGRAM_BOOKINGS_TOPIC_ID", type: variable }
+  - { pattern: "TELEGRAM_BOT_USERNAME", type: variable }
 
 # Branch -> environment. "env4ci push" on a branch writes to its environment.
 branches:
