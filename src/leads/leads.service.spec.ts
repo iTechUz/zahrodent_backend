@@ -22,7 +22,7 @@ describe('LeadsService', () => {
   >;
   let gateway: jest.Mocked<Pick<NotificationsGateway, 'sendNewLead'>>;
   let tg: { enqueue: jest.Mock };
-  let notifier: { notifyLeadReceived: jest.Mock };
+  let notifier: { notifyLeadReceived: jest.Mock; notifyLeadStatus: jest.Mock };
 
   const lead = { id: 'l1', name: 'Ali', phone: '+998901112233' } as any;
 
@@ -38,7 +38,10 @@ describe('LeadsService', () => {
     };
     gateway = { sendNewLead: jest.fn() };
     tg = { enqueue: jest.fn().mockResolvedValue({}) };
-    notifier = { notifyLeadReceived: jest.fn().mockResolvedValue('sms') };
+    notifier = {
+      notifyLeadReceived: jest.fn().mockResolvedValue('sms'),
+      notifyLeadStatus: jest.fn().mockResolvedValue(true),
+    };
     service = new LeadsService(
       repo as unknown as LeadsRepository,
       gateway as unknown as NotificationsGateway,
@@ -291,6 +294,34 @@ describe('LeadsService', () => {
         expect.any(Date),
       );
       expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('update — status o‘zgarganda mijozga xabar ketadi, o‘zgarmasa ketmaydi', async () => {
+      repo.findById.mockResolvedValue(lead);
+      repo.update.mockResolvedValue({ ...lead, status: 'contacted' });
+      await service.update('l1', { status: 'contacted' });
+      expect(notifier.notifyLeadStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'contacted' }),
+        'contacted',
+      );
+      notifier.notifyLeadStatus.mockClear();
+      repo.findById.mockResolvedValue({ ...lead, status: 'contacted' });
+      await service.update('l1', { status: 'contacted' });
+      await service.update('l1', { notes: 'x' });
+      expect(notifier.notifyLeadStatus).not.toHaveBeenCalled();
+    });
+
+    it('update — converted bo‘lganda ham mijozga xabar ketadi', async () => {
+      repo.findById.mockResolvedValue({ ...lead, status: 'proposal' });
+      repo.updateAndEnsurePatient.mockResolvedValue({
+        ...lead,
+        status: 'converted',
+      });
+      await service.update('l1', { status: 'converted' });
+      expect(notifier.notifyLeadStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'converted' }),
+        'converted',
+      );
     });
 
     it('update — telefon kanonik +998 formatga keltiriladi', async () => {

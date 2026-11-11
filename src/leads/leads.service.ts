@@ -182,7 +182,7 @@ export class LeadsService {
     // First move to "converted" → the lead becomes a patient automatically
     // (the repository re-checks inside a transaction: concurrent-safe).
     if (data.status === 'converted' && lead.status !== 'converted') {
-      return this.leadsRepository.updateAndEnsurePatient(
+      const converted = await this.leadsRepository.updateAndEnsurePatient(
         id,
         data,
         {
@@ -194,8 +194,15 @@ export class LeadsService {
         },
         parseDateOnlyToUTC(todayInTashkent()),
       );
+      void this.clientNotifier.notifyLeadStatus(converted, 'converted');
+      return converted;
     }
-    return this.leadsRepository.update(id, data);
+    const updated = await this.leadsRepository.update(id, data);
+    // Tell the person (if they linked the bot) — fire-and-forget, never fails the update.
+    if (data.status && data.status !== lead.status) {
+      void this.clientNotifier.notifyLeadStatus(updated, data.status);
+    }
+    return updated;
   }
 
   async remove(id: string) {

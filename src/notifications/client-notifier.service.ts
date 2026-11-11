@@ -28,19 +28,26 @@ export class ClientNotifierService {
     private readonly eskiz: EskizService,
   ) {}
 
-  /** Verified Telegram chat id for this phone, or null. */
+  /** Verified Telegram chat id for this phone (patient card first, then a lead), or null. */
   async findChatId(rawPhone: string): Promise<string | null> {
     const phone = normalizeUzPhone(rawPhone);
     if (!phone) return null;
     const ids = (await this.patients.findActiveIdsByMobile(phone)).map(
       (p) => p.id,
     );
-    if (!ids.length) return null;
-    const p = await this.prisma.patient.findFirst({
-      where: { id: { in: ids }, telegramChatId: { not: null } },
+    if (ids.length) {
+      const p = await this.prisma.patient.findFirst({
+        where: { id: { in: ids }, telegramChatId: { not: null } },
+        select: { telegramChatId: true },
+      });
+      if (p?.telegramChatId) return p.telegramChatId;
+    }
+    const l = await this.prisma.lead.findFirst({
+      where: { phone, telegramChatId: { not: null } },
+      orderBy: { createdAt: 'desc' },
       select: { telegramChatId: true },
     });
-    return p?.telegramChatId ?? null;
+    return l?.telegramChatId ?? null;
   }
 
   /** `https://t.me/<bot>?start=lead` or null when the bot name isn't set. */
@@ -99,4 +106,44 @@ export class ClientNotifierService {
       return 'none';
     }
   }
+
+  /**
+   * "Your application moved to <status>" — to the lead's linked Telegram chat only
+   * (no SMS: the bot link was already offered on submit). Fixed texts, no user input.
+   * Never throws.
+   */
+  async notifyLeadStatus(lead: Lead, status: string): Promise<boolean> {
+    try {
+      const text = LEAD_STATUS_TEXTS[status];
+      if (!text) return false;
+      const chatId = lead.telegramChatId ?? (await this.findChatId(lead.phone));
+      if (!chatId) return false;
+      await this.outbox.enqueue({
+        kind: 'patient_lead_status',
+        chatId,
+        text,
+        leadId: lead.id,
+      });
+      return true;
+    } catch (e) {
+      this.logger.warn(
+        `Ariza holati xabari yuborilmadi: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return false;
+    }
+  }
 }
+
+/** Client-facing text per lead status ("new" is the initial state — no message). */
+export const LEAD_STATUS_TEXTS: Record<string, string> = {
+  contacted:
+    "📞 Zahro Dental: arizangiz ko'rib chiqilmoqda, administrator siz bilan bog'lanadi.",
+  consultation:
+    '🩺 Zahro Dental: konsultatsiya uchun vaqt kelishilmoqda. Administrator xabar beradi.',
+  proposal:
+    '📝 Zahro Dental: siz uchun davolash taklifi tayyorlandi. Administrator batafsil aytib beradi.',
+  converted:
+    "✅ Zahro Dental: arizangiz tasdiqlandi, siz klinikamizda ro'yxatga olindingiz. Qabul eslatmalarini shu yerda olasiz.",
+  cancelled:
+    "ℹ️ Zahro Dental: arizangiz yopildi. Savollaringiz bo'lsa, bizga yozing yoki qayta ariza qoldiring.",
+};

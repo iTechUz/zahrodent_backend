@@ -117,6 +117,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         String(chatId),
       );
       if (n) this.logger.log(`Telegram chat ${n} ta bemor kartasiga bog'landi`);
+      // Same for the person's applications (status updates), still only their own contact.
+      if (this.prisma) {
+        const l = await this.prisma.lead.updateMany({
+          where: { phone },
+          data: { telegramChatId: String(chatId) },
+        });
+        if (l.count)
+          this.logger.log(`Telegram chat ${l.count} ta arizaga bog'landi`);
+      }
     } catch (err) {
       this.logger.warn(
         `Bemorni Telegram chatga bog'lashda xato: ${err instanceof Error ? err.message : String(err)}`,
