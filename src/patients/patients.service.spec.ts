@@ -1,6 +1,10 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { DOCTOR_PROFILE_MISSING_MESSAGE } from '../common/auth/doctor-scope';
-import { PatientsService } from './patients.service';
+import { PatientsService, patientDebtMessage } from './patients.service';
 import { PatientsRepository } from './patients.repository';
 import type { AuthUserView } from '../auth/auth.service';
 
@@ -74,7 +78,9 @@ describe('PatientsService', () => {
       count: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
-      softDelete: jest.fn().mockResolvedValue({ cancelledBookings: 0 }),
+      softDelete: jest
+        .fn()
+        .mockResolvedValue({ cancelledBookings: 0, cancelled: [] }),
       restore: jest.fn(),
       groupBySource: jest.fn(),
       createComment: jest.fn(),
@@ -536,7 +542,85 @@ describe('PatientsService', () => {
         new Date('2026-06-30T20:00:00.000Z'),
         new Date('2026-07-01T00:00:00.000Z'),
         ['pending', 'confirmed'],
+        { reason: 'Bemor arxivlandi', actor: { id: 'u1', name: 'Admin' } },
       );
+    });
+
+    it('qarzi bor (balance < 0) — 409, qarz summasi xabarda, o‘chirilmaydi', async () => {
+      repo.findById.mockResolvedValue(
+        row({ visits: [{ price: 1_500_000 }], payments: [] }) as any,
+      );
+      const err = await service.remove('p1', admin).catch((e) => e);
+      expect(err).toBeInstanceOf(ConflictException);
+      expect(err.message).toBe(patientDebtMessage(1_500_000));
+      expect(err.message).toContain('1 500 000');
+      expect(repo.softDelete).not.toHaveBeenCalled();
+    });
+
+    it('qarzi bor, force=true — o‘chiriladi', async () => {
+      repo.findById.mockResolvedValue(
+        row({ visits: [{ price: 1_500_000 }], payments: [] }) as any,
+      );
+      await expect(service.remove('p1', admin, true)).resolves.toEqual({
+        id: 'p1',
+      });
+      expect(repo.softDelete).toHaveBeenCalled();
+    });
+
+    it('balans 0 yoki ijobiy — force kerak emas', async () => {
+      repo.findById.mockResolvedValue(
+        row({
+          visits: [{ price: 100 }],
+          payments: [
+            { amount: 100, status: 'paid', discount: null, type: 'INCOME' },
+          ],
+        }) as any,
+      );
+      await expect(service.remove('p1', admin)).resolves.toEqual({ id: 'p1' });
+    });
+
+    it('bekor qilingan har bir qabul uchun xodimlar guruhiga xabar (notifyChanged)', async () => {
+      const notifyChanged = jest.fn().mockResolvedValue(undefined);
+      const moduleRef = { get: jest.fn().mockReturnValue({ notifyChanged }) };
+      const svc = new PatientsService(
+        repo as unknown as PatientsRepository,
+        moduleRef as any,
+      );
+      repo.findById.mockResolvedValue(row() as any);
+      repo.softDelete.mockResolvedValue({
+        cancelledBookings: 2,
+        cancelled: [
+          { id: 'b1', from: 'pending' },
+          { id: 'b2', from: 'confirmed' },
+        ],
+      });
+      await svc.remove('p1', admin);
+      expect(notifyChanged).toHaveBeenCalledTimes(2);
+      expect(notifyChanged).toHaveBeenCalledWith({
+        bookingId: 'b1',
+        from: 'pending',
+        to: 'cancelled',
+        reason: 'Bemor arxivlandi',
+        actor: { id: admin.id, name: admin.name },
+      });
+    });
+
+    it('xabar yuborishdagi xato o‘chirishni buzmaydi', async () => {
+      const moduleRef = {
+        get: jest.fn(() => {
+          throw new Error('no provider');
+        }),
+      };
+      const svc = new PatientsService(
+        repo as unknown as PatientsRepository,
+        moduleRef as any,
+      );
+      repo.findById.mockResolvedValue(row() as any);
+      repo.softDelete.mockResolvedValue({
+        cancelledBookings: 1,
+        cancelled: [{ id: 'b1', from: 'pending' }],
+      });
+      await expect(svc.remove('p1', admin)).resolves.toEqual({ id: 'p1' });
     });
   });
 

@@ -59,6 +59,15 @@ describe('BookingStatusService', () => {
     }
   });
 
+  it('notifyChanged — faqat xabar (log yozmaydi), sabab guruhga boradi', async () => {
+    await svc.notifyChanged(change('cancelled', 'Bemor arxivlandi'));
+    expect(prisma.bookingStatusLog.create).not.toHaveBeenCalled();
+    const group = outbox.enqueue.mock.calls.find(
+      (c) => c[0].kind === 'booking_status_group',
+    )[0];
+    expect(group.text).toContain('Sabab: Bemor arxivlandi');
+  });
+
   it('logs who/when/why and posts to the staff group with admin name', async () => {
     await svc.onChanged(change('cancelled', 'Bemor so‘radi'));
     expect(prisma.bookingStatusLog.create.mock.calls[0][0].data).toMatchObject({

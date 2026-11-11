@@ -106,28 +106,78 @@ describe('PatientsRepository', () => {
     });
   });
 
-  it('softDelete — tranzaksiyada deletedAt + kelgusi faol qabullar bekor', async () => {
-    const tx = {
-      patient: { update: jest.fn().mockResolvedValue({}) },
-      booking: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
-    };
-    prisma.$transaction = jest.fn(async (fn: any) => fn(tx));
+  describe('softDelete', () => {
     const at = new Date('2026-07-01T10:00:00Z');
     const from = new Date('2026-07-01T00:00:00Z');
-    await expect(
-      repo.softDelete('p1', at, from, ['pending', 'confirmed']),
-    ).resolves.toEqual({ cancelledBookings: 2 });
-    expect(tx.patient.update).toHaveBeenCalledWith({
-      where: { id: 'p1' },
-      data: { deletedAt: at },
+    const log = {
+      reason: 'Bemor arxivlandi',
+      actor: { id: 'u1', name: 'Admin' },
+    };
+    const mkTx = (active: { id: string; status: string }[]) => {
+      const tx = {
+        patient: { update: jest.fn().mockResolvedValue({}) },
+        booking: {
+          findMany: jest.fn().mockResolvedValue(active),
+          updateMany: jest.fn().mockResolvedValue({ count: active.length }),
+        },
+        bookingStatusLog: { createMany: jest.fn() },
+      };
+      prisma.$transaction = jest.fn(async (fn: any) => fn(tx));
+      return tx;
+    };
+
+    it('tranzaksiyada deletedAt + faol qabullar bekor + har biriga status log', async () => {
+      const tx = mkTx([
+        { id: 'b1', status: 'pending' },
+        { id: 'b2', status: 'confirmed' },
+      ]);
+      await expect(
+        repo.softDelete('p1', at, from, ['pending', 'confirmed'], log),
+      ).resolves.toEqual({
+        cancelledBookings: 2,
+        cancelled: [
+          { id: 'b1', from: 'pending' },
+          { id: 'b2', from: 'confirmed' },
+        ],
+      });
+      expect(tx.patient.update).toHaveBeenCalledWith({
+        where: { id: 'p1' },
+        data: { deletedAt: at },
+      });
+      expect(tx.booking.findMany).toHaveBeenCalledWith({
+        where: {
+          patientId: 'p1',
+          date: { gte: from },
+          status: { in: ['pending', 'confirmed'] },
+        },
+        select: { id: true, status: true },
+      });
+      expect(tx.booking.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['b1', 'b2'] } },
+        data: { status: 'cancelled' },
+      });
+      expect(tx.bookingStatusLog.createMany).toHaveBeenCalledWith({
+        data: [
+          {
+            bookingId: 'b1',
+            fromStatus: 'pending',
+            toStatus: 'cancelled',
+            reason: 'Bemor arxivlandi',
+            changedById: 'u1',
+            changedByName: 'Admin',
+          },
+          expect.objectContaining({ bookingId: 'b2', fromStatus: 'confirmed' }),
+        ],
+      });
     });
-    expect(tx.booking.updateMany).toHaveBeenCalledWith({
-      where: {
-        patientId: 'p1',
-        date: { gte: from },
-        status: { in: ['pending', 'confirmed'] },
-      },
-      data: { status: 'cancelled' },
+
+    it('faol qabul yo‘q — updateMany/log chaqirilmaydi', async () => {
+      const tx = mkTx([]);
+      await expect(
+        repo.softDelete('p1', at, from, ['pending'], log),
+      ).resolves.toEqual({ cancelledBookings: 0, cancelled: [] });
+      expect(tx.booking.updateMany).not.toHaveBeenCalled();
+      expect(tx.bookingStatusLog.createMany).not.toHaveBeenCalled();
     });
   });
 

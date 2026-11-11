@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Prisma } from '@prisma/client';
 import {
   PatientsRepository,
@@ -33,8 +35,14 @@ import {
 } from './patient-age';
 import { normalizeUzPhone } from '../common/utils/phone.util';
 import { ACTIVE_BOOKING_STATUSES } from '../bookings/bookings.service';
+import { BookingStatusService } from '../bookings/booking-status.service';
 
 export const PATIENT_NOT_FOUND = 'Bemor topilmadi';
+/** Reason written to the status log of bookings cancelled by archiving a patient. */
+export const PATIENT_ARCHIVED_REASON = 'Bemor arxivlandi';
+
+export const patientDebtMessage = (debt: number) =>
+  `Bemorning ${debt.toLocaleString('ru-RU').replace(/\u00a0/g, ' ')} so'm qarzi bor. Arxivlansa, bu qarz boshqaruv paneli jamilaridan chiqib ketadi. Baribir o'chirasizmi? (?force=true)`;
 
 /** Soft-deleted patients are hidden from every list, stat and lookup. */
 export const NOT_DELETED: Prisma.PatientWhereInput = { deletedAt: null };
@@ -49,7 +57,12 @@ const currentYear = () => Number(todayInTashkent().slice(0, 4));
 export class PatientsService {
   private readonly logger = new Logger(PatientsService.name);
 
-  constructor(private readonly patientsRepository: PatientsRepository) {}
+  constructor(
+    private readonly patientsRepository: PatientsRepository,
+    // Resolved lazily: NotificationsModule (owner of BookingStatusService)
+    // itself imports PatientsModule, so it can't be injected directly.
+    private readonly moduleRef?: ModuleRef,
+  ) {}
 
   /** Doctor → only own patients; other roles → no restriction. */
   private scopeWhere(user: AuthUserView): Prisma.PatientWhereInput | null {
@@ -248,20 +261,59 @@ export class PatientsService {
 
   /**
    * Soft delete (admin). History stays; upcoming pending/confirmed bookings
-   * (today onwards, Asia/Tashkent) are cancelled. Already deleted → 404.
+   * (today onwards, Asia/Tashkent) are cancelled — each gets a status-log row
+   * ("Bemor arxivlandi") and a staff-group notice. A patient who owes the
+   * clinic (balance < 0) is refused with 409 unless `force` (the debt would
+   * silently leave the dashboard totals). Already deleted → 404.
    */
-  async remove(id: string, user: AuthUserView) {
-    await this.ensureExists(id, user);
-    await this.patientsRepository.softDelete(
+  async remove(id: string, user: AuthUserView, force = false) {
+    const patient = await this.findOne(id, user);
+    if (patient.balance < 0 && !force) {
+      throw new ConflictException(patientDebtMessage(-patient.balance));
+    }
+    const actor = { id: user.id, name: user.name };
+    const { cancelled } = await this.patientsRepository.softDelete(
       id,
       new Date(),
       parseDateOnlyToUTC(todayInTashkent()),
       ACTIVE_BOOKING_STATUSES,
+      { reason: PATIENT_ARCHIVED_REASON, actor },
     );
+    this.notifyCancelled(cancelled, actor);
     return { id };
   }
 
-  /** Undo a soft delete (admin). Cancelled bookings stay cancelled. */
+  /** Staff-group notices for the bookings cancelled by archiving. Never throws. */
+  private notifyCancelled(
+    cancelled: { id: string; from: string }[],
+    actor: { id: string | null; name: string },
+  ) {
+    if (!cancelled.length || !this.moduleRef) return;
+    try {
+      const status = this.moduleRef.get(BookingStatusService, {
+        strict: false,
+      });
+      for (const b of cancelled) {
+        void status.notifyChanged({
+          bookingId: b.id,
+          from: b.from,
+          to: 'cancelled',
+          reason: PATIENT_ARCHIVED_REASON,
+          actor,
+        });
+      }
+    } catch (e) {
+      this.logger.warn(
+        `Arxivlash xabarlari yuborilmadi: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  /**
+   * Undo a soft delete (admin). The patient (and any debt) is back in every
+   * list and total. Bookings cancelled on archiving stay cancelled (their
+   * status log says "Bemor arxivlandi"); an admin can reopen them one by one.
+   */
   async restore(id: string) {
     const p = await this.patientsRepository.findById(id);
     if (!p) throw new NotFoundException(PATIENT_NOT_FOUND);

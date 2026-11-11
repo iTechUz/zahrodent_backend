@@ -29,7 +29,10 @@ import { ROLES_STAFF } from '../common/constants/role-groups';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { AuthUserView } from '../auth/auth.service';
 import { PatientsQueryDto } from './dto/patients-query.dto';
-import { PatientFindOneQueryDto } from './dto/patient-find-one-query.dto';
+import {
+  PatientDeleteQueryDto,
+  PatientFindOneQueryDto,
+} from './dto/patient-find-one-query.dto';
 
 @ApiTags('patients')
 @ApiBearerAuth('JWT')
@@ -92,7 +95,7 @@ export class PatientsController {
   @ApiOperation({
     summary: "Bemorni o'chirish — soft delete (faqat admin)",
     description:
-      "`deletedAt` qo'yiladi: bemor barcha ro'yxat/statistika/qidiruvlardan yashiriladi. Tashrif, to'lov va o'tgan qabullar saqlanadi (moliya ro'yxatlarida `patient.deletedAt` bilan). Bugundan keyingi pending/confirmed qabullar `cancelled` qilinadi.",
+      "`deletedAt` qo'yiladi: bemor barcha ro'yxat/statistika/qidiruvlardan yashiriladi. Tashrif, to'lov va o'tgan qabullar saqlanadi (moliya ro'yxatlarida `patient.deletedAt` bilan). Bugundan keyingi pending/confirmed qabullar `cancelled` qilinadi (status logida \"Bemor arxivlandi\" sababi bilan, xodimlar guruhiga xabar). Bemorning qarzi bo'lsa (balance < 0) 409 qaytadi (xabarda qarz summasi) — tasdiqlangach `?force=true` bilan qayta yuboring.",
   })
   @ApiOkResponse({
     schema: { type: 'object', properties: { id: { type: 'string' } } },
@@ -101,8 +104,12 @@ export class PatientsController {
     description: "Bemor topilmadi yoki allaqachon o'chirilgan",
   })
   @ApiParam({ name: 'id' })
-  remove(@Param('id') id: string, @GetUser() user: AuthUserView) {
-    return this.patientsService.remove(id, user);
+  remove(
+    @Param('id') id: string,
+    @Query() query: PatientDeleteQueryDto,
+    @GetUser() user: AuthUserView,
+  ) {
+    return this.patientsService.remove(id, user, query.force === 'true');
   }
 
   @Post(':id/restore')

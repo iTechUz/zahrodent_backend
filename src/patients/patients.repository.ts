@@ -107,26 +107,49 @@ export class PatientsRepository {
 
   /**
    * Soft delete: sets `deleted_at` and cancels the patient's upcoming
-   * active bookings (date ≥ `fromDate`) in one transaction. History
-   * (visits, payments, past bookings) is kept.
+   * active bookings (date ≥ `fromDate`) in one transaction, writing a
+   * status-log row (`reason`) for each of them. History (visits, payments,
+   * past bookings) is kept.
    */
   softDelete(
     id: string,
     at: Date,
     fromDate: Date,
     activeStatuses: string[],
-  ): Promise<{ cancelledBookings: number }> {
+    log: { reason: string; actor: { id: string | null; name: string } },
+  ): Promise<{
+    cancelledBookings: number;
+    cancelled: { id: string; from: string }[];
+  }> {
     return this.prisma.$transaction(async (tx) => {
       await tx.patient.update({ where: { id }, data: { deletedAt: at } });
-      const r = await tx.booking.updateMany({
+      const active = await tx.booking.findMany({
         where: {
           patientId: id,
           date: { gte: fromDate },
           status: { in: activeStatuses },
         },
+        select: { id: true, status: true },
+      });
+      if (!active.length) return { cancelledBookings: 0, cancelled: [] };
+      await tx.booking.updateMany({
+        where: { id: { in: active.map((b) => b.id) } },
         data: { status: 'cancelled' },
       });
-      return { cancelledBookings: r.count };
+      await tx.bookingStatusLog.createMany({
+        data: active.map((b) => ({
+          bookingId: b.id,
+          fromStatus: b.status,
+          toStatus: 'cancelled',
+          reason: log.reason,
+          changedById: log.actor.id,
+          changedByName: log.actor.name.slice(0, 100),
+        })),
+      });
+      return {
+        cancelledBookings: active.length,
+        cancelled: active.map((b) => ({ id: b.id, from: b.status })),
+      };
     });
   }
 

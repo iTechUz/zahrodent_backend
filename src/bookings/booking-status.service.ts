@@ -75,6 +75,15 @@ export class BookingStatusService {
     } catch (e) {
       this.logger.warn(`Status logini yozib bo'lmadi: ${errMsg(e)}`);
     }
+    await this.notifyChanged(c);
+  }
+
+  /**
+   * Only the Telegram notices of a status change (the log row is written by
+   * the caller, e.g. in its own transaction). Never throws.
+   */
+  async notifyChanged(c: StatusChange): Promise<void> {
+    const reason = c.reason?.trim() ? oneLine(c.reason, 300) : null;
     try {
       const ctx = await this.snapshot(c.bookingId);
       if (!ctx) return;

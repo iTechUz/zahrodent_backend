@@ -76,8 +76,12 @@ describe('PatientsController', () => {
 
   it('remove — id va user', async () => {
     service.remove.mockResolvedValue({ id: 'p1' });
-    await expect(controller.remove('p1', user)).resolves.toEqual({ id: 'p1' });
-    expect(service.remove).toHaveBeenCalledWith('p1', user);
+    await expect(controller.remove('p1', {}, user)).resolves.toEqual({
+      id: 'p1',
+    });
+    expect(service.remove).toHaveBeenCalledWith('p1', user, false);
+    await controller.remove('p1', { force: 'true' }, user);
+    expect(service.remove).toHaveBeenLastCalledWith('p1', user, true);
   });
 
   it('restore — faqat id', async () => {
