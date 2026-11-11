@@ -66,3 +66,19 @@ describe('assertStatusTransition', () => {
     ).not.toThrow();
   });
 });
+
+describe('assertServiceForCompletion', () => {
+  it('completing without a service is rejected', () => {
+    expect(() => assertServiceForCompletion('completed', undefined)).toThrow(
+      BadRequestException,
+    );
+    expect(() => assertServiceForCompletion('completed', null)).toThrow(
+      'xizmat',
+    );
+  });
+
+  it('other statuses and completed with a service pass', () => {
+    expect(() => assertServiceForCompletion('confirmed', null)).not.toThrow();
+    expect(() => assertServiceForCompletion('completed', 's1')).not.toThrow();
+  });
+});

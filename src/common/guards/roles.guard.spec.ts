@@ -24,11 +24,15 @@ describe('RolesGuard', () => {
     guard = new RolesGuard(reflector as unknown as Reflector);
   });
 
-  it('rollar talab qilinmasa — ruxsat', () => {
+  it('@Roles yo‘q (yoki bo‘sh) — default bo‘yicha 403 (deny by default)', () => {
     reflector.getAllAndOverride.mockReturnValue(undefined);
-    expect(guard.canActivate(ctx())).toBe(true);
+    expect(() => guard.canActivate(ctx({ role: 'admin' }))).toThrow(
+      ForbiddenException,
+    );
     reflector.getAllAndOverride.mockReturnValue([]);
-    expect(guard.canActivate(ctx())).toBe(true);
+    expect(() => guard.canActivate(ctx({ role: 'admin' }))).toThrow(
+      ForbiddenException,
+    );
   });
 
   it('handler va class metadata tekshiriladi', () => {

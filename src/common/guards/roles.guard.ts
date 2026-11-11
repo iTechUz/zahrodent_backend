@@ -18,8 +18,12 @@ export class RolesGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
+    // Deny by default: a route under RolesGuard without @Roles is a mistake
+    // (forgotten decorator) — never "open to every logged-in role".
+    // Routes meant for any authenticated user use JwtAuthGuard alone (no RolesGuard);
+    // public routes have no guards. roles-coverage.spec.ts checks every route.
     if (!required?.length) {
-      return true;
+      throw new ForbiddenException(FORBIDDEN_MESSAGE);
     }
     const { user } = context
       .switchToHttp()

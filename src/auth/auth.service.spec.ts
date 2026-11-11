@@ -11,6 +11,8 @@ import {
   LOGIN_LOCK_MS,
   LOGIN_LOCKED_MESSAGE,
   LOGIN_MAX_FAILURES,
+  LOGIN_PHONE_MAX_FAILURES,
+  maskPhone,
 } from './auth.service';
 import { UsersRepository } from './users.repository';
 import {
@@ -388,6 +390,78 @@ describe('AuthService', () => {
       await expect(
         service.login({ phone: '+998900000001', password: 'x' }),
       ).rejects.toBeInstanceOf(HttpException);
+    });
+  });
+
+  describe('login — phone+IP bloklash', () => {
+    const phone = '+998901234567';
+    const attacker = { ip: '203.0.113.9' };
+    const owner = { ip: '198.51.100.7' };
+    let hash: string;
+    beforeEach(async () => {
+      hash = await bcrypt.hash('right', 4);
+      usersRepository.findByPhone.mockResolvedValue(
+        mockUser({ phone, passwordHash: hash }),
+      );
+    });
+
+    const fail = async (n: number, meta: { ip: string }, p = phone) => {
+      for (let i = 0; i < n; i++) {
+        await expect(
+          service.login({ phone: p, password: 'wrong' }, meta),
+        ).rejects.toBeInstanceOf(UnauthorizedException);
+      }
+    };
+
+    it('begona IP dan 10 xato egasini bloklamaydi', async () => {
+      await fail(LOGIN_MAX_FAILURES, attacker);
+      await expect(
+        service.login({ phone, password: 'right' }, attacker),
+      ).rejects.toBeInstanceOf(HttpException);
+      await expect(
+        service.login({ phone, password: 'right' }, owner),
+      ).resolves.toBeDefined();
+    });
+
+    it('umumiy limit: noma’lum IP bloklanadi, ishonchli IP kira oladi', async () => {
+      await service.login({ phone, password: 'right' }, owner); // known-good
+      // taqsimlangan hujum: har xil IP lardan
+      for (let i = 0; i < LOGIN_PHONE_MAX_FAILURES; i++) {
+        await expect(
+          service.login(
+            { phone, password: 'wrong' },
+            { ip: `192.0.2.${(i % 200) + 1}-${i}` },
+          ),
+        ).rejects.toBeInstanceOf(UnauthorizedException);
+      }
+      await expect(
+        service.login({ phone, password: 'right' }, { ip: '192.0.2.250' }),
+      ).rejects.toMatchObject({ status: 429 });
+      await expect(
+        service.login({ phone, password: 'right' }, owner),
+      ).resolves.toBeDefined();
+    });
+
+    it('log satrida telefon maskalanadi', async () => {
+      const warn = jest
+        .spyOn(
+          (service as unknown as { logger: { warn: (m: string) => void } })
+            .logger,
+          'warn',
+        )
+        .mockImplementation(() => undefined);
+      await fail(LOGIN_MAX_FAILURES, attacker);
+      const lines = warn.mock.calls.map((c) => String(c[0]));
+      expect(lines.length).toBeGreaterThan(0);
+      for (const l of lines) {
+        expect(l).not.toContain(phone);
+        expect(l).toContain('+99890***4567');
+      }
+    });
+
+    it('maskPhone', () => {
+      expect(maskPhone('+998901234567')).toBe('+99890***4567');
+      expect(maskPhone('123')).toBe('***');
     });
   });
 

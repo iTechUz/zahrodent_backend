@@ -158,6 +158,7 @@ model Booking {
   @@index([status])
   @@index([date, status])
   @@index([doctorId, date])
+  @@index([patientId, date])
   @@map("bookings")
 }
 
@@ -201,6 +202,7 @@ model Visit {
   @@index([doctorId])
   @@index([date])
   @@index([bookingId])
+  @@index([doctorId, date])
   @@map("visits")
 }
 
@@ -230,6 +232,8 @@ model Payment {
   @@index([date])
   @@index([type])
   @@index([visitId])
+  @@index([type, status, date])
+  @@index([patientId, date])
   @@map("payments")
 }
 

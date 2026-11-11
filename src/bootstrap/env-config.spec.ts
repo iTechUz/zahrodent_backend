@@ -9,6 +9,9 @@ import {
   isProduction,
   isSwaggerEnabled,
   parsePort,
+  socketCorsOrigin,
+  swaggerBasicAuth,
+  warnIfProxyNotTrusted,
   warnWeakJwtSecret,
 } from './env-config';
 
@@ -19,6 +22,9 @@ const KEYS = [
   'NODE_ENV',
   'SWAGGER_ENABLED',
   'CORS_ORIGINS',
+  'SWAGGER_USER',
+  'SWAGGER_PASSWORD',
+  'TRUST_PROXY',
   'JWT_SECRET',
   'INITIAL_ADMIN_PASSWORD',
 ] as const;
@@ -114,9 +120,29 @@ describe('env-config', () => {
       expect(isSwaggerEnabled(false)).toBe(false);
     });
 
-    it.each(['true', '1', 'TRUE'])('%s — yoqiq (prod da ham)', (v) => {
+    it.each(['true', '1', 'TRUE'])('%s — dev da yoqiq', (v) => {
       process.env.SWAGGER_ENABLED = v;
+      expect(isSwaggerEnabled(false)).toBe(true);
+    });
+
+    it('prod: SWAGGER_ENABLED=true lekin basic-auth yo‘q — baribir o‘chiq', () => {
+      process.env.SWAGGER_ENABLED = 'true';
+      expect(isSwaggerEnabled(true)).toBe(false);
+      process.env.SWAGGER_USER = 'doc';
+      expect(isSwaggerEnabled(true)).toBe(false);
+    });
+
+    it('prod: SWAGGER_ENABLED=true + SWAGGER_USER/PASSWORD — yoqiq', () => {
+      process.env.SWAGGER_ENABLED = 'true';
+      process.env.SWAGGER_USER = 'doc';
+      process.env.SWAGGER_PASSWORD = 'pw';
       expect(isSwaggerEnabled(true)).toBe(true);
+    });
+
+    it('prod: SWAGGER_ENABLED yo‘q, basic-auth bor — baribir o‘chiq', () => {
+      process.env.SWAGGER_USER = 'doc';
+      process.env.SWAGGER_PASSWORD = 'pw';
+      expect(isSwaggerEnabled(true)).toBe(false);
     });
 
     it('noma’lum qiymat — prod ga qarab', () => {
@@ -259,6 +285,86 @@ describe('env-config', () => {
       process.env.NODE_ENV = 'production';
       process.env.INITIAL_ADMIN_PASSWORD = 'S3cure-pass';
       expect(() => enforceProductionAdminPassword()).not.toThrow();
+    });
+  });
+
+  describe('swaggerBasicAuth', () => {
+    const mw = swaggerBasicAuth({ user: 'doc', password: 'pw' });
+    const run = (authorization?: string) => {
+      const next = jest.fn();
+      const send = jest.fn();
+      const res = { setHeader: jest.fn(), status: jest.fn(() => ({ send })) };
+      mw({ headers: { authorization } }, res, next);
+      return { next, res };
+    };
+    const basic = (v: string) => `Basic ${Buffer.from(v).toString('base64')}`;
+
+    it('to‘g‘ri login — o‘tadi', () => {
+      expect(run(basic('doc:pw')).next).toHaveBeenCalled();
+    });
+    it('parolda ":" bo‘lsa ham ishlaydi', () => {
+      const m = swaggerBasicAuth({ user: 'a', password: 'p:w' });
+      const next = jest.fn();
+      m({ headers: { authorization: basic('a:p:w') } }, {} as never, next);
+      expect(next).toHaveBeenCalled();
+    });
+    it.each([undefined, 'Bearer x', basic('doc:bad'), basic('x:pw')])(
+      '%s — 401',
+      (h) => {
+        const { next, res } = run(h);
+        expect(next).not.toHaveBeenCalled();
+        expect(res.status).toHaveBeenCalledWith(401);
+        expect(res.setHeader).toHaveBeenCalledWith(
+          'WWW-Authenticate',
+          expect.stringContaining('Basic'),
+        );
+      },
+    );
+  });
+
+  describe('socketCorsOrigin (WebSocket CORS)', () => {
+    const check = (origin: string | undefined) => {
+      let out: boolean | undefined;
+      socketCorsOrigin(origin, (_e, allow) => (out = allow));
+      return out;
+    };
+    it('ro‘yxat bor — faqat ro‘yxatdagi origin', () => {
+      process.env.CORS_ORIGINS = 'https://a.uz, https://b.uz';
+      expect(check('https://a.uz')).toBe(true);
+      expect(check('https://evil.uz')).toBe(false);
+    });
+    it('env har chaqiruvda o‘qiladi (lazy)', () => {
+      expect(check('https://a.uz')).toBe(true); // dev, bo‘sh
+      process.env.CORS_ORIGINS = 'https://b.uz';
+      expect(check('https://a.uz')).toBe(false);
+    });
+    it('prod + bo‘sh ro‘yxat — brauzer origin rad etiladi (fail closed)', () => {
+      process.env.NODE_ENV = 'production';
+      expect(check('https://a.uz')).toBe(false);
+      expect(check(undefined)).toBe(true);
+    });
+    it('dev + bo‘sh ro‘yxat — hammasi', () => {
+      expect(check('https://anything.uz')).toBe(true);
+    });
+  });
+
+  describe('warnIfProxyNotTrusted', () => {
+    it('prod + TRUST_PROXY yo‘q/0 — ogohlantirish', () => {
+      expect(warnIfProxyNotTrusted(true)).toBe(true);
+      process.env.TRUST_PROXY = '0';
+      expect(warnIfProxyNotTrusted(true)).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('TRUST_PROXY'),
+      );
+    });
+    it('prod + TRUST_PROXY=1/true — jim', () => {
+      process.env.TRUST_PROXY = '1';
+      expect(warnIfProxyNotTrusted(true)).toBe(false);
+      process.env.TRUST_PROXY = 'true';
+      expect(warnIfProxyNotTrusted(true)).toBe(false);
+    });
+    it('dev — jim', () => {
+      expect(warnIfProxyNotTrusted(false)).toBe(false);
     });
   });
 });

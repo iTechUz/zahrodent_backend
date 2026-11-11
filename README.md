@@ -152,7 +152,7 @@ Namuna fayllar: [.env.example](.env.example) (dev) va [.env.production.example](
 
 | O'zgaruvchi | Majburiy | Standart | Tavsif | Misol |
 |---|---|---|---|---|
-| `NODE_ENV` | prod'da ha | — | `production` qat'iy tekshiruvlarni yoqadi, Swagger'ni o'chiradi, JSON log | `production` |
+| `NODE_ENV` | prod'da ha | — (Docker image: `production`) | `production` qat'iy tekshiruvlarni yoqadi, Swagger'ni o'chiradi, JSON log | `production` |
 | `PORT` | yo'q | `3000` (image'da `7878`) | Tinglash porti | `7878` |
 | `HOST` | yo'q | `0.0.0.0` | Tinglash manzili | `0.0.0.0` |
 | `TZ` | tavsiya | image'da `Asia/Tashkent` | Jarayon vaqt zonasi (sana mantiqi baribir Asia/Tashkent) | `Asia/Tashkent` |
@@ -163,7 +163,7 @@ Namuna fayllar: [.env.example](.env.example) (dev) va [.env.production.example](
 | `CORS_ORIGINS` | **ha** (prod) | dev: hammasi | Ruxsat etilgan origin'lar (vergul bilan); Socket.IO ham | `https://admin.example.uz` |
 | `PUBLIC_BASE_URL` | yo'q | `http://localhost:<PORT>` | Faqat start bannerida | `https://api.example.uz` |
 | `TRUST_PROXY` | tavsiya | o'chiq | `1`/`true` — nginx ortida (haqiqiy IP rate limiting uchun) | `1` |
-| `SWAGGER_ENABLED` | yo'q | dev: on, prod: off | `/swagger` UI | `false` |
+| `SWAGGER_ENABLED` | yo'q | dev: on, prod: off | `/swagger` UI. Prod'da `true` bo'lsa ham `SWAGGER_USER`+`SWAGGER_PASSWORD` (basic-auth) bo'lmasa o'chiq qoladi | `false` |
 | `LOG_FORMAT` | yo'q | prod: `json`, aks holda `text` | Log formati | `json` |
 | `INITIAL_ADMIN_PHONE` | birinchi start | `+998901234567` | Admin yo'q bo'lsa yaratiladigan admin telefoni | `+998901234567` |
 | `INITIAL_ADMIN_PASSWORD` | **ha** (prod) | dev: `admin123` | ≥ 8 belgi, `admin123` taqiqlangan (prod'da start to'xtaydi) | `openssl rand -base64 18` |
@@ -186,7 +186,7 @@ Qoidalar:
 1. **Faqat oldinga (forward-only).** Qo'llangan migratsiya fayli hech qachon tahrirlanmaydi yoki o'chirilmaydi —
    o'zgarish kerak bo'lsa yangi migratsiya yoziladi.
 2. Umumiy/production bazada **hech qachon** `prisma migrate dev`, `prisma migrate reset` yoki `prisma db push` ishlatilmaydi.
-3. Production'da migratsiyalar konteyner startida avtomatik: `prisma migrate deploy && node dist/src/main.js`.
+3. Production'da migratsiyalar CD'ning `migrate` job'ida (konteyner almashishidan oldin, avval `pg_dump` zaxira nusxa bilan) qo'llanadi; konteyner startida emas. Destruktiv SQL (`DROP COLUMN`/`DROP TABLE`/`ALTER COLUMN … TYPE`) PR'da `-- allow-destructive` izohisiz CI'dan o'tmaydi.
 4. Yangi migratsiya yozish (lokal):
    ```bash
    # schema.prisma ni o'zgartiring, so'ng vaqtinchalik shadow DB bilan SQL oling
@@ -265,7 +265,7 @@ POST /auth/logout {refresh_token} → { success: true }   (idempotent)
 
 **Telegram bot** (`TELEGRAM_BOT_TOKEN`):
 
-1. @BotFather → `/newbot` → token. Production va lokal uchun **alohida** botlar ishlating.
+1. @BotFather → `/newbot` → token. Production va lokal uchun **alohida** botlar ishlating. Repoda default token/chat id yo'q (dev'da ham): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_LEADS_CHAT_ID` faqat env'dan o'qiladi.
 2. Bot long polling bilan ishlaydi — webhook va ochiq port kerak emas. Bitta token bilan faqat **bitta** instansiya
    polling qilishi mumkin (aks holda Telegram `409 Conflict`); qo'shimcha replikalarda `TELEGRAM_BOT_ENABLED=false`.
 3. Oqim: `/start` → foydalanuvchi telefon raqamini yuboradi → xizmat tanlaydi yoki xabar yozadi → **lid** yaratiladi
@@ -294,18 +294,14 @@ Eslatma oynasi: bugundan `bugun + reminderDaysAhead` gacha (Asia/Tashkent), `pen
 ## Docker va CI/CD
 
 **Dockerfile** (multi-stage): `npm ci` → `prisma generate` → `nest build`; runtime image faqat prod dependency'lar,
-non-root `nodeuser`, `PORT=7878`, `TZ=Asia/Tashkent`, `HEALTHCHECK` → `GET /health`. Start buyrug'i:
-`prisma migrate deploy && exec node dist/src/main.js` (node PID 1 — SIGTERM'da graceful shutdown: Prisma disconnect, bot stop).
+distroless non-root, `NODE_ENV=production` (default), `TZ=Asia/Tashkent`, `HEALTHCHECK` → `GET /health`. Start buyrug'i:
+`node dist/src/main.js` (node PID 1 — SIGTERM'da graceful shutdown: Prisma disconnect, bot stop). Migratsiya start'da emas, CD'da.
 
-**GitHub Actions** (`.github/workflows/docker-deploy.yml`):
-
-| Job | Qachon | Nima qiladi |
-|---|---|---|
-| `test` | har PR va `main` ga push | `npm ci`, `prisma generate`, type check, ESLint, Jest (coverage) |
-| `deploy` | faqat `main` ga push, `test` o'tsa | `docker build -t 10449/zahrodent_backend:<git sha>` → Docker Hub → SSH orqali serverda `docker pull`, eski konteynerni o'chirish, `docker run --network zaxro_network -p 7878:7878 --env-file …/.env` |
-
-Kerakli GitHub secrets: `DOCKERHUB_TOKEN`, `SSH_PRIVATE_KEY`. Batafsil, birinchi deploy, rollback va nginx:
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+**GitHub Actions**: `.github/workflows/ci.yml` (lint, typecheck, test, Docker build, migration safety, npm audit) va
+`.github/workflows/cd.yml` (CI muvaffaqiyatli tugagach: `build` → `prepare` → `migrate` → `deploy` → `notify`;
+`main` → `production`, `dev` → `development` environment). Production'da `NODE_ENV` va `TRUST_PROXY` Variables majburiy,
+**faqat bitta API instansiyasi** ishlatiladi (Telegram polling, xotiradagi login bloklash). Batafsil, birinchi deploy,
+rollback, backup va nginx: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Health check
 

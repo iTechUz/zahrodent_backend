@@ -75,8 +75,11 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY package.json ./
 
-# Set production environment
-ENV NODE_ENV=development
+# Production by default: a deploy that forgets NODE_ENV must not silently run in
+# development mode (open CORS, Swagger on, weak-secret checks off). Build stages above
+# do not set NODE_ENV, so `npm ci`/`nest build` still install devDependencies.
+# CD requires NODE_ENV to be set explicitly for every environment (see cd.yml).
+ENV NODE_ENV=production
 ENV TZ=Asia/Tashkent
 
 USER nonroot

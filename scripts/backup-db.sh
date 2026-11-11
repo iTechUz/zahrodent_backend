@@ -17,6 +17,12 @@
 # Other settings:
 #   BACKUP_DIR      default /home/ubuntu/backups/zahro_dental
 #   RETENTION_DAYS  default 14 (older *.dump.gz files are deleted)
+#   KEEP_LAST       if set (e.g. 10): keep only the newest N *.dump.gz instead of
+#                   deleting by age (used for the pre-migration dumps made by CD)
+#   MIN_BYTES       default 100: the archive must be bigger, else the run FAILS
+#   HEARTBEAT_URL   optional URL to GET after a successful run (healthchecks.io
+#                   style dead-man switch: no ping in time = alert), same as s3-backup.sh
+#   HEARTBEAT_FAIL_URL  optional URL to GET when the run fails (e.g. <hc-url>/fail)
 #   ENV_FILE        default /home/ubuntu/projects/zaxro_dent/backend/zahrodent_backend/.env
 #
 # Cron (daily 03:15, Asia/Tashkent server time):
@@ -34,11 +40,26 @@ PG_CONTAINER="${PG_CONTAINER:-}"
 PGUSER="${PGUSER:-postgres}"
 PGDATABASE="${PGDATABASE:-zahro_dental}"
 
+MIN_BYTES="${MIN_BYTES:-100}"
+KEEP_LAST="${KEEP_LAST:-}"
+
 log() { printf '%s [backup] %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$*"; }
-die() { log "XATO: $*"; exit 1; }
+die() {
+  log "XATO: $*"
+  if [ -n "${HEARTBEAT_FAIL_URL:-}" ]; then
+    curl -fsS -m 10 "$HEARTBEAT_FAIL_URL" >/dev/null 2>&1 || log "ogohlantirish: fail-heartbeat yuborilmadi"
+  fi
+  exit 1
+}
 
 if ! [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || [ "$RETENTION_DAYS" -lt 1 ]; then
   die "RETENTION_DAYS musbat butun son bo'lishi kerak (hozir: $RETENTION_DAYS)"
+fi
+if [ -n "$KEEP_LAST" ] && { ! [[ "$KEEP_LAST" =~ ^[0-9]+$ ]] || [ "$KEEP_LAST" -lt 1 ]; }; then
+  die "KEEP_LAST musbat butun son bo'lishi kerak (hozir: $KEEP_LAST)"
+fi
+if ! [[ "$MIN_BYTES" =~ ^[0-9]+$ ]]; then
+  die "MIN_BYTES butun son bo'lishi kerak (hozir: $MIN_BYTES)"
 fi
 
 # DATABASE_URL from the app's env file when no mode is configured.
@@ -78,11 +99,21 @@ fi
 
 gzip -t "$TMP" || die "arxiv buzilgan: $TMP"
 SIZE="$(wc -c < "$TMP" | tr -d ' ')"
-[ "$SIZE" -gt 100 ] || die "backup juda kichik ($SIZE bayt) — pg_dump xatosi?"
+[ "$SIZE" -gt "$MIN_BYTES" ] || die "backup juda kichik ($SIZE bayt) — pg_dump xatosi?"
 mv "$TMP" "$TARGET"
 trap - EXIT
 log "tayyor: $TARGET ($SIZE bayt)"
 
-# Rotation: delete backups older than RETENTION_DAYS days.
-DELETED="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.dump.gz' -mtime +"$RETENTION_DAYS" -print -delete | wc -l | tr -d ' ')"
-log "rotatsiya: ${DELETED} ta eski backup o'chirildi (> ${RETENTION_DAYS} kun)"
+# Rotation: newest KEEP_LAST files, or (default) delete older than RETENTION_DAYS days.
+if [ -n "$KEEP_LAST" ]; then
+  # shellcheck disable=SC2012 # file names are ours (timestamps, no newlines)
+  { ls -1t "$BACKUP_DIR"/*.dump.gz 2>/dev/null || true; } | tail -n +"$((KEEP_LAST + 1))" | while IFS= read -r old; do rm -f -- "$old"; done
+  log "rotatsiya: oxirgi ${KEEP_LAST} ta saqlandi, eskilari o'chirildi"
+else
+  DELETED="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.dump.gz' -mtime +"$RETENTION_DAYS" -print -delete | wc -l | tr -d ' ')"
+  log "rotatsiya: ${DELETED} ta eski backup o'chirildi (> ${RETENTION_DAYS} kun)"
+fi
+
+if [ -n "${HEARTBEAT_URL:-}" ]; then
+  curl -fsS -m 10 "$HEARTBEAT_URL" >/dev/null || log "ogohlantirish: heartbeat yuborilmadi"
+fi

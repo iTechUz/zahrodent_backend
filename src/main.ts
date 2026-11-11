@@ -19,6 +19,9 @@ import {
   parsePort,
   enforceProductionJwtSecret,
   warnWeakJwtSecret,
+  warnIfProxyNotTrusted,
+  getSwaggerCredentials,
+  swaggerBasicAuth,
   enforceProductionAdminPassword,
 } from './bootstrap/env-config';
 
@@ -50,6 +53,7 @@ async function bootstrap() {
     app.set('trust proxy', 1);
     logger.log('TRUST_PROXY: yoqildi (nginx / load balancer ortida)');
   }
+  warnIfProxyNotTrusted(prod);
 
   app.useGlobalPipes(
     new ValidationPipe({
@@ -70,6 +74,20 @@ async function bootstrap() {
 
   const swaggerOn = isSwaggerEnabled(prod);
   if (swaggerOn) {
+    // Production'da Swagger faqat basic-auth (SWAGGER_USER/SWAGGER_PASSWORD) bilan yoqiladi.
+    const swaggerCreds = prod ? getSwaggerCredentials() : null;
+    if (swaggerCreds) {
+      const guard = swaggerBasicAuth(swaggerCreds);
+      app.use(
+        [
+          `/${SWAGGER_PATH}`,
+          `/${SWAGGER_PATH}-json`,
+          `/${SWAGGER_PATH}-yaml`,
+          '/docs',
+        ],
+        guard,
+      );
+    }
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Zahro Dental API')
       .setDescription(
@@ -108,7 +126,7 @@ async function bootstrap() {
     });
   } else {
     logger.log(
-      `Swagger UI o'chirilgan (NODE_ENV=production). Yoqish: SWAGGER_ENABLED=true — keyin /${SWAGGER_PATH}`,
+      `Swagger UI o'chirilgan. Production'da yoqish: SWAGGER_ENABLED=true + SWAGGER_USER + SWAGGER_PASSWORD (basic-auth) — keyin /${SWAGGER_PATH}`,
     );
   }
 

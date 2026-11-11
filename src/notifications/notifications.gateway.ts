@@ -8,6 +8,7 @@ import {
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import { socketCorsOrigin } from '../bootstrap/env-config';
 import { AuthService, AuthUserView } from '../auth/auth.service';
 
 /** Roles that receive `newLead` (same roles that can read /leads). */
@@ -31,9 +32,8 @@ export function extractSocketToken(client: Socket): string | null {
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.CORS_ORIGINS
-      ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim())
-      : true,
+    // Lazy: CORS_ORIGINS o'qilishi har handshake'da (import vaqtida emas); prod'da bo'sh = yopiq.
+    origin: socketCorsOrigin,
     credentials: true,
   },
 })

@@ -22,6 +22,8 @@ rules:
   - { pattern: "HOST", type: variable }
   - { pattern: "NODE_ENV", type: variable }
   - { pattern: "TZ", type: variable }
+  - { pattern: "PG_*", type: variable }
+  - { pattern: "PRE_MIGRATE_*", type: variable }
   - { pattern: "CORS_ORIGINS", type: variable }
   - { pattern: "PUBLIC_BASE_URL", type: variable }
   - { pattern: "TRUST_PROXY", type: variable }
