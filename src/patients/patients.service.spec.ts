@@ -188,6 +188,22 @@ describe('PatientsService', () => {
       expect(where()).toEqual({ AND: [ND, { assignedDoctorId: 'd9' }] });
     });
 
+    it('relatedDoctorId — biriktirilgan, qabulga yozilgan yoki tashrif qilgan bemorlar', async () => {
+      await service.findAll({ relatedDoctorId: 'd9' }, admin);
+      expect(where()).toEqual({
+        AND: [
+          ND,
+          {
+            OR: [
+              { assignedDoctorId: 'd9' },
+              { bookings: { some: { doctorId: 'd9' } } },
+              { visits: { some: { doctorId: 'd9' } } },
+            ],
+          },
+        ],
+      });
+    });
+
     it('doctor — faqat o‘z bemorlari (biriktirilgan, booking yoki visit)', async () => {
       await service.findAll({}, doctor);
       expect(where()).toEqual({ AND: [ND, doctorScope] });
