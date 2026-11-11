@@ -37,10 +37,27 @@ export const TOKEN_REFRESH_MESSAGE = 'Token yangilanishi kerak — qayta kiring'
 export const SESSION_EXPIRED_MESSAGE = 'Sessiya muddati tugagan, qayta kiring';
 export const LOGIN_LOCKED_MESSAGE =
   "Juda ko'p noto'g'ri urinish — 15 daqiqadan keyin qayta urinib ko'ring";
-/** Per-phone lockout: this many failures in a row … */
+/** Per phone+IP lockout: this many failures in a row from ONE IP … */
 export const LOGIN_MAX_FAILURES = 10;
-/** … lock the account's login for this long. */
+/** … lock that phone+IP pair for this long (other IPs are unaffected). */
 export const LOGIN_LOCK_MS = 15 * 60 * 1000;
+/**
+ * Looser per-phone ceiling (all IPs together): protects against a distributed
+ * guesser. When hit, only IPs that never logged in successfully for this phone
+ * are blocked — a "known-good" IP (successful login within the TTL) still passes.
+ */
+export const LOGIN_PHONE_MAX_FAILURES = 50;
+/** How long a successful login keeps its IP "known good" for that phone. */
+export const KNOWN_IP_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const KNOWN_IPS_PER_PHONE = 5;
+const LOGIN_MAP_CLEANUP_AT = 10_000;
+const UNKNOWN_IP = 'unknown';
+
+/** +998901234567 → +99890***4567 (raw phones never go to logs). */
+export function maskPhone(phone: string): string {
+  if (phone.length < 10) return '***';
+  return `${phone.slice(0, 6)}***${phone.slice(-4)}`;
+}
 export const WRONG_CURRENT_PASSWORD_MESSAGE = "Joriy parol noto'g'ri";
 
 /** Client metadata stored with a refresh token (audit only). */
@@ -93,15 +110,24 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
   /**
-   * Failed logins per phone (known or not — no account probing). In-memory:
-   * per API instance, reset on restart; the per-IP throttler stays the
-   * first line of defence. Trade-off: someone can lock a victim out for 15
-   * minutes by guessing wrong passwords on purpose.
+   * Failed logins per phone+IP (known or not — no account probing). In-memory:
+   * per API instance, reset on restart; the per-IP throttler stays the first
+   * line of defence. Keyed by IP too, so a stranger guessing wrong passwords
+   * from his own IP locks only himself out, not the real user.
    */
   private readonly loginFailures = new Map<
     string,
     { count: number; lockedUntil: number }
   >();
+
+  /** Looser per-phone counter (all IPs); see LOGIN_PHONE_MAX_FAILURES. */
+  private readonly phoneFailures = new Map<
+    string,
+    { count: number; lockedUntil: number }
+  >();
+
+  /** phone → (ip → expiresAt) of successful logins ("known-good paths"). */
+  private readonly knownIps = new Map<string, Map<string, number>>();
 
   constructor(
     private readonly usersRepository: UsersRepository,
@@ -110,7 +136,8 @@ export class AuthService {
   ) {}
 
   async login(dto: LoginDto, meta: SessionMeta = {}): Promise<AuthSession> {
-    this.assertLoginNotLocked(dto.phone);
+    const ip = meta.ip?.slice(0, IP_MAX) || UNKNOWN_IP;
+    this.assertLoginNotLocked(dto.phone, ip);
     const user = await this.usersRepository.findByPhone(dto.phone);
     // Same message for unknown phone and wrong password (no account probing).
     // bcrypt still runs for unknown phones so timing doesn't leak either.
@@ -119,10 +146,12 @@ export class AuthService {
       user?.passwordHash ?? DUMMY_BCRYPT_HASH,
     );
     if (!user || !ok) {
-      this.recordLoginFailure(dto.phone);
+      this.recordLoginFailure(dto.phone, ip);
       throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
     }
-    this.loginFailures.delete(dto.phone);
+    this.loginFailures.delete(`${dto.phone}|${ip}`);
+    this.phoneFailures.delete(dto.phone);
+    this.rememberKnownIp(dto.phone, ip);
     // If doctor role, fetch the associated Doctor record id
     let doctorId: string | undefined;
     if (user.role === 'doctor') {
@@ -133,36 +162,79 @@ export class AuthService {
     return this.issueSession(view, randomUUID(), meta);
   }
 
-  private assertLoginNotLocked(phone: string) {
-    const f = this.loginFailures.get(phone);
-    if (!f || f.lockedUntil === 0) return;
-    if (f.lockedUntil > Date.now()) {
-      throw new HttpException(
-        LOGIN_LOCKED_MESSAGE,
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
+  private assertLoginNotLocked(phone: string, ip: string) {
+    const now = Date.now();
+    const pair = this.loginFailures.get(`${phone}|${ip}`);
+    if (pair && pair.lockedUntil > now) this.throwLocked();
+    if (pair && pair.lockedUntil !== 0) {
+      // Lock expired → fresh start.
+      this.loginFailures.delete(`${phone}|${ip}`);
     }
-    // Lock expired → fresh start.
-    this.loginFailures.delete(phone);
+    const byPhone = this.phoneFailures.get(phone);
+    if (byPhone && byPhone.lockedUntil !== 0) {
+      if (byPhone.lockedUntil > now) {
+        // Phone-wide ceiling: only a known-good IP may still try.
+        if (!this.isKnownIp(phone, ip, now)) this.throwLocked();
+      } else {
+        this.phoneFailures.delete(phone);
+      }
+    }
   }
 
-  private recordLoginFailure(phone: string) {
+  private throwLocked(): never {
+    throw new HttpException(LOGIN_LOCKED_MESSAGE, HttpStatus.TOO_MANY_REQUESTS);
+  }
+
+  private recordLoginFailure(phone: string, ip: string) {
     const now = Date.now();
-    // Opportunistic cleanup keeps the map from growing without bound.
-    if (this.loginFailures.size > 10_000) {
-      for (const [k, v] of this.loginFailures) {
-        if (v.lockedUntil !== 0 && v.lockedUntil <= now) {
-          this.loginFailures.delete(k);
+    // Opportunistic cleanup keeps the maps from growing without bound.
+    for (const map of [this.loginFailures, this.phoneFailures]) {
+      if (map.size > LOGIN_MAP_CLEANUP_AT) {
+        for (const [k, v] of map) {
+          if (v.lockedUntil !== 0 && v.lockedUntil <= now) map.delete(k);
         }
       }
     }
-    const f = this.loginFailures.get(phone) ?? { count: 0, lockedUntil: 0 };
+    const key = `${phone}|${ip}`;
+    const f = this.loginFailures.get(key) ?? { count: 0, lockedUntil: 0 };
     f.count += 1;
     if (f.count >= LOGIN_MAX_FAILURES) {
       f.lockedUntil = now + LOGIN_LOCK_MS;
-      this.logger.warn(`Login bloklandi (15 daqiqa): ${phone}`);
+      this.logger.warn(
+        `Login bloklandi (15 daqiqa): ${maskPhone(phone)} ip=${ip}`,
+      );
     }
-    this.loginFailures.set(phone, f);
+    this.loginFailures.set(key, f);
+
+    const p = this.phoneFailures.get(phone) ?? { count: 0, lockedUntil: 0 };
+    p.count += 1;
+    if (p.count >= LOGIN_PHONE_MAX_FAILURES && p.lockedUntil === 0) {
+      p.lockedUntil = now + LOGIN_LOCK_MS;
+      this.logger.warn(
+        `Login umumiy limiti (barcha IP): ${maskPhone(phone)} — noma'lum IP'lar 15 daqiqaga bloklandi`,
+      );
+    }
+    this.phoneFailures.set(phone, p);
+  }
+
+  private isKnownIp(phone: string, ip: string, now: number): boolean {
+    const exp = this.knownIps.get(phone)?.get(ip);
+    return exp !== undefined && exp > now;
+  }
+
+  private rememberKnownIp(phone: string, ip: string) {
+    if (ip === UNKNOWN_IP) return;
+    const now = Date.now();
+    if (this.knownIps.size > LOGIN_MAP_CLEANUP_AT) this.knownIps.clear();
+    const ips = this.knownIps.get(phone) ?? new Map<string, number>();
+    ips.delete(ip); // re-insert → newest last
+    ips.set(ip, now + KNOWN_IP_TTL_MS);
+    for (const [k, exp] of ips) if (exp <= now) ips.delete(k);
+    while (ips.size > KNOWN_IPS_PER_PHONE) {
+      const oldest = ips.keys().next().value as string;
+      ips.delete(oldest);
+    }
+    this.knownIps.set(phone, ips);
   }
 
   /**
