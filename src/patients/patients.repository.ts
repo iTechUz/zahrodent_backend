@@ -182,6 +182,7 @@ export class PatientsRepository {
     content: string;
     patientId: string;
     authorId: string;
+    authorName: string;
   }) {
     return this.prisma.patientComment.create({
       data,

@@ -302,16 +302,37 @@ export class PatientsService {
     user: AuthUserView,
   ) {
     await this.ensureExists(data.patientId, user);
-    return this.patientsRepository.createComment({
+    const c = await this.patientsRepository.createComment({
       content: data.content,
       patientId: data.patientId,
       authorId: user.id,
+      // Muallif keyin o'chirilsa ham ism qoladi.
+      authorName: user.name,
     });
+    return this.toCommentResponse(c);
   }
 
   async findComments(patientId: string, user: AuthUserView) {
     await this.ensureExists(patientId, user);
-    return this.patientsRepository.findCommentsByPatientId(patientId);
+    const rows =
+      await this.patientsRepository.findCommentsByPatientId(patientId);
+    return rows.map((c) => this.toCommentResponse(c));
+  }
+
+  /** Muallif o'chirilgan bo'lsa `author` snapshot ismdan yig'iladi. */
+  toCommentResponse<
+    T extends {
+      authorName: string | null;
+      author: { name: string; avatar: string | null } | null;
+    },
+  >(c: T) {
+    return {
+      ...c,
+      author: c.author ?? {
+        name: c.authorName ?? "Noma'lum xodim",
+        avatar: null,
+      },
+    };
   }
 
   toResponse(p: PatientWithRelations) {

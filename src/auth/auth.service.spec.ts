@@ -6,6 +6,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import {
+  ACCOUNT_DEACTIVATED_MESSAGE,
   AuthService,
   LOGIN_LOCK_MS,
   LOGIN_LOCKED_MESSAGE,
@@ -29,6 +30,7 @@ function mockUser(partial: Partial<User>): User {
     role: 'admin',
     specialty: null,
     avatar: null,
+    isActive: true,
     createdAt: now,
     updatedAt: now,
     ...partial,
@@ -97,6 +99,19 @@ describe('AuthService', () => {
     await expect(
       service.login({ phone: '+998901234567', password: 'wrong' }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('login — faolsizlantirilgan xodim (parol to‘g‘ri) → 401, sessiya ochilmaydi', async () => {
+    usersRepository.findByPhone.mockResolvedValue(
+      mockUser({
+        passwordHash: await bcrypt.hash('secret', 4),
+        isActive: false,
+      }),
+    );
+    await expect(
+      service.login({ phone: '+998901234567', password: 'secret' }),
+    ).rejects.toThrow(ACCOUNT_DEACTIVATED_MESSAGE);
+    expect(refreshTokens.create).not.toHaveBeenCalled();
   });
 
   it('login — muvaffaqiyat', async () => {
@@ -239,6 +254,7 @@ describe('AuthService', () => {
       role: 'doctor',
       specialty: null,
       avatar: null,
+      isActive: true,
       doctor: { id: 'd9' },
     };
 
@@ -268,6 +284,14 @@ describe('AuthService', () => {
 
     it('user o‘chirilgan (token bekor) — null', async () => {
       usersRepository.findAuthById.mockResolvedValue(null);
+      await expect(service.resolveTokenUser(payload)).resolves.toBeNull();
+    });
+
+    it('faolsizlantirilgan user — null (mavjud token ishlamaydi)', async () => {
+      usersRepository.findAuthById.mockResolvedValue({
+        ...dbUser,
+        isActive: false,
+      } as any);
       await expect(service.resolveTokenUser(payload)).resolves.toBeNull();
     });
 
@@ -451,8 +475,22 @@ describe('AuthService', () => {
       role: 'doctor',
       specialty: null,
       avatar: null,
+      isActive: true,
       doctor: { id: 'd9' },
     };
+
+    it('faolsizlantirilgan user refresh qila olmaydi, family bekor qilinadi', async () => {
+      refreshTokens.findByHash.mockResolvedValue(row());
+      usersRepository.findAuthById.mockResolvedValue({
+        ...dbUser,
+        isActive: false,
+      } as any);
+      await expect(service.refresh('tok')).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      expect(refreshTokens.revokeFamily).toHaveBeenCalled();
+      expect(refreshTokens.rotate).not.toHaveBeenCalled();
+    });
 
     it('rotation — eski bekor, yangi shu family da, javob login bilan bir xil', async () => {
       refreshTokens.findByHash.mockResolvedValue(row());

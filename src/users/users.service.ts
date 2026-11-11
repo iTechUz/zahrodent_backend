@@ -16,8 +16,10 @@ export const PHONE_TAKEN_MESSAGE =
   'Ushbu telefon raqami bilan foydalanuvchi allaqachon mavjud';
 export const USER_NOT_FOUND = 'Foydalanuvchi topilmadi';
 export const CANNOT_DELETE_SELF = "O'zingizning hisobingizni o'chira olmaysiz";
+export const CANNOT_DEACTIVATE_SELF =
+  "O'zingizning hisobingizni faolsizlantira olmaysiz";
 export const LAST_ADMIN_MESSAGE =
-  "Tizimdagi yagona adminni o'chirib yoki rolini o'zgartirib bo'lmaydi";
+  "Tizimdagi yagona faol adminni o'chirib, faolsizlantirib yoki rolini o'zgartirib bo'lmaydi";
 
 export const DOCTOR_VIA_DOCTORS_MESSAGE =
   "Shifokor foydalanuvchisini bu yerda yaratib bo'lmaydi — /doctors orqali shifokor qo'shing (login ham o'sha yerda beriladi)";
@@ -29,6 +31,7 @@ const PUBLIC_SELECT = {
   role: true,
   specialty: true,
   avatar: true,
+  isActive: true,
   createdAt: true,
 } as const;
 
@@ -99,7 +102,10 @@ export class UsersService {
     });
   }
 
-  async update(id: string, dto: UpdateUserDto) {
+  async update(id: string, dto: UpdateUserDto, currentUserId?: string) {
+    if (dto.isActive === false && currentUserId && id === currentUserId) {
+      throw new ConflictException(CANNOT_DEACTIVATE_SELF);
+    }
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException(USER_NOT_FOUND);
 
@@ -108,17 +114,41 @@ export class UsersService {
     }
 
     const data = await this.buildUpdateData(id, dto);
-    const select = { id: true, name: true, phone: true, role: true } as const;
-    const demotesAdmin =
-      user.role === 'admin' && !!dto.role && dto.role !== 'admin';
-    const updated = demotesAdmin
-      ? await this.prisma.$transaction(async (tx) => {
-          await this.assertNotLastAdmin(tx, id);
-          return tx.user.update({ where: { id }, data, select });
-        })
-      : await this.prisma.user.update({ where: { id }, data, select });
-    // New password or role → existing sessions must log in again.
-    if (dto.password || (dto.role && dto.role !== user.role)) {
+    const select = {
+      id: true,
+      name: true,
+      phone: true,
+      role: true,
+      isActive: true,
+    } as const;
+    const losesAdmin =
+      user.role === 'admin' &&
+      ((!!dto.role && dto.role !== 'admin') || dto.isActive === false);
+    const syncDoctor =
+      user.role === 'doctor' &&
+      dto.isActive !== undefined &&
+      dto.isActive !== user.isActive;
+    const updated =
+      losesAdmin || syncDoctor
+        ? await this.prisma.$transaction(async (tx) => {
+            if (losesAdmin) await this.assertNotLastAdmin(tx, id);
+            const res = await tx.user.update({ where: { id }, data, select });
+            // Doctor kartasi login bilan birga yoqiladi/o'chiriladi.
+            if (syncDoctor) {
+              await tx.doctor.updateMany({
+                where: { userId: id },
+                data: { isActive: dto.isActive },
+              });
+            }
+            return res;
+          })
+        : await this.prisma.user.update({ where: { id }, data, select });
+    // New password, role or deactivation → existing sessions must end.
+    if (
+      dto.password ||
+      (dto.role && dto.role !== user.role) ||
+      dto.isActive === false
+    ) {
       await this.revokeSessions(id);
     }
     return updated;
@@ -149,7 +179,7 @@ export class UsersService {
   }
 
   /**
-   * Locks every admin row (FOR UPDATE) for the rest of the transaction, so two
+   * Locks every ACTIVE admin row (FOR UPDATE) for the rest of the transaction, so two
    * concurrent demotions/deletions of different admins serialise and the
    * second one sees the first's result instead of both passing the check.
    */
@@ -158,7 +188,7 @@ export class UsersService {
     targetId: string,
   ) {
     const admins = await tx.$queryRaw<{ id: string }[]>`
-      SELECT id FROM users WHERE role = 'admin' FOR UPDATE
+      SELECT id FROM users WHERE role = 'admin' AND is_active = true FOR UPDATE
     `;
     if (admins.length <= 1 && admins.some((a) => a.id === targetId)) {
       throw new ConflictException(LAST_ADMIN_MESSAGE);

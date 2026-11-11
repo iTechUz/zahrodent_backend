@@ -33,6 +33,8 @@ export type AuthUserView = {
 
 export const INVALID_CREDENTIALS_MESSAGE =
   "Telefon raqami yoki parol noto'g'ri";
+export const ACCOUNT_DEACTIVATED_MESSAGE =
+  "Hisobingiz faolsizlantirilgan — administratorga murojaat qiling";
 export const TOKEN_REFRESH_MESSAGE = 'Token yangilanishi kerak — qayta kiring';
 export const SESSION_EXPIRED_MESSAGE = 'Sessiya muddati tugagan, qayta kiring';
 export const LOGIN_LOCKED_MESSAGE =
@@ -123,6 +125,10 @@ export class AuthService {
       throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
     }
     this.loginFailures.delete(dto.phone);
+    // Parol to'g'ri bo'lgandan keyingina aytamiz (akkaunt mavjudligi sizib chiqmasin).
+    if (!user.isActive) {
+      throw new UnauthorizedException(ACCOUNT_DEACTIVATED_MESSAGE);
+    }
     // If doctor role, fetch the associated Doctor record id
     let doctorId: string | undefined;
     if (user.role === 'doctor') {
@@ -189,7 +195,7 @@ export class AuthService {
     }
 
     const user = await this.usersRepository.findAuthById(row.userId);
-    if (!user || !APP_ROLES.includes(user.role)) {
+    if (!user || !user.isActive || !APP_ROLES.includes(user.role)) {
       await this.refreshTokens.revokeFamily(row.familyId, now);
       throw new UnauthorizedException(SESSION_EXPIRED_MESSAGE);
     }
@@ -297,13 +303,13 @@ export class AuthService {
 
   /**
    * Token payload → current user from the DB. `null` when the payload is
-   * malformed/stale or the user no longer exists (deleted = revoked).
+   * malformed/stale, the user no longer exists or is deactivated.
    * Role and doctorId always come from the DB, not from the token.
    */
   async resolveTokenUser(payload: unknown): Promise<AuthUserView | null> {
     if (!isJwtAccessPayload(payload)) return null;
     const user = await this.usersRepository.findAuthById(payload.sub);
-    if (!user || !APP_ROLES.includes(user.role)) return null;
+    if (!user || !user.isActive || !APP_ROLES.includes(user.role)) return null;
     return this.toUserView(
       user,
       user.role === 'doctor' ? user.doctor?.id : undefined,

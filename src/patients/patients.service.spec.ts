@@ -291,6 +291,42 @@ describe('PatientsService', () => {
     });
   });
 
+  describe('comments — muallif o‘chirilganda', () => {
+    it('addComment — authorName snapshot yoziladi', async () => {
+      repo.findById.mockResolvedValue(row() as any);
+      repo.createComment.mockResolvedValue({
+        id: 'c1',
+        authorName: 'Admin',
+        author: { name: 'Admin', avatar: null },
+      } as any);
+      await service.addComment({ content: 'x', patientId: 'p1' }, admin);
+      expect(repo.createComment).toHaveBeenCalledWith({
+        content: 'x',
+        patientId: 'p1',
+        authorId: 'u1',
+        authorName: 'Admin',
+      });
+    });
+
+    it('findComments — author null bo‘lsa snapshot ism ko‘rsatiladi', async () => {
+      repo.findById.mockResolvedValue(row() as any);
+      repo.findCommentsByPatientId.mockResolvedValue([
+        { id: 'c1', authorId: null, authorName: 'Eski xodim', author: null },
+        { id: 'c2', authorId: null, authorName: null, author: null },
+        {
+          id: 'c3',
+          authorId: 'u1',
+          authorName: 'Eski',
+          author: { name: 'Yangi', avatar: 'a.png' },
+        },
+      ] as any);
+      const out = await service.findComments('p1', admin);
+      expect(out[0].author).toEqual({ name: 'Eski xodim', avatar: null });
+      expect(out[1].author.name).toBe("Noma'lum xodim");
+      expect(out[2].author).toEqual({ name: 'Yangi', avatar: 'a.png' });
+    });
+  });
+
   describe('findOne', () => {
     it('o‘chirilgan bemor — 404; admin includeDeleted bilan ko‘radi', async () => {
       const deletedAt = new Date('2026-07-01T10:00:00.000Z');
@@ -626,14 +662,19 @@ describe('PatientsService', () => {
   describe('comments', () => {
     it('addComment — authorId bilan saqlaydi', async () => {
       repo.findById.mockResolvedValue(row() as any);
-      repo.createComment.mockResolvedValue({ id: 'c1' } as any);
+      repo.createComment.mockResolvedValue({
+        id: 'c1',
+        authorName: 'Admin',
+        author: { name: 'Admin', avatar: null },
+      } as any);
       await expect(
         service.addComment({ content: 'Salom', patientId: 'p1' }, admin),
-      ).resolves.toEqual({ id: 'c1' });
+      ).resolves.toMatchObject({ id: 'c1' });
       expect(repo.createComment).toHaveBeenCalledWith({
         content: 'Salom',
         patientId: 'p1',
         authorId: 'u1',
+        authorName: 'Admin',
       });
     });
 
@@ -674,11 +715,16 @@ describe('PatientsService', () => {
       it('doctor — o‘z bemoriga izoh yoza oladi (authorId = user.id)', async () => {
         repo.findById.mockResolvedValue(row() as any);
         repo.count.mockResolvedValue(1);
+        repo.createComment.mockResolvedValue({
+          author: null,
+          authorName: 'Dr',
+        } as any);
         await service.addComment({ content: 'ok', patientId: 'p1' }, doctor);
         expect(repo.createComment).toHaveBeenCalledWith({
           content: 'ok',
           patientId: 'p1',
           authorId: 'u2',
+          authorName: 'Dr',
         });
       });
     });

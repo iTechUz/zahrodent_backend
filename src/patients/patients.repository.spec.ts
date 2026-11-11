@@ -206,7 +206,12 @@ describe('PatientsRepository', () => {
 
   it('comments — author include, yangi birinchi', async () => {
     const authorInclude = { author: { select: { name: true, avatar: true } } };
-    const data = { content: 'c', patientId: 'p1', authorId: 'u1' };
+    const data = {
+      content: 'c',
+      patientId: 'p1',
+      authorId: 'u1',
+      authorName: 'Ali',
+    };
     await repo.createComment(data);
     expect(prisma.patientComment.create).toHaveBeenCalledWith({
       data,

@@ -49,8 +49,8 @@ describe('UsersController', () => {
   it('update — id va dto uzatiladi', async () => {
     const dto = { firstName: 'Ali' } as any;
     service.update.mockResolvedValue({ id: 'u1' });
-    await controller.update('u1', dto);
-    expect(service.update).toHaveBeenCalledWith('u1', dto);
+    await controller.update('u1', dto, { id: 'admin1' } as any);
+    expect(service.update).toHaveBeenCalledWith('u1', dto, 'admin1');
   });
 
   it('remove — id va joriy foydalanuvchi id si uzatiladi', async () => {
