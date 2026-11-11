@@ -16,6 +16,9 @@ export const LEAD_STATUSES = [
   'cancelled',
 ] as const;
 
+/** Languages of the public form (staff replies in the visitor's language). */
+export const LEAD_LANGS = ['uz', 'ru', 'en'] as const;
+
 export const LEAD_PHONE_REGEX = /^\+?[\d\s()-]{7,20}$/;
 
 export class CreateLeadDto {
@@ -27,7 +30,7 @@ export class CreateLeadDto {
   @ApiProperty({ example: '+998901234567' })
   @IsString()
   @IsNotEmpty()
-  @Matches(LEAD_PHONE_REGEX, { message: 'Invalid phone' })
+  @Matches(LEAD_PHONE_REGEX, { message: "Telefon raqami noto'g'ri formatda" })
   phone: string;
 
   @ApiProperty({ example: 'Implantatsiya', required: false })
@@ -62,6 +65,11 @@ export class CreateLeadDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiProperty({ enum: LEAD_LANGS, required: false })
+  @IsOptional()
+  @IsIn(LEAD_LANGS, { message: "Til noto'g'ri (uz, ru yoki en)" })
+  lang?: string;
 
   @ApiProperty({ enum: LEAD_STATUSES, required: false })
   @IsOptional()

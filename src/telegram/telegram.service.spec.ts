@@ -9,10 +9,11 @@ type Handler = (ctx: any) => unknown;
 const handlers: {
   start?: Handler;
   chatid?: Handler;
+  commands: Record<string, Handler>;
   on: Record<string, Handler>;
   action?: { re: RegExp; fn: Handler };
   catch?: (err: unknown) => void;
-} = { on: {} };
+} = { on: {}, commands: {} };
 const launch = jest.fn();
 const stop = jest.fn();
 const ctorArgs: string[] = [];
@@ -23,8 +24,9 @@ jest.mock('telegraf', () => {
     constructor(token: string) {
       ctorArgs.push(token);
     }
-    command(_name: string, fn: Handler) {
-      handlers.chatid = fn;
+    command(name: string, fn: Handler) {
+      handlers.commands[name] = fn;
+      if (name === 'chatid') handlers.chatid = fn;
     }
     start(fn: Handler) {
       handlers.start = fn;
@@ -90,6 +92,7 @@ describe('TelegramService', () => {
   beforeEach(() => {
     handlers.start = undefined;
     handlers.chatid = undefined;
+    handlers.commands = {};
     handlers.on = {};
     handlers.action = undefined;
     ctorArgs.length = 0;
@@ -182,8 +185,13 @@ describe('TelegramService', () => {
     const shareContact = async () =>
       handlers.on.contact(
         ctx({
+          chat: { id: 9001 },
           message: {
-            contact: { phone_number: '+998901112233', first_name: 'Vali' },
+            contact: {
+              phone_number: '+998901112233',
+              first_name: 'Vali',
+              user_id: 42,
+            },
           },
         }),
       );
@@ -197,10 +205,18 @@ describe('TelegramService', () => {
       expect(handlers.action?.re.test('service_braces')).toBe(true);
     });
 
-    it('/chatid — chat ID ni qaytaradi', () => {
+    it('/chatid — guruhda chat ID ni qaytaradi', () => {
+      for (const type of ['group', 'supergroup']) {
+        const reply = jest.fn();
+        void handlers.chatid?.({ chat: { id: -1001234, type }, reply });
+        expect(reply).toHaveBeenCalledWith('Chat ID: -1001234');
+      }
+    });
+
+    it('/chatid — shaxsiy chatda jim (begona odamga chat id oshkor bo‘lmaydi)', () => {
       const reply = jest.fn();
-      void handlers.chatid?.({ chat: { id: -1001234 }, reply });
-      expect(reply).toHaveBeenCalledWith('Chat ID: -1001234');
+      void handlers.chatid?.({ chat: { id: 5, type: 'private' }, reply });
+      expect(reply).not.toHaveBeenCalled();
     });
 
     it('ikkinchi onModuleInit — qayta launch qilinmaydi (dublikat poller yo‘q)', () => {
@@ -235,6 +251,22 @@ describe('TelegramService', () => {
         }
       }
       expect(leads.create).toHaveBeenCalledTimes(3);
+    });
+
+    it('rate limit — faqat YARATILGAN leadlar sanaladi (xato urinish hisobga kirmaydi)', async () => {
+      for (let i = 0; i < 5; i++) {
+        await shareContact();
+        leads.create.mockRejectedValueOnce(new Error('db'));
+        await handlers.on.text(ctx({ message: { text: `x${i}` } }));
+      }
+      expect(leads.create).toHaveBeenCalledTimes(5); // never rate limited
+      await shareContact();
+      const c = ctx({ message: { text: 'ok' } });
+      await handlers.on.text(c);
+      expect(c.reply).toHaveBeenCalledWith(
+        'Sizning xabaringiz va murojaatingiz qabul qilindi!',
+        { remove: true },
+      );
     });
 
     it('launch xatosi log qilinadi (crash yo‘q)', async () => {
@@ -293,11 +325,27 @@ describe('TelegramService', () => {
       expect(patients.setTelegramChatId).toHaveBeenCalledWith(['p1'], '9001');
     });
 
-    it('boshqa odamning kontakti yoki user_id yo‘q — bog‘lanmaydi', async () => {
-      await handlers.on.contact(ownContact('+998901112233', 7));
-      await shareContact();
+    it('boshqa odamning kontakti yoki user_id yo‘q — bog‘lanmaydi, lead ochilmaydi, o‘z kontaktini so‘raydi', async () => {
+      const foreign = ownContact('+998901112233', 7);
+      await handlers.on.contact(foreign);
+      const noId = ctx({
+        message: {
+          contact: { phone_number: '+998901112233', first_name: 'Vali' },
+        },
+      });
+      await handlers.on.contact(noId);
       expect(patients.findActiveIdsByMobile).not.toHaveBeenCalled();
       expect(patients.setTelegramChatId).not.toHaveBeenCalled();
+      for (const c of [foreign, noId]) {
+        expect(c.reply).toHaveBeenCalledWith(
+          expect.stringContaining("o'zingizning telefon raqamingizni"),
+          expect.anything(),
+        );
+      }
+      // no state → pressing a service button files nothing
+      await handlers.action!.fn(ctx({ match: ['service_other', 'other'] }));
+      await handlers.on.text(ctx({ message: { text: 'salom' } }));
+      expect(leads.create).not.toHaveBeenCalled();
     });
 
     it('O‘zbek raqami bo‘lmasa — bog‘lanmaydi, lead oqimi davom etadi', async () => {
@@ -326,11 +374,7 @@ describe('TelegramService', () => {
     });
 
     it('contact — xizmat tanlash tugmalari', async () => {
-      const c = ctx({
-        message: {
-          contact: { phone_number: '+998901112233', first_name: 'Vali' },
-        },
-      });
+      const c = ownContact('+998901112233');
       await handlers.on.contact(c);
       expect(c.reply).toHaveBeenCalledWith(
         "Rahmat! Endi qaysi xizmat bo'yicha murojaat qilmoqchisiz?",
@@ -354,11 +398,20 @@ describe('TelegramService', () => {
         phone: '+998901112233',
         service: name,
         source: 'telegram_bot',
+        telegramChatId: '9001',
       });
       expect(c.reply).toHaveBeenCalledWith(
         expect.stringContaining('muvaffaqiyatli qabul qilindi'),
         { remove: true },
       );
+    });
+
+    it('lead faqat o‘z kontakti bo‘yicha chatga bog‘lanadi (chatId lead bilan saqlanadi)', async () => {
+      await shareContact();
+      await handlers.action!.fn(ctx({ match: ['service_braces', 'braces'] }));
+      expect(leads.create.mock.calls[0][0]).toMatchObject({
+        telegramChatId: '9001',
+      });
     });
 
     it('action — state tozalanadi, ikkinchi bosish /start so‘raydi', async () => {
@@ -368,13 +421,18 @@ describe('TelegramService', () => {
       await handlers.action!.fn(again);
       expect(leads.create).toHaveBeenCalledTimes(1);
       expect(again.reply).toHaveBeenCalledWith(
-        "Iltimos, avval /start buyrug'ini bosing.",
+        expect.stringContaining('qayta /start bosing'),
       );
     });
 
     it('action — kontakt ismi bo‘lmasa telegram first_name', async () => {
       await handlers.on.contact(
-        ctx({ message: { contact: { phone_number: '+998901112233' } } }),
+        ctx({
+          chat: { id: 9001 },
+          message: {
+            contact: { phone_number: '+998901112233', user_id: 42 },
+          },
+        }),
       );
       await handlers.action!.fn(ctx({ match: ['service_other', 'other'] }));
       expect(leads.create).toHaveBeenCalledWith(
@@ -408,6 +466,7 @@ describe('TelegramService', () => {
         phone: '+998901112233',
         message: 'Tishim og‘riyapti',
         source: 'telegram_bot',
+        telegramChatId: '9001',
       });
       expect(c.reply).toHaveBeenCalledWith(
         'Sizning xabaringiz va murojaatingiz qabul qilindi!',
@@ -452,8 +511,103 @@ describe('TelegramService', () => {
       await handlers.action!.fn(other);
       expect(leads.create).not.toHaveBeenCalled();
       expect(other.reply).toHaveBeenCalledWith(
-        "Iltimos, avval /start buyrug'ini bosing.",
+        expect.stringContaining('qayta /start bosing'),
       );
+    });
+
+    describe('TTL, /start payload, /help, /cancel', () => {
+      afterEach(() => jest.useRealTimers());
+
+      it('30 daqiqadan keyin state yo‘qoladi — tugma "qayta /start" deydi', async () => {
+        jest.useFakeTimers({ now: new Date('2026-11-12T10:00:00Z') });
+        await shareContact();
+        jest.setSystemTime(new Date('2026-11-12T10:31:00Z'));
+        const c = ctx({ match: ['service_braces', 'braces'] });
+        await handlers.action!.fn(c);
+        expect(leads.create).not.toHaveBeenCalled();
+        expect(c.reply).toHaveBeenCalledWith(
+          expect.stringContaining('qayta /start bosing'),
+        );
+      });
+
+      it('29 daqiqada hali amal qiladi', async () => {
+        jest.useFakeTimers({ now: new Date('2026-11-12T10:00:00Z') });
+        await shareContact();
+        jest.setSystemTime(new Date('2026-11-12T10:29:00Z'));
+        await handlers.action!.fn(ctx({ match: ['service_braces', 'braces'] }));
+        expect(leads.create).toHaveBeenCalledTimes(1);
+      });
+
+      it('tashlab ketilgan suhbatlar xotiradan tozalanadi (leak yo‘q)', async () => {
+        jest.useFakeTimers({ now: new Date('2026-11-12T10:00:00Z') });
+        const states = (service as any).userStates as Map<number, unknown>;
+        await shareContact(); // user 42
+        jest.setSystemTime(new Date('2026-11-12T11:00:00Z'));
+        await handlers.on.contact(
+          ctx({
+            from: { id: 7, first_name: 'B' },
+            chat: { id: 7 },
+            message: {
+              contact: { phone_number: '+998901112244', user_id: 7 },
+            },
+          }),
+        );
+        expect([...states.keys()]).toEqual([7]);
+      });
+
+      it('/start?start=lead payload ham xuddi shu oqim (kontakt so‘raydi)', () => {
+        const c = ctx({ payload: 'lead', message: { text: '/start lead' } });
+        handlers.start!(c);
+        expect(c.reply).toHaveBeenCalledWith(
+          expect.stringContaining('telefon raqamingizni yuboring'),
+          expect.anything(),
+        );
+      });
+
+      it('/cancel — jarayonni bekor qiladi, keyingi tugma lead yaratmaydi', async () => {
+        await shareContact();
+        const c = ctx();
+        await handlers.commands.cancel(c);
+        expect(c.reply).toHaveBeenCalledWith(
+          expect.stringContaining('Bekor qilindi'),
+          { remove: true },
+        );
+        await handlers.action!.fn(ctx({ match: ['service_braces', 'braces'] }));
+        expect(leads.create).not.toHaveBeenCalled();
+      });
+
+      it('/help — klinika ma‘lumoti (sozlamalardan) va murojaat yo‘riqnomasi', async () => {
+        const prisma = {
+          clinicSettings: {
+            findUnique: jest.fn().mockResolvedValue({
+              clinicName: 'Zahro Dental',
+              phone: '+998901234567',
+              address: 'Toshkent',
+              workingHours: '09:00-18:00',
+            }),
+          },
+        };
+        const fresh = new TelegramService(
+          leads as unknown as LeadsService,
+          patients as unknown as PatientsRepository,
+          registry,
+          prisma as any,
+        );
+        fresh.onModuleInit();
+        const c = ctx();
+        await handlers.commands.help(c);
+        const text = c.reply.mock.calls[0][0] as string;
+        expect(text).toContain('+998901234567');
+        expect(text).toContain('Toshkent');
+        expect(text).toContain('/start');
+        expect(text).toContain('/cancel');
+      });
+
+      it('/help — sozlamalar o‘qilmasa ham javob beradi', async () => {
+        const c = ctx();
+        await handlers.commands.help(c);
+        expect(c.reply.mock.calls[0][0]).toContain('/start');
+      });
     });
   });
 });

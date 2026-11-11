@@ -20,6 +20,10 @@ import { statusChatId, telegramBotToken } from './dev-defaults';
 /** Max leads one Telegram user can create per window (spam guard). */
 export const TELEGRAM_LEAD_LIMIT = 3;
 export const TELEGRAM_LEAD_WINDOW_MS = 60 * 60 * 1000;
+/** An abandoned conversation (shared contact, never picked a service) is forgotten after this. */
+export const TELEGRAM_STATE_TTL_MS = 30 * 60 * 1000;
+
+type FlowState = { phone: string; name: string; chatId: number; at: number };
 
 /** TELEGRAM_BOT_ENABLED=false|0|no|off disables polling (default: on). */
 export function isTelegramBotEnabled(): boolean {
@@ -32,7 +36,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private bot: Telegraf | null = null;
   private launched = false;
   private readonly logger = new Logger(TelegramService.name);
-  private userStates = new Map<number, string>(); // simple state management
+  private userStates = new Map<number, FlowState>(); // simple state management
   private leadTimestamps = new Map<number, number[]>();
 
   constructor(
@@ -210,18 +214,53 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  /** Sliding-window limit per Telegram user; records the attempt if allowed. */
-  private allowLead(telegramUserId: number, now = Date.now()): boolean {
+  /** Remembers the shared (own) contact; also drops abandoned conversations. */
+  private setState(
+    userId: number,
+    st: Omit<FlowState, 'at'>,
+    now = Date.now(),
+  ) {
+    for (const [id, v] of this.userStates) {
+      if (now - v.at >= TELEGRAM_STATE_TTL_MS) this.userStates.delete(id);
+    }
+    this.userStates.set(userId, { ...st, at: now });
+  }
+
+  /** The live (not expired) state, without removing it. */
+  private getState(userId: number, now = Date.now()): FlowState | undefined {
+    const v = this.userStates.get(userId);
+    if (!v) return undefined;
+    if (now - v.at >= TELEGRAM_STATE_TTL_MS) {
+      this.userStates.delete(userId);
+      return undefined;
+    }
+    return v;
+  }
+
+  /** Takes the state out (a double tap can't create two leads); put it back on failure. */
+  private takeState(userId: number): FlowState | undefined {
+    const v = this.getState(userId);
+    this.userStates.delete(userId);
+    return v;
+  }
+
+  /** Sliding-window limit per Telegram user: has the user room for one more CREATED lead? */
+  private leadAllowed(telegramUserId: number, now = Date.now()): boolean {
     const recent = (this.leadTimestamps.get(telegramUserId) ?? []).filter(
       (t) => now - t < TELEGRAM_LEAD_WINDOW_MS,
     );
-    if (recent.length >= TELEGRAM_LEAD_LIMIT) {
-      this.leadTimestamps.set(telegramUserId, recent);
-      return false;
-    }
+    if (recent.length) this.leadTimestamps.set(telegramUserId, recent);
+    else this.leadTimestamps.delete(telegramUserId);
+    return recent.length < TELEGRAM_LEAD_LIMIT;
+  }
+
+  /** Counts a lead that was really created (failed attempts don't count). */
+  private recordLead(telegramUserId: number, now = Date.now()) {
+    const recent = (this.leadTimestamps.get(telegramUserId) ?? []).filter(
+      (t) => now - t < TELEGRAM_LEAD_WINDOW_MS,
+    );
     recent.push(now);
     this.leadTimestamps.set(telegramUserId, recent);
-    return true;
   }
 
   private async replyRateLimited(ctx: { reply: (t: string) => unknown }) {
@@ -230,38 +269,147 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  private registerCommands(bot: Telegraf) {
-    // Staff helper: shows the chat id to put into TELEGRAM_STATUS_CHAT_ID.
-    bot.command('chatid', (ctx) => ctx.reply(`Chat ID: ${ctx.chat.id}`));
+  /** Stops the button spinner; a stale/odd callback must never throw. */
+  private async ack(
+    ctx: { answerCbQuery?: (t?: string) => unknown },
+    t?: string,
+  ) {
+    try {
+      await ctx.answerCbQuery?.(t);
+    } catch {
+      /* ignore */
+    }
+  }
 
-    bot.start((ctx) => {
-      ctx.reply(
+  private async clinicInfo(): Promise<string> {
+    let row: {
+      clinicName: string;
+      phone: string;
+      address: string;
+      workingHours: string;
+    } | null = null;
+    try {
+      row =
+        (await this.prisma?.clinicSettings?.findUnique({
+          where: { id: 1 },
+        })) ?? null;
+    } catch {
+      row = null;
+    }
+    return [
+      `🦷 ${oneLine(row?.clinicName || 'Zahro Dental', 100)}`,
+      row?.address && `📍 ${oneLine(row.address, 200)}`,
+      row?.workingHours && `🕒 ${oneLine(row.workingHours, 100)}`,
+      row?.phone && `📞 ${oneLine(row.phone, 30)}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private askContact(
+    ctx: { reply: (t: string, extra?: unknown) => unknown },
+    text: string,
+  ) {
+    return ctx.reply(
+      text,
+      Markup.keyboard([
+        Markup.button.contactRequest('📱 Telefon raqamni yuborish'),
+      ])
+        .resize()
+        .oneTime(),
+    );
+  }
+
+  /** Files the lead for the user's remembered OWN contact; shared by the service buttons and free text. */
+  private async submitLead(
+    ctx: {
+      from: { id: number; first_name: string };
+      reply: (t: string, extra?: unknown) => unknown;
+    },
+    details: { service?: string; message?: string },
+    okText: string,
+    errText: string,
+  ) {
+    const state = this.takeState(ctx.from.id);
+    if (!state) {
+      await ctx.reply(
+        'Murojaatingiz muddati tugagan yoki boshlanmagan. Iltimos, qayta /start bosing.',
+      );
+      return;
+    }
+    if (!this.leadAllowed(ctx.from.id)) {
+      this.userStates.set(ctx.from.id, state);
+      await this.replyRateLimited(ctx);
+      return;
+    }
+    try {
+      await this.leadsService.create({
+        name: state.name || ctx.from.first_name,
+        phone: state.phone,
+        ...details,
+        source: 'telegram_bot',
+        // Own contact only (checked when it was shared) → status updates reach this chat.
+        telegramChatId: String(state.chatId),
+      });
+      this.recordLead(ctx.from.id);
+      await ctx.reply(okText, Markup.removeKeyboard());
+    } catch (error) {
+      this.logger.error('Error creating lead:', error);
+      // Keep the conversation so the user can simply try again.
+      this.userStates.set(ctx.from.id, state);
+      await ctx.reply(errText);
+    }
+  }
+
+  private registerCommands(bot: Telegraf) {
+    // Staff helper: shows the chat id to put into TELEGRAM_STATUS_CHAT_ID (groups only).
+    bot.command('chatid', (ctx) => {
+      if (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup') return;
+      return ctx.reply(`Chat ID: ${ctx.chat.id}`);
+    });
+
+    bot.command('help', async (ctx) => {
+      await ctx.reply(
+        `${await this.clinicInfo()}\n\nMurojaat qoldirish: /start bosing, telefon raqamingizni yuboring va xizmatni tanlang (yoki xabar yozing). Administrator siz bilan bog'lanadi.\nBekor qilish: /cancel`,
+      );
+    });
+
+    bot.command('cancel', async (ctx) => {
+      this.userStates.delete(ctx.from.id);
+      await ctx.reply(
+        'Bekor qilindi. Qayta boshlash uchun /start bosing.',
+        Markup.removeKeyboard(),
+      );
+    });
+
+    // Plain /start and a deep link (?start=lead) run the same flow.
+    bot.start(async (ctx) => {
+      this.userStates.delete(ctx.from.id);
+      await this.askContact(
+        ctx,
         `Zahro Dental klinikasiga xush kelibsiz, ${ctx.from.first_name}!\n\nIltimos, telefon raqamingizni yuboring:`,
-        Markup.keyboard([
-          Markup.button.contactRequest('📱 Telefon raqamni yuborish'),
-        ])
-          .resize()
-          .oneTime(),
       );
     });
 
     bot.on('contact', async (ctx) => {
       const contact = ctx.message.contact;
 
-      // Link the chat to the patient card(s) for reminders — only when the
-      // user shared their OWN contact (not someone else's).
-      if (contact.user_id !== undefined && contact.user_id === ctx.from.id) {
-        await this.linkPatientChat(contact.phone_number, ctx.chat.id);
+      // Only the user's OWN contact is trusted: a request must never be filed
+      // for (or linked to the chat of) somebody else's number.
+      if (contact.user_id === undefined || contact.user_id !== ctx.from.id) {
+        await this.askContact(
+          ctx,
+          "Iltimos, o'zingizning telefon raqamingizni yuboring (pastdagi tugma orqali). Boshqa odamning kontakti qabul qilinmaydi.",
+        );
+        return;
       }
+      await this.linkPatientChat(contact.phone_number, ctx.chat.id);
 
-      // Save contact info to session/state
-      this.userStates.set(
-        ctx.from.id,
-        JSON.stringify({
-          phone: contact.phone_number,
-          name: contact.first_name,
-        }),
-      );
+      this.setState(ctx.from.id, {
+        phone: contact.phone_number,
+        name: contact.first_name,
+        chatId: ctx.chat.id,
+      });
 
       await ctx.reply(
         "Rahmat! Endi qaysi xizmat bo'yicha murojaat qilmoqchisiz?",
@@ -327,7 +475,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
     bot.action(/^service_(.+)/, async (ctx) => {
       const serviceType = ctx.match[1];
-      const state = this.userStates.get(ctx.from.id);
+      await this.ack(ctx);
 
       let serviceName = 'Boshqa';
       if (serviceType === 'consultation') serviceName = 'Konsultatsiya';
@@ -335,35 +483,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       if (serviceType === 'whitening') serviceName = 'Tish oqartirish';
       if (serviceType === 'braces') serviceName = 'Breketlar';
 
-      if (state) {
-        const userData = JSON.parse(state);
-        if (!this.allowLead(ctx.from.id)) {
-          await this.replyRateLimited(ctx);
-          return;
-        }
-        // Create lead in database
-        try {
-          await this.leadsService.create({
-            name: userData.name || ctx.from.first_name,
-            phone: userData.phone,
-            service: serviceName,
-            source: 'telegram_bot',
-          });
-
-          await ctx.reply(
-            "Sizning murojaatingiz muvaffaqiyatli qabul qilindi. Tez orada ma'muriyatimiz siz bilan bog'lanadi!",
-            Markup.removeKeyboard(),
-          );
-          this.userStates.delete(ctx.from.id);
-        } catch (error) {
-          this.logger.error('Error creating lead:', error);
-          await ctx.reply(
-            "Kechirasiz, xatolik yuz berdi. Iltimos keyinroq qayta urinib ko'ring.",
-          );
-        }
-      } else {
-        await ctx.reply("Iltimos, avval /start buyrug'ini bosing.");
-      }
+      await this.submitLead(
+        ctx,
+        { service: serviceName },
+        "Sizning murojaatingiz muvaffaqiyatli qabul qilindi. Tez orada ma'muriyatimiz siz bilan bog'lanadi!",
+        "Kechirasiz, xatolik yuz berdi. Iltimos keyinroq qayta urinib ko'ring.",
+      );
     });
 
     // Handle normal messages as 'other' requests if they already provided contact
@@ -371,33 +496,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       const text = ctx.message.text;
       if (text.startsWith('/')) return; // ignore commands
 
-      const state = this.userStates.get(ctx.from.id);
-      if (state) {
-        const userData = JSON.parse(state);
-        if (!this.allowLead(ctx.from.id)) {
-          await this.replyRateLimited(ctx);
-          return;
-        }
-        try {
-          await this.leadsService.create({
-            name: userData.name || ctx.from.first_name,
-            phone: userData.phone,
-            message: text.slice(0, 2000),
-            source: 'telegram_bot',
-          });
-
-          await ctx.reply(
-            'Sizning xabaringiz va murojaatingiz qabul qilindi!',
-            Markup.removeKeyboard(),
-          );
-          this.userStates.delete(ctx.from.id);
-        } catch (error) {
-          this.logger.error('Error creating lead:', error);
-          await ctx.reply('Xatolik yuz berdi.');
-        }
+      if (this.getState(ctx.from.id)) {
+        await this.submitLead(
+          ctx,
+          { message: text.slice(0, 2000) },
+          'Sizning xabaringiz va murojaatingiz qabul qilindi!',
+          'Xatolik yuz berdi.',
+        );
       } else {
         await ctx.reply(
-          "Murojaat qoldirish uchun /start buyrug'ini bosing va telefon raqamingizni yuboring.",
+          "Murojaat qoldirish uchun /start buyrug'ini bosing va telefon raqamingizni yuboring (so'rovingiz muddati tugagan bo'lsa, qayta /start bosing).",
         );
       }
     });

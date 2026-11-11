@@ -96,7 +96,7 @@ describe('DTO validation', () => {
     it('bo‘sh parol', () => {
       expect(
         errorsOf(LoginDto, { phone: '+998901234567', password: '' }).password,
-      ).toEqual(['password is required']);
+      ).toEqual(['Parolni kiriting']);
     });
   });
 

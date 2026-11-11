@@ -8,6 +8,6 @@ export class LoginDto {
   phone: string;
 
   @IsString()
-  @MinLength(1, { message: 'password is required' })
+  @MinLength(1, { message: 'Parolni kiriting' })
   password: string;
 }

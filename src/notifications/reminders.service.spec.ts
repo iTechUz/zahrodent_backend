@@ -62,6 +62,8 @@ describe('RemindersService', () => {
     expect(a.kind).toBe('reminder_24h');
     expect(a.chatId).toBe('555');
     expect(a.text).toContain('02.11.2026');
+    // late retries must not deliver it after the visit has started
+    expect(a.expiresAt.toISOString()).toBe('2026-11-02T05:00:00.000Z');
     expect(
       a.replyMarkup.inline_keyboard.flat().map((b: any) => b.callback_data),
     ).toEqual(['rem_ok_b1', 'rem_re_b1']);

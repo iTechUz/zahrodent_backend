@@ -1,5 +1,12 @@
 import { NotFoundException } from '@nestjs/common';
-import { LeadsService } from './leads.service';
+import {
+  LeadsService,
+  adminLeadLink,
+  formatLeadMessage,
+  formatLeadUpdateMessage,
+  mergeLeadDetails,
+  neutralizeLinks,
+} from './leads.service';
 import { LeadsRepository } from './leads.repository';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 import { ClientNotifierService } from '../notifications/client-notifier.service';
@@ -15,6 +22,7 @@ describe('LeadsService', () => {
       | 'findById'
       | 'create'
       | 'findOpenByPhoneSince'
+      | 'createOrMerge'
       | 'update'
       | 'delete'
       | 'updateAndEnsurePatient'
@@ -32,6 +40,7 @@ describe('LeadsService', () => {
       findById: jest.fn(),
       create: jest.fn(),
       findOpenByPhoneSince: jest.fn().mockResolvedValue(null),
+      createOrMerge: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
       updateAndEnsurePatient: jest.fn(),
@@ -59,16 +68,94 @@ describe('LeadsService', () => {
       );
     });
 
-    it('website re-submit with an open lead → returns it, no new row, no ping', async () => {
-      repo.findOpenByPhoneSince.mockResolvedValue(lead);
+    it('website/bot lead goes through the atomic createOrMerge (new → pinged)', async () => {
+      repo.createOrMerge.mockResolvedValue({ lead, created: true });
+      const dto = { name: 'Ali', phone: '+998901112233', source: 'website' };
+      await expect(service.create(dto)).resolves.toBe(lead);
+      const [phone, since, data] = repo.createOrMerge.mock.calls[0];
+      expect(phone).toBe('+998901112233');
+      expect(since.getTime()).toBeLessThanOrEqual(Date.now() - 23 * 3600_000);
+      expect(data).toEqual(expect.objectContaining(dto));
+      expect(repo.create).not.toHaveBeenCalled();
+      expect(gateway.sendNewLead).toHaveBeenCalledWith(lead);
+    });
+
+    it('bot lead keeps telegramChatId on the stored row', async () => {
+      repo.createOrMerge.mockResolvedValue({ lead, created: true });
+      await service.create({
+        name: 'Ali',
+        phone: '+998901112233',
+        source: 'telegram_bot',
+        telegramChatId: '42',
+      });
+      expect(repo.createOrMerge.mock.calls[0][2]).toEqual(
+        expect.objectContaining({ telegramChatId: '42' }),
+      );
+    });
+
+    it('repeat submit → no new ping to gateway/customer; merge callback appends details', async () => {
+      const prev = {
+        ...lead,
+        service: 'Implant',
+        message: 'Eski matn',
+        telegramChatId: null,
+      };
+      repo.createOrMerge.mockImplementation(async (_p, _s, _d, merge) => {
+        const patch = merge(prev);
+        return { lead: { ...prev, ...(patch as object) }, created: false };
+      });
       const r = await service.create({
         name: 'Ali',
         phone: '+998901112233',
         source: 'website',
+        service: 'Breket',
+        message: 'Yangi savol',
       });
-      expect(r).toBe(lead);
-      expect(repo.create).not.toHaveBeenCalled();
+      expect(r.message).toMatch(
+        /^Eski matn\n\[.*\] Xizmat: Breket; Xabar: Yangi savol$/,
+      );
       expect(gateway.sendNewLead).not.toHaveBeenCalled();
+      expect(notifier.notifyLeadReceived).not.toHaveBeenCalled();
+    });
+
+    describe('repeat submit staff note', () => {
+      const saved = process.env.TELEGRAM_LEADS_CHAT_ID;
+      const flush = () => new Promise((r) => setImmediate(r));
+      afterEach(() => {
+        if (saved === undefined) delete process.env.TELEGRAM_LEADS_CHAT_ID;
+        else process.env.TELEGRAM_LEADS_CHAT_ID = saved;
+      });
+      const run = async (extra: object) => {
+        const prev = { ...lead, service: 'Implant', message: null };
+        repo.createOrMerge.mockImplementation(async (_p, _s, _d, merge) => {
+          const patch = merge(prev);
+          return { lead: { ...prev, ...(patch as object) }, created: false };
+        });
+        await service.create({
+          name: 'Ali',
+          phone: '+998901112233',
+          source: 'website',
+          ...extra,
+        });
+        await flush();
+      };
+
+      it('new details → one short "qo\'shimcha ma\'lumot" note via the outbox', async () => {
+        process.env.TELEGRAM_LEADS_CHAT_ID = '-100123';
+        await run({ message: 'Yana bir savol' });
+        expect(tg.enqueue).toHaveBeenCalledTimes(1);
+        const a = tg.enqueue.mock.calls[0][0];
+        expect(a.kind).toBe('lead_group_update');
+        expect(a.chatId).toBe('-100123');
+        expect(a.text).toContain("Qo'shimcha ma'lumot");
+        expect(a.text).toContain('Yana bir savol');
+      });
+
+      it('nothing new (same service) → no note', async () => {
+        process.env.TELEGRAM_LEADS_CHAT_ID = '-100123';
+        await run({ service: 'Implant' });
+        expect(tg.enqueue).not.toHaveBeenCalled();
+      });
     });
 
     it('CRM-entered leads are never deduped', async () => {
@@ -296,6 +383,19 @@ describe('LeadsService', () => {
       expect(repo.update).not.toHaveBeenCalled();
     });
 
+    it('update — converted: lead telegramChatId bemorga ko‘chirish uchun uzatiladi', async () => {
+      repo.findById.mockResolvedValue({
+        ...lead,
+        status: 'proposal',
+        telegramChatId: '777',
+      });
+      repo.updateAndEnsurePatient.mockResolvedValue({ ...lead });
+      await service.update('l1', { status: 'converted' });
+      expect(repo.updateAndEnsurePatient.mock.calls[0][2]).toEqual(
+        expect.objectContaining({ telegramChatId: '777' }),
+      );
+    });
+
     it('update — status o‘zgarganda mijozga xabar ketadi, o‘zgarmasa ketmaydi', async () => {
       repo.findById.mockResolvedValue(lead);
       repo.update.mockResolvedValue({ ...lead, status: 'contacted' });
@@ -368,6 +468,132 @@ describe('LeadsService', () => {
       repo.findById.mockResolvedValue(lead);
       await expect(service.remove('l1')).resolves.toEqual({ success: true });
       expect(repo.delete).toHaveBeenCalledWith('l1');
+    });
+  });
+});
+
+describe('lead group text helpers', () => {
+  const base = {
+    id: 'l1',
+    name: 'Ali',
+    phone: '+998901112233',
+    service: null,
+    doctor: null,
+    preferredAt: null,
+    message: null,
+    source: 'website',
+    lang: null,
+    telegramChatId: null,
+    createdAt: new Date('2026-10-15T09:30:00Z'),
+  } as any;
+  const saved = process.env.ADMIN_PUBLIC_URL;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.ADMIN_PUBLIC_URL;
+    else process.env.ADMIN_PUBLIC_URL = saved;
+  });
+
+  it('neutralizeLinks — havolalar bosib bo‘lmaydigan shaklga o‘tadi', () => {
+    const out = neutralizeLinks(
+      'Qarang http://evil.com/x va www.site.uz hamda t.me/abc',
+    );
+    expect(out).not.toMatch(/https?:\/\//);
+    expect(out).not.toMatch(/\w\.(com|uz|me)/);
+    expect(out).toContain('evil[.]com');
+  });
+
+  it('neutralizeLinks — oddiy matn, vaqt va telefon buzilmaydi', () => {
+    expect(neutralizeLinks('Soat 10.30, +998 90 111 22 33. Rahmat')).toBe(
+      'Soat 10.30, +998 90 111 22 33. Rahmat',
+    );
+  });
+
+  it('formatLeadMessage — message ichidagi havola zararsizlanadi', () => {
+    const t = formatLeadMessage({
+      ...base,
+      message: 'Bu yerga: https://phish.example.com/login',
+    });
+    expect(t).not.toContain('://');
+    expect(t).not.toContain('example.com');
+  });
+
+  it('lang — "🌐 RU" qatori; noma’lum til ko‘rsatilmaydi', () => {
+    expect(formatLeadMessage({ ...base, lang: 'ru' })).toContain('🌐 RU');
+    expect(formatLeadMessage({ ...base, lang: 'xx' })).not.toContain('🌐');
+    expect(formatLeadMessage(base)).not.toContain('🌐');
+  });
+
+  it('ADMIN_PUBLIC_URL — faqat o‘rnatilgan bo‘lsa havola qo‘shiladi', () => {
+    delete process.env.ADMIN_PUBLIC_URL;
+    expect(formatLeadMessage(base)).not.toContain('🔗');
+    process.env.ADMIN_PUBLIC_URL = 'https://admin.zahro.uz/';
+    expect(adminLeadLink(base.phone)).toBe(
+      'https://admin.zahro.uz/leads?search=%2B998901112233',
+    );
+    expect(formatLeadMessage(base)).toContain(
+      '🔗 https://admin.zahro.uz/leads',
+    );
+    expect(formatLeadUpdateMessage(base, 'x')).toContain('🔗');
+    process.env.ADMIN_PUBLIC_URL = 'javascript:alert(1)';
+    expect(adminLeadLink(base.phone)).toBeNull();
+  });
+
+  describe('mergeLeadDetails', () => {
+    const now = new Date('2026-10-15T09:30:00Z');
+    it('keeps old text, appends a dated line, fills empty fields', () => {
+      const r = mergeLeadDetails(
+        { ...base, message: 'Eski' },
+        { service: 'Breket', preferredAt: '2026-10-20 10:00', lang: 'ru' },
+        now,
+      );
+      expect(r.patch?.message).toBe(
+        'Eski\n[15.10.2026 14:30] Xizmat: Breket; Vaqt: 2026-10-20 10:00',
+      );
+      expect(r.patch).toMatchObject({ service: 'Breket', lang: 'ru' });
+      expect(r.added).toBe('Xizmat: Breket; Vaqt: 2026-10-20 10:00');
+    });
+
+    it('does not overwrite an existing service, only notes it', () => {
+      const r = mergeLeadDetails(
+        { ...base, service: 'Implant' },
+        { service: 'Breket' },
+        now,
+      );
+      expect(r.patch).not.toHaveProperty('service');
+      expect(r.added).toContain('Breket');
+    });
+
+    it('nothing new → null patch and null note', () => {
+      const r = mergeLeadDetails(
+        { ...base, service: 'Implant', message: 'Salom' },
+        { service: 'Implant', message: 'Salom' },
+        now,
+      );
+      expect(r).toEqual({ patch: null, added: null });
+    });
+
+    it('links an own-contact chat when the lead had none', () => {
+      const r = mergeLeadDetails(base, { telegramChatId: '55' }, now);
+      expect(r.patch).toEqual({ telegramChatId: '55' });
+      expect(r.added).toBeNull();
+    });
+
+    it('respects the 2000 char limit', () => {
+      const long = 'a'.repeat(1990);
+      const r = mergeLeadDetails(
+        { ...base, message: long },
+        { message: 'b'.repeat(500) },
+        now,
+      );
+      // no room left for a meaningful line → message untouched, staff still told
+      expect(r.patch?.message).toBeUndefined();
+      expect(r.added).toContain('Xabar');
+      const r2 = mergeLeadDetails(
+        { ...base, message: 'a'.repeat(1500) },
+        { message: 'b'.repeat(900) },
+        now,
+      );
+      expect((r2.patch?.message as string).length).toBeLessThanOrEqual(2000);
+      expect(r2.patch?.message as string).toMatch(/…$/);
     });
   });
 });

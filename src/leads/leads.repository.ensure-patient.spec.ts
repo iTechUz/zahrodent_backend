@@ -22,7 +22,8 @@ describe('LeadsRepository.updateAndEnsurePatient', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'l1' }),
       },
-      patient: { findFirst: jest.fn(), create: jest.fn() },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      patient: { updateMany: jest.fn(), create: jest.fn() },
     };
     prisma = {
       $transaction: jest.fn(async (fn: (t: unknown) => unknown) => fn(tx)),
@@ -31,7 +32,7 @@ describe('LeadsRepository.updateAndEnsurePatient', () => {
   });
 
   it('mavjud (o‘chirilmagan) bemor bo‘lsa — yangi yaratilmaydi', async () => {
-    tx.patient.findFirst.mockResolvedValue({ id: 'p1' });
+    tx.$queryRaw.mockResolvedValue([{ id: 'p1' }]);
     const res = await repo.updateAndEnsurePatient('l1', data, baseLead, date);
     expect(res).toEqual({ id: 'l1' });
     expect(tx.lead.updateMany).toHaveBeenCalledWith({
@@ -39,15 +40,12 @@ describe('LeadsRepository.updateAndEnsurePatient', () => {
       data,
     });
     expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
-    expect(tx.patient.findFirst).toHaveBeenCalledWith({
-      where: { phone: { in: [baseLead.phone] }, deletedAt: null },
-      select: { id: true },
-    });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(tx.patient.create).not.toHaveBeenCalled();
   });
 
   it('bemor yo‘q — ism/familiya ajratiladi, izoh va sana bilan yaratiladi', async () => {
-    tx.patient.findFirst.mockResolvedValue(null);
+    tx.$queryRaw.mockResolvedValue([]);
     await repo.updateAndEnsurePatient(
       'l1',
       data,
@@ -69,13 +67,14 @@ describe('LeadsRepository.updateAndEnsurePatient', () => {
         phone: baseLead.phone,
         source: 'website',
         notes: 'Xizmat: Tish\nMurojaat: Og‘riq',
+        telegramChatId: null,
         createdAt: date,
       },
     });
   });
 
   it('bitta so‘zli ism — lastName bo‘sh, izoh bo‘sh qator', async () => {
-    tx.patient.findFirst.mockResolvedValue(null);
+    tx.$queryRaw.mockResolvedValue([]);
     await repo.updateAndEnsurePatient(
       'l1',
       data,
@@ -89,7 +88,7 @@ describe('LeadsRepository.updateAndEnsurePatient', () => {
   });
 
   it('faqat bo‘shliqdan iborat ism — firstName lead.name ga qaytadi', async () => {
-    tx.patient.findFirst.mockResolvedValue(null);
+    tx.$queryRaw.mockResolvedValue([]);
     await repo.updateAndEnsurePatient(
       'l1',
       data,
@@ -108,7 +107,7 @@ describe('LeadsRepository.updateAndEnsurePatient', () => {
     ['phone', 'phone'],
     ['instagram', 'phone'],
   ])('source %s -> patient.source %s', async (src, expected) => {
-    tx.patient.findFirst.mockResolvedValue(null);
+    tx.$queryRaw.mockResolvedValue([]);
     await repo.updateAndEnsurePatient(
       'l1',
       data,
@@ -126,30 +125,57 @@ describe('LeadsRepository.updateAndEnsurePatient', () => {
     });
     const res = await repo.updateAndEnsurePatient('l1', data, baseLead, date);
     expect(res).toEqual({ id: 'l1', status: 'converted' });
-    expect(tx.patient.findFirst).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
     expect(tx.patient.create).not.toHaveBeenCalled();
   });
 
-  it('o‘zbek raqami — bemor kanonik +998 formatida yaratiladi va ikkala format qidiriladi', async () => {
-    tx.patient.findFirst.mockResolvedValue(null);
+  it('o‘zbek raqami — bemor kanonik +998 formatida yaratiladi, raqamlar bo‘yicha qidiriladi', async () => {
+    tx.$queryRaw.mockResolvedValue([]);
     await repo.updateAndEnsurePatient(
       'l1',
       data,
       { ...baseLead, phone: '90 123 45 67' },
       date,
     );
-    expect(tx.patient.findFirst).toHaveBeenCalledWith({
-      where: {
-        phone: { in: ['90 123 45 67', '+998901234567'] },
-        deletedAt: null,
-      },
-      select: { id: true },
-    });
+    // Tagged template: (strings, ...values) → digits with and without country code.
+    const call = tx.$queryRaw.mock.calls[0];
+    expect(call.slice(1)).toEqual(['998901234567', '901234567']);
     expect(tx.patient.create.mock.calls[0][0].data.phone).toBe('+998901234567');
   });
 
+  it('lead telegramChatId — yangi bemorga ko‘chiriladi', async () => {
+    await repo.updateAndEnsurePatient(
+      'l1',
+      data,
+      { ...baseLead, telegramChatId: '777' },
+      date,
+    );
+    expect(tx.patient.create.mock.calls[0][0].data.telegramChatId).toBe('777');
+  });
+
+  it('mavjud bemor — chati bo‘sh kartalarga lead chati yoziladi, band chat buzilmaydi', async () => {
+    tx.$queryRaw.mockResolvedValue([{ id: 'p1' }, { id: 'p2' }]);
+    await repo.updateAndEnsurePatient(
+      'l1',
+      data,
+      { ...baseLead, telegramChatId: '777' },
+      date,
+    );
+    expect(tx.patient.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['p1', 'p2'] }, telegramChatId: null },
+      data: { telegramChatId: '777' },
+    });
+    expect(tx.patient.create).not.toHaveBeenCalled();
+  });
+
+  it('mavjud bemor, lead chati yo‘q — hech narsa yozilmaydi', async () => {
+    tx.$queryRaw.mockResolvedValue([{ id: 'p1' }]);
+    await repo.updateAndEnsurePatient('l1', data, baseLead, date);
+    expect(tx.patient.updateMany).not.toHaveBeenCalled();
+  });
+
   it('bemor yaratish xatosi tranzaksiyadan tashqariga chiqadi', async () => {
-    tx.patient.findFirst.mockResolvedValue(null);
+    tx.$queryRaw.mockResolvedValue([]);
     const err = new Error('unique');
     tx.patient.create.mockRejectedValue(err);
     await expect(

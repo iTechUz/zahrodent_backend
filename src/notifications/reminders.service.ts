@@ -216,6 +216,8 @@ export class RemindersService implements OnModuleInit, OnModuleDestroy {
             : `⏰ ${text}`,
         replyMarkup: reminderKeyboard(b.id),
         patientId: b.patientId,
+        // After the visit starts the reminder is no longer true.
+        expiresAt: bookingStart(b.date, b.time),
       });
       if (row) queued += 1;
       else {

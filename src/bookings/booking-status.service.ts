@@ -92,10 +92,11 @@ export class BookingStatusService {
           admin: oneLine(c.actor.name, 100),
         }),
       );
+      // Staff-typed reason stays in the group message and the log — never sent to the patient.
       const msg = formatClientStatusMessage(c.to, {
         doctor: ctx.doctor,
         when: ctx.when,
-        reason,
+        clinicPhone: c.to === 'cancelled' ? await this.clinicPhone() : null,
       });
       if (msg) {
         await this.toPatient(
@@ -103,6 +104,8 @@ export class BookingStatusService {
           ctx,
           msg,
           c.to === 'completed' ? feedbackKeyboard(c.bookingId) : undefined,
+          // "Tasdiqlandi" after the visit began would be stale if retried late.
+          c.to === 'confirmed' ? ctx.startsAt : undefined,
         );
       }
     } catch (e) {
@@ -276,6 +279,7 @@ export class BookingStatusService {
     ctx: BookingSnapshot,
     text: string,
     replyMarkup?: Prisma.InputJsonValue,
+    expiresAt?: Date,
   ) {
     if (!ctx.chatId) {
       this.logger.log(
@@ -289,7 +293,21 @@ export class BookingStatusService {
       text,
       replyMarkup,
       patientId: ctx.patientId,
+      expiresAt,
     });
+  }
+
+  /** Clinic phone from settings (shown to the patient), or null. Never throws. */
+  private async clinicPhone(): Promise<string | null> {
+    try {
+      const row = await this.prisma.clinicSettings?.findUnique({
+        where: { id: 1 },
+        select: { phone: true },
+      });
+      return row?.phone?.trim() ? oneLine(row.phone, 30) : null;
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -336,13 +354,14 @@ export function formatGroupStatusMessage(v: {
 /** Patient-facing text; null for statuses the patient isn't told about. */
 export function formatClientStatusMessage(
   to: string,
-  v: { doctor: string; when: string; reason: string | null },
+  v: { doctor: string; when: string; clinicPhone?: string | null },
 ): string | null {
   switch (to) {
     case 'confirmed':
       return `✅ Sizning arizangiz tasdiqlandi.\n📅 ${v.when}\n🦷 Shifokor ${v.doctor} sizni kutmoqda.`;
     case 'cancelled':
-      return `Afsuski, qabulingiz bekor qilindi.\nSababi: ${v.reason ?? "ko'rsatilmagan"}\nQayta yozilish uchun klinikaga murojaat qiling.`;
+      // No free-text reason: it is typed by staff for staff (may be rude/private).
+      return `Afsuski, qabulingiz bekor qilindi.\nBatafsil ma'lumot va qayta yozilish uchun klinikaga murojaat qiling${v.clinicPhone ? `: ${v.clinicPhone}` : '.'}`;
     case 'completed':
       return `Klinikamizga tashrif buyurganingiz uchun rahmat! 🦷\nIltimos, xizmatimizni baholang:`;
     default:

@@ -276,6 +276,8 @@ model NotificationLog {
   patientId     String?   @map("patient_id")
   createdAt     DateTime  @default(now()) @map("created_at")
   sentAt        DateTime? @map("sent_at")
+  /// After this instant the message is no longer true → dropped as 'expired' instead of sent.
+  expiresAt     DateTime? @map("expires_at")
 
   @@index([status, nextAttemptAt])
   @@index([createdAt])
@@ -297,6 +299,8 @@ model Lead {
   preferredAt String?  @map("preferred_at")
   /// Set by the bot only when the person shared THEIR OWN contact (status updates go here).
   telegramChatId String? @map("telegram_chat_id")
+  /// Language of the public form visitor: uz | ru | en (staff replies in it).
+  lang        String?
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
