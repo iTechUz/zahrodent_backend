@@ -163,7 +163,7 @@ Namuna fayllar: [.env.example](.env.example) (dev) va [.env.production.example](
 | `CORS_ORIGINS` | **ha** (prod) | dev: hammasi | Ruxsat etilgan origin'lar (vergul bilan); Socket.IO ham | `https://admin.example.uz` |
 | `PUBLIC_BASE_URL` | yo'q | `http://localhost:<PORT>` | Faqat start bannerida | `https://api.example.uz` |
 | `TRUST_PROXY` | tavsiya | o'chiq | `1`/`true` — nginx ortida (haqiqiy IP rate limiting uchun) | `1` |
-| `SWAGGER_ENABLED` | yo'q | dev: on, prod: off | `/swagger` UI | `false` |
+| `SWAGGER_ENABLED` | yo'q | dev: on, prod: off | `/swagger` UI. Prod'da `true` bo'lsa ham `SWAGGER_USER`+`SWAGGER_PASSWORD` (basic-auth) bo'lmasa o'chiq qoladi | `false` |
 | `LOG_FORMAT` | yo'q | prod: `json`, aks holda `text` | Log formati | `json` |
 | `INITIAL_ADMIN_PHONE` | birinchi start | `+998901234567` | Admin yo'q bo'lsa yaratiladigan admin telefoni | `+998901234567` |
 | `INITIAL_ADMIN_PASSWORD` | **ha** (prod) | dev: `admin123` | ≥ 8 belgi, `admin123` taqiqlangan (prod'da start to'xtaydi) | `openssl rand -base64 18` |
