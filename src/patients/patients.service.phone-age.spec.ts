@@ -182,7 +182,7 @@ describe('PatientsService — telefon, tug‘ilgan yil, balans maydonlari', () =
         totalPaid: 500,
         totalRefunded: 100,
         totalOwed: 300,
-        balance: 100,
+        balance: 200,
       });
     });
   });

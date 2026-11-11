@@ -9,6 +9,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsRealDateOnly } from '../../common/validators/is-real-date-only';
 
 export const PAYMENT_METHODS = [
   'cash',
@@ -23,9 +24,11 @@ const STATUSES = PAYMENT_STATUSES;
 const TYPES = PAYMENT_TYPES;
 
 export class CreatePaymentDto {
+  /** Required for INCOME (checked in the service); optional for EXPENSE (clinic expense). */
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  patientId: string;
+  patientId?: string;
 
   @Type(() => Number)
   @IsInt()
@@ -61,6 +64,7 @@ export class CreatePaymentDto {
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'date YYYY-MM-DD formatida bo‘lishi kerak',
   })
+  @IsRealDateOnly()
   date?: string;
 
   @IsOptional()

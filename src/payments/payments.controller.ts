@@ -23,6 +23,8 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { ROLES_FINANCE } from '../common/constants/role-groups';
 import { PaymentsQueryDto } from './dto/payments-query.dto';
+import { GetUser } from '../common/decorators/get-user.decorator';
+import { AuthUserView } from '../auth/auth.service';
 import { DoctorStatsQueryDto } from './dto/doctor-stats-query.dto';
 
 @ApiTags('payments')
@@ -68,21 +70,36 @@ export class PaymentsController {
 
   @Post()
   @ApiOperation({ summary: "Yangi to'lov" })
-  create(@Body() dto: CreatePaymentDto) {
-    return this.paymentsService.create(dto);
+  create(@Body() dto: CreatePaymentDto, @GetUser() user: AuthUserView) {
+    return this.paymentsService.create(dto, user);
+  }
+
+  @Get(':id/audit')
+  @ApiOperation({
+    summary: "To'lov o'zgarishlari tarixi (faqat admin)",
+    description:
+      "create/update/delete yozuvlari (kim, qachon, avval/keyin). O'chirilgan to'lov uchun ham ishlaydi.",
+  })
+  @ApiParam({ name: 'id' })
+  audit(@Param('id') id: string) {
+    return this.paymentsService.getAudit(id);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: "To'lovni yangilash" })
   @ApiParam({ name: 'id' })
-  update(@Param('id') id: string, @Body() dto: UpdatePaymentDto) {
-    return this.paymentsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePaymentDto,
+    @GetUser() user: AuthUserView,
+  ) {
+    return this.paymentsService.update(id, dto, user);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: "To'lovni o'chirish" })
   @ApiParam({ name: 'id' })
-  remove(@Param('id') id: string) {
-    return this.paymentsService.remove(id);
+  remove(@Param('id') id: string, @GetUser() user: AuthUserView) {
+    return this.paymentsService.remove(id, user);
   }
 }

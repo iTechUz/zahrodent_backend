@@ -5,7 +5,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { PaymentsRepository, PaymentWithPatient } from './payments.repository';
+import {
+  PaymentActor,
+  PaymentsRepository,
+  PaymentWithPatient,
+} from './payments.repository';
+import { AuthUserView } from '../auth/auth.service';
 import {
   connectActivePatient,
   toPatientSummary,
@@ -24,6 +29,24 @@ import { PaymentsQueryDto } from './dto/payments-query.dto';
 import { COLLECTED_PAYMENT_STATUSES } from '../patients/patient-balance';
 
 export const PAYMENT_NOT_FOUND = "To'lov topilmadi";
+export const PAYMENT_PATIENT_REQUIRED =
+  "Kirim to'lovi uchun bemorni tanlang (bemorsiz faqat chiqim bo'lishi mumkin)";
+export const PAYMENT_VISIT_NEEDS_PATIENT =
+  "Tashrifga bog'langan to'lovda bemor ko'rsatilishi kerak";
+export const PAYMENT_DATE_FUTURE =
+  "Qabul qilingan to'lov sanasi kelajakda bo'lishi mumkin emas";
+export const PAYMENT_DATE_TOO_OLD =
+  "To'lov sanasi 2020-01-01 dan oldin bo'lmasligi kerak";
+export const PAYMENT_DISCOUNT_TOO_BIG =
+  'Chegirma tashrif narxidan oshmasligi kerak';
+
+/** Earliest plausible payment date (the clinic's records start here). */
+export const PAYMENT_MIN_DATE = '2020-01-01';
+
+const actorOf = (user: AuthUserView): PaymentActor => ({
+  id: user.id,
+  name: user.name,
+});
 
 /** Identical payment re-submitted inside this window = accidental double click. */
 export const PAYMENT_DUPLICATE_WINDOW_MS = 10_000;
@@ -34,7 +57,7 @@ export const PAYMENT_DUPLICATE_MESSAGE =
 export class PaymentsService {
   /**
    * Double-submit guard: key (patient, visit, amount, type) → last accepted
-   * time. In-memory (one API instance; payments have no created_at column),
+   * time. In-memory (one API instance),
    * checked and claimed synchronously so concurrent requests can't both pass.
    */
   private readonly recentSubmissions = new Map<string, number>();
@@ -49,7 +72,7 @@ export class PaymentsService {
       }
     }
     const key = [
-      dto.patientId,
+      dto.patientId ?? '',
       dto.visitId ?? '',
       dto.amount,
       dto.type || 'INCOME',
@@ -120,13 +143,24 @@ export class PaymentsService {
     return this.toResponse(p);
   }
 
-  async create(dto: CreatePaymentDto) {
-    if (dto.visitId) await this.assertVisitBelongs(dto.visitId, dto.patientId);
+  async create(dto: CreatePaymentDto, user: AuthUserView) {
+    const type = dto.type || 'INCOME';
+    if (type === 'INCOME' && !dto.patientId) {
+      throw new BadRequestException(PAYMENT_PATIENT_REQUIRED);
+    }
+    if (dto.visitId && !dto.patientId) {
+      throw new BadRequestException(PAYMENT_VISIT_NEEDS_PATIENT);
+    }
     const dateStr = dto.date ?? todayInTashkent();
+    this.assertDate(dateStr, dto.status);
+    if (dto.visitId && dto.patientId) {
+      const visit = await this.assertVisitBelongs(dto.visitId, dto.patientId);
+      this.assertDiscount(dto.discount, visit.price);
+    }
     const claimed = this.claimSubmission(dto);
     let p: PaymentWithPatient;
     try {
-      p = await this.insertPayment(dto, dateStr);
+      p = await this.insertPayment(dto, dateStr, actorOf(user));
     } catch (e) {
       // Nothing was saved → a retry is legitimate.
       this.recentSubmissions.delete(claimed);
@@ -135,68 +169,134 @@ export class PaymentsService {
     return this.toResponse(p);
   }
 
-  private insertPayment(dto: CreatePaymentDto, dateStr: string) {
-    return this.paymentsRepository.create({
-      patient: connectActivePatient(dto.patientId),
-      amount: dto.amount,
-      method: dto.method,
-      status: dto.status,
-      date: parseDateOnlyToUTC(dateStr),
-      description: dto.description,
-      type: dto.type || 'INCOME',
-      discount: dto.discount,
-      service: dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
-      visit: dto.visitId ? { connect: { id: dto.visitId } } : undefined,
-    });
+  /** Money collected (paid|partial) can't be dated in the future; nothing before 2020. */
+  private assertDate(dateStr: string, status: string) {
+    if (dateStr < PAYMENT_MIN_DATE) {
+      throw new BadRequestException(PAYMENT_DATE_TOO_OLD);
+    }
+    if (
+      (COLLECTED_PAYMENT_STATUSES as readonly string[]).includes(status) &&
+      dateStr > todayInTashkent()
+    ) {
+      throw new BadRequestException(PAYMENT_DATE_FUTURE);
+    }
   }
 
-  async update(id: string, dto: UpdatePaymentDto) {
+  private assertDiscount(discount: number | null | undefined, price: number) {
+    if (discount && discount > price) {
+      throw new BadRequestException(PAYMENT_DISCOUNT_TOO_BIG);
+    }
+  }
+
+  private insertPayment(
+    dto: CreatePaymentDto,
+    dateStr: string,
+    actor: PaymentActor,
+  ) {
+    return this.paymentsRepository.createWithAudit(
+      {
+        patient: dto.patientId
+          ? connectActivePatient(dto.patientId)
+          : undefined,
+        amount: dto.amount,
+        method: dto.method,
+        status: dto.status,
+        date: parseDateOnlyToUTC(dateStr),
+        description: dto.description,
+        type: dto.type || 'INCOME',
+        discount: dto.discount,
+        service: dto.serviceId ? { connect: { id: dto.serviceId } } : undefined,
+        visit: dto.visitId ? { connect: { id: dto.visitId } } : undefined,
+      },
+      actor,
+    );
+  }
+
+  async update(id: string, dto: UpdatePaymentDto, user: AuthUserView) {
     const current = await this.getOrThrow(id);
     const nextVisitId =
       dto.visitId === undefined ? current.visitId : dto.visitId || null;
     const nextPatientId = dto.patientId ?? current.patientId;
+    const nextType = dto.type ?? current.type;
+    if (nextType === 'INCOME' && !nextPatientId) {
+      throw new BadRequestException(PAYMENT_PATIENT_REQUIRED);
+    }
+    if (nextVisitId && !nextPatientId) {
+      throw new BadRequestException(PAYMENT_VISIT_NEEDS_PATIENT);
+    }
+    if (dto.date !== undefined || dto.status !== undefined) {
+      this.assertDate(
+        dto.date ?? toDateOnlyString(current.date),
+        dto.status ?? current.status,
+      );
+    }
     if (
       nextVisitId &&
-      (dto.visitId !== undefined || dto.patientId !== undefined)
+      nextPatientId &&
+      (dto.visitId !== undefined ||
+        dto.patientId !== undefined ||
+        dto.discount !== undefined)
     ) {
-      await this.assertVisitBelongs(nextVisitId, nextPatientId);
+      const visit = await this.assertVisitBelongs(nextVisitId, nextPatientId);
+      this.assertDiscount(dto.discount ?? current.discount, visit.price);
     }
-    const p = await this.paymentsRepository.update(id, {
-      amount: dto.amount,
-      method: dto.method,
-      status: dto.status,
-      description: dto.description,
-      type: dto.type,
-      discount: dto.discount,
-      date: dto.date === undefined ? undefined : parseDateOnlyToUTC(dto.date),
-      patient:
-        dto.patientId === undefined
-          ? undefined
-          : connectActivePatient(dto.patientId),
-      service:
-        dto.serviceId === undefined
-          ? undefined
-          : dto.serviceId
-            ? { connect: { id: dto.serviceId } }
-            : { disconnect: true },
-      visit:
-        dto.visitId === undefined
-          ? undefined
-          : dto.visitId
-            ? { connect: { id: dto.visitId } }
-            : { disconnect: true },
-    });
+    const p = await this.paymentsRepository.updateWithAudit(
+      id,
+      {
+        amount: dto.amount,
+        method: dto.method,
+        status: dto.status,
+        description: dto.description,
+        type: dto.type,
+        discount: dto.discount,
+        date: dto.date === undefined ? undefined : parseDateOnlyToUTC(dto.date),
+        patient:
+          dto.patientId === undefined
+            ? undefined
+            : connectActivePatient(dto.patientId),
+        service:
+          dto.serviceId === undefined
+            ? undefined
+            : dto.serviceId
+              ? { connect: { id: dto.serviceId } }
+              : { disconnect: true },
+        visit:
+          dto.visitId === undefined
+            ? undefined
+            : dto.visitId
+              ? { connect: { id: dto.visitId } }
+              : { disconnect: true },
+      },
+      actorOf(user),
+    );
     return this.toResponse(p);
   }
 
-  async remove(id: string) {
+  /** Hard delete; the full row stays in the audit trail (payment_audits). */
+  async remove(id: string, user: AuthUserView) {
     await this.getOrThrow(id);
-    await this.paymentsRepository.delete(id);
+    await this.paymentsRepository.deleteWithAudit(id, actorOf(user));
     return { id };
   }
 
+  /** Change trail of a payment (also for already deleted ones). */
+  async getAudit(id: string) {
+    const rows = await this.paymentsRepository.listAudit(id);
+    return rows.map((r) => ({
+      id: r.id,
+      paymentId: r.paymentId,
+      action: r.action,
+      actorId: r.actorId,
+      actorName: r.actorName,
+      before: r.before,
+      after: r.after,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
+
   /**
-   * Revenue = INCOME payments with status paid|partial (money received).
+   * Revenue = INCOME payments with status paid|partial (money received),
+   * including payments of soft-deleted patients (money really came in).
    * Expenses (EXPENSE, "Chiqim") are reported separately, never mixed in.
    * pendingAmount = outstanding patient debt (see patient-balance.ts).
    */
@@ -264,7 +364,10 @@ export class PaymentsService {
     return p;
   }
 
-  private async assertVisitBelongs(visitId: string, patientId: string) {
+  private async assertVisitBelongs(
+    visitId: string,
+    patientId: string,
+  ): Promise<{ price: number }> {
     const visit = await this.paymentsRepository.findVisitOwner(visitId);
     if (!visit) throw new NotFoundException('Tashrif topilmadi');
     if (visit.patientId !== patientId) {
@@ -272,12 +375,15 @@ export class PaymentsService {
         "Tashrif boshqa bemorga tegishli — to'lovni shu tashrifga bog'lab bo'lmaydi",
       );
     }
+    return { price: visit.price ?? 0 };
   }
 
   private toResponse(p: PaymentWithPatient) {
     return {
       id: p.id,
       patientId: p.patientId,
+      createdAt: p.createdAt ? p.createdAt.toISOString() : undefined,
+      createdById: p.createdById ?? undefined,
       amount: p.amount,
       method: p.method,
       status: p.status,

@@ -22,7 +22,9 @@ describe('PaymentsRepository', () => {
         delete: jest.fn(),
       },
       visit: { findMany: jest.fn() },
+      paymentAudit: { create: jest.fn(), findMany: jest.fn() },
     };
+    prisma.$transaction = jest.fn((fn: any) => fn(prisma));
     repo = new PaymentsRepository(prisma as PrismaService);
   });
 
@@ -119,19 +121,88 @@ describe('PaymentsRepository', () => {
       where: { id: 'x' },
       include: PS,
     });
-    await repo.create({ amount: 1 } as any);
-    expect(prisma.payment.create).toHaveBeenCalledWith({
-      data: { amount: 1 },
-      include: PS,
+  });
+
+  describe('audit trail (bitta tranzaksiyada)', () => {
+    const actor = { id: 'u1', name: 'Admin' };
+    const row = {
+      id: 'pay1',
+      amount: 5,
+      date: new Date('2026-06-01T00:00:00.000Z'),
+    };
+
+    it('createWithAudit — createdById va create audit', async () => {
+      prisma.payment.create.mockResolvedValue(row);
+      await repo.createWithAudit({ amount: 5 } as any, actor);
+      expect(prisma.payment.create).toHaveBeenCalledWith({
+        data: { amount: 5, createdById: 'u1' },
+        include: PS,
+      });
+      expect(prisma.paymentAudit.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          paymentId: 'pay1',
+          action: 'create',
+          actorId: 'u1',
+          actorName: 'Admin',
+          before: undefined,
+          after: { ...row, date: '2026-06-01T00:00:00.000Z' },
+        }),
+      });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     });
-    await repo.update('x', { amount: 2 });
-    expect(prisma.payment.update).toHaveBeenCalledWith({
-      where: { id: 'x' },
-      data: { amount: 2 },
-      include: PS,
+
+    it('updateWithAudit — avval/keyin snapshot', async () => {
+      prisma.payment.findUnique.mockResolvedValue({ ...row, amount: 1 });
+      prisma.payment.update.mockResolvedValue(row);
+      await repo.updateWithAudit('pay1', { amount: 5 }, actor);
+      expect(prisma.payment.update).toHaveBeenCalledWith({
+        where: { id: 'pay1' },
+        data: { amount: 5 },
+        include: PS,
+      });
+      const data = prisma.paymentAudit.create.mock.calls[0][0].data;
+      expect(data.action).toBe('update');
+      expect(data.before.amount).toBe(1);
+      expect(data.after.amount).toBe(5);
     });
-    await repo.delete('x');
-    expect(prisma.payment.delete).toHaveBeenCalledWith({ where: { id: 'x' } });
+
+    it('deleteWithAudit — to‘liq qator audit ga yoziladi, keyin o‘chiriladi', async () => {
+      prisma.payment.findUnique.mockResolvedValue(row);
+      const order: string[] = [];
+      prisma.paymentAudit.create.mockImplementation(async () => {
+        order.push('audit');
+      });
+      prisma.payment.delete.mockImplementation(async () => {
+        order.push('delete');
+        return row;
+      });
+      await repo.deleteWithAudit('pay1', actor);
+      expect(order).toEqual(['audit', 'delete']);
+      const data = prisma.paymentAudit.create.mock.calls[0][0].data;
+      expect(data).toMatchObject({ action: 'delete', after: undefined });
+      expect(data.before.id).toBe('pay1');
+      expect(prisma.payment.delete).toHaveBeenCalledWith({
+        where: { id: 'pay1' },
+      });
+    });
+
+    it('audit yozilmasa to‘lov ham saqlanmaydi (xato tranzaksiyani buzadi)', async () => {
+      prisma.payment.create.mockResolvedValue(row);
+      prisma.paymentAudit.create.mockRejectedValue(new Error('boom'));
+      await expect(
+        repo.createWithAudit({ amount: 5 } as any, actor),
+      ).rejects.toThrow('boom');
+    });
+
+    it('listAudit — yangisi birinchi', async () => {
+      prisma.paymentAudit.findMany.mockResolvedValue([]);
+      await repo.listAudit('pay1');
+      expect(prisma.paymentAudit.findMany).toHaveBeenCalledWith({
+        where: { paymentId: 'pay1' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: 200,
+      });
+    });
   });
 
   it('getDebtSummary — raw SQL natijasi raqamga aylanadi', async () => {
@@ -154,7 +225,7 @@ describe('PaymentsRepository', () => {
     await repo.findVisitOwner('v1');
     expect(prisma.visit.findUnique).toHaveBeenCalledWith({
       where: { id: 'v1' },
-      select: { id: true, patientId: true },
+      select: { id: true, patientId: true, price: true },
     });
   });
 });

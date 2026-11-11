@@ -3,19 +3,29 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { PAYMENT_DUPLICATE_MESSAGE, PaymentsService } from './payments.service';
+import {
+  PAYMENT_DATE_FUTURE,
+  PAYMENT_DATE_TOO_OLD,
+  PAYMENT_DISCOUNT_TOO_BIG,
+  PAYMENT_DUPLICATE_MESSAGE,
+  PAYMENT_PATIENT_REQUIRED,
+  PAYMENT_VISIT_NEEDS_PATIENT,
+  PaymentsService,
+} from './payments.service';
 import { PaymentsRepository } from './payments.repository';
 
 describe('PaymentsService', () => {
+  const admin = { id: 'u1', name: 'Admin', role: 'admin' } as any;
   let service: PaymentsService;
   let repo: jest.Mocked<
     Pick<
       PaymentsRepository,
       | 'findAll'
       | 'findById'
-      | 'create'
-      | 'update'
-      | 'delete'
+      | 'createWithAudit'
+      | 'updateWithAudit'
+      | 'deleteWithAudit'
+      | 'listAudit'
       | 'sumAmount'
       | 'getDoctorStats'
       | 'getDebtSummary'
@@ -43,15 +53,16 @@ describe('PaymentsService', () => {
     repo = {
       findAll: jest.fn().mockResolvedValue({ data: [], total: 0 }),
       findById: jest.fn(),
-      create: jest.fn().mockResolvedValue(payment()),
-      update: jest.fn().mockResolvedValue(payment()),
-      delete: jest.fn(),
+      createWithAudit: jest.fn().mockResolvedValue(payment()),
+      updateWithAudit: jest.fn().mockResolvedValue(payment()),
+      deleteWithAudit: jest.fn(),
+      listAudit: jest.fn().mockResolvedValue([]),
       sumAmount: jest.fn(),
       getDoctorStats: jest.fn(),
       getDebtSummary: jest.fn().mockResolvedValue({ total: 0, count: 0 }),
       findVisitOwner: jest
         .fn()
-        .mockResolvedValue({ id: 'v1', patientId: 'p1' }),
+        .mockResolvedValue({ id: 'v1', patientId: 'p1', price: 200_000 }),
     };
     service = new PaymentsService(repo as unknown as PaymentsRepository);
   });
@@ -235,31 +246,37 @@ describe('PaymentsService', () => {
     it('default type INCOME va bugungi sana (Asia/Tashkent)', async () => {
       // 2026-06-17 22:00Z = 2026-06-18 03:00 Toshkent
       jest.useFakeTimers({ now: new Date('2026-06-17T22:00:00.000Z') });
-      await service.create(dto);
-      expect(repo.create).toHaveBeenCalledWith({
-        patient: { connect: { id: 'p1', deletedAt: null } },
-        amount: 100_000,
-        method: 'cash',
-        status: 'paid',
-        date: new Date('2026-06-18T00:00:00.000Z'),
-        description: 'Plomba',
-        type: 'INCOME',
-        discount: undefined,
-        service: undefined,
-        visit: undefined,
-      });
+      await service.create(dto, admin);
+      expect(repo.createWithAudit).toHaveBeenCalledWith(
+        {
+          patient: { connect: { id: 'p1', deletedAt: null } },
+          amount: 100_000,
+          method: 'cash',
+          status: 'paid',
+          date: new Date('2026-06-18T00:00:00.000Z'),
+          description: 'Plomba',
+          type: 'INCOME',
+          discount: undefined,
+          service: undefined,
+          visit: undefined,
+        },
+        { id: 'u1', name: 'Admin' },
+      );
     });
 
     it('EXPENSE, sana, service va visit bilan', async () => {
-      await service.create({
-        ...dto,
-        type: 'EXPENSE',
-        date: '2026-06-01',
-        discount: 5,
-        serviceId: 's1',
-        visitId: 'v1',
-      });
-      expect(repo.create).toHaveBeenCalledWith(
+      await service.create(
+        {
+          ...dto,
+          type: 'EXPENSE',
+          date: '2026-06-01',
+          discount: 5,
+          serviceId: 's1',
+          visitId: 'v1',
+        },
+        admin,
+      );
+      expect(repo.createWithAudit).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'EXPENSE',
           date: new Date('2026-06-01T00:00:00.000Z'),
@@ -267,6 +284,7 @@ describe('PaymentsService', () => {
           service: { connect: { id: 's1' } },
           visit: { connect: { id: 'v1' } },
         }),
+        { id: 'u1', name: 'Admin' },
       );
     });
   });
@@ -281,38 +299,46 @@ describe('PaymentsService', () => {
     };
 
     it('create — boshqa bemor tashrifi 400, yozilmaydi', async () => {
-      repo.findVisitOwner.mockResolvedValue({ id: 'v9', patientId: 'p2' });
+      repo.findVisitOwner.mockResolvedValue({
+        id: 'v9',
+        patientId: 'p2',
+        price: 200_000,
+      });
       await expect(
-        service.create({ ...dto, visitId: 'v9' }),
+        service.create({ ...dto, visitId: 'v9' }, admin),
       ).rejects.toBeInstanceOf(BadRequestException);
-      expect(repo.create).not.toHaveBeenCalled();
+      expect(repo.createWithAudit).not.toHaveBeenCalled();
     });
 
     it('create — tashrif topilmasa 404', async () => {
       repo.findVisitOwner.mockResolvedValue(null);
-      await expect(service.create({ ...dto, visitId: 'nope' })).rejects.toThrow(
-        new NotFoundException('Tashrif topilmadi'),
-      );
+      await expect(
+        service.create({ ...dto, visitId: 'nope' }, admin),
+      ).rejects.toThrow(new NotFoundException('Tashrif topilmadi'));
     });
 
     it('create — visitId siz tekshirilmaydi', async () => {
-      await service.create(dto);
+      await service.create(dto, admin);
       expect(repo.findVisitOwner).not.toHaveBeenCalled();
     });
 
     it('update — patientId o‘zgarsa mavjud tashrif bilan tekshiriladi', async () => {
       repo.findById.mockResolvedValue(payment({ visitId: 'v1' }));
-      repo.findVisitOwner.mockResolvedValue({ id: 'v1', patientId: 'p1' });
+      repo.findVisitOwner.mockResolvedValue({
+        id: 'v1',
+        patientId: 'p1',
+        price: 200_000,
+      });
       await expect(
-        service.update('pay1', { patientId: 'p2' }),
+        service.update('pay1', { patientId: 'p2' }, admin),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(repo.findVisitOwner).toHaveBeenCalledWith('v1');
-      expect(repo.update).not.toHaveBeenCalled();
+      expect(repo.updateWithAudit).not.toHaveBeenCalled();
     });
 
     it('update — faqat status o‘zgarsa tashrif tekshirilmaydi', async () => {
       repo.findById.mockResolvedValue(payment({ visitId: 'v1' }));
-      await service.update('pay1', { status: 'partial' });
+      await service.update('pay1', { status: 'partial' }, admin);
       expect(repo.findVisitOwner).not.toHaveBeenCalled();
     });
   });
@@ -320,38 +346,46 @@ describe('PaymentsService', () => {
   describe('update', () => {
     it('404 — update chaqirilmaydi', async () => {
       repo.findById.mockResolvedValue(null);
-      await expect(service.update('x', { amount: 1 })).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
-      expect(repo.update).not.toHaveBeenCalled();
+      await expect(
+        service.update('x', { amount: 1 }, admin),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(repo.updateWithAudit).not.toHaveBeenCalled();
     });
 
     it('qisman update', async () => {
       repo.findById.mockResolvedValue(payment());
-      await service.update('pay1', { status: 'partial' });
-      expect(repo.update).toHaveBeenCalledWith('pay1', {
-        amount: undefined,
-        method: undefined,
-        status: 'partial',
-        description: undefined,
-        type: undefined,
-        discount: undefined,
-        date: undefined,
-        patient: undefined,
-        service: undefined,
-        visit: undefined,
-      });
+      await service.update('pay1', { status: 'partial' }, admin);
+      expect(repo.updateWithAudit).toHaveBeenCalledWith(
+        'pay1',
+        {
+          amount: undefined,
+          method: undefined,
+          status: 'partial',
+          description: undefined,
+          type: undefined,
+          discount: undefined,
+          date: undefined,
+          patient: undefined,
+          service: undefined,
+          visit: undefined,
+        },
+        { id: 'u1', name: 'Admin' },
+      );
     });
 
     it('connect va disconnect', async () => {
       repo.findById.mockResolvedValue(payment());
-      await service.update('pay1', {
-        patientId: 'p2',
-        serviceId: 's2',
-        visitId: '',
-        date: '2026-06-02',
-      });
-      expect(repo.update.mock.calls[0][1]).toMatchObject({
+      await service.update(
+        'pay1',
+        {
+          patientId: 'p2',
+          serviceId: 's2',
+          visitId: '',
+          date: '2026-06-02',
+        },
+        admin,
+      );
+      expect(repo.updateWithAudit.mock.calls[0][1]).toMatchObject({
         date: new Date('2026-06-02T00:00:00.000Z'),
         patient: { connect: { id: 'p2' } },
         service: { connect: { id: 's2' } },
@@ -361,8 +395,8 @@ describe('PaymentsService', () => {
 
     it('serviceId "" — disconnect, visitId — connect', async () => {
       repo.findById.mockResolvedValue(payment());
-      await service.update('pay1', { serviceId: '', visitId: 'v3' });
-      expect(repo.update.mock.calls[0][1]).toMatchObject({
+      await service.update('pay1', { serviceId: '', visitId: 'v3' }, admin);
+      expect(repo.updateWithAudit.mock.calls[0][1]).toMatchObject({
         service: { disconnect: true },
         visit: { connect: { id: 'v3' } },
       });
@@ -372,16 +406,21 @@ describe('PaymentsService', () => {
   describe('remove', () => {
     it('404', async () => {
       repo.findById.mockResolvedValue(null);
-      await expect(service.remove('x')).rejects.toBeInstanceOf(
+      await expect(service.remove('x', admin)).rejects.toBeInstanceOf(
         NotFoundException,
       );
-      expect(repo.delete).not.toHaveBeenCalled();
+      expect(repo.deleteWithAudit).not.toHaveBeenCalled();
     });
 
     it('o‘chiradi', async () => {
       repo.findById.mockResolvedValue(payment());
-      await expect(service.remove('pay1')).resolves.toEqual({ id: 'pay1' });
-      expect(repo.delete).toHaveBeenCalledWith('pay1');
+      await expect(service.remove('pay1', admin)).resolves.toEqual({
+        id: 'pay1',
+      });
+      expect(repo.deleteWithAudit).toHaveBeenCalledWith('pay1', {
+        id: 'u1',
+        name: 'Admin',
+      });
     });
   });
 
@@ -508,32 +547,32 @@ describe('PaymentsService', () => {
 
     it('10 soniya ichida xuddi shu to‘lov — 409, ikkinchisi yozilmaydi', async () => {
       jest.useFakeTimers({ now: new Date('2026-11-08T10:00:00.000Z') });
-      await service.create(dto);
+      await service.create(dto, admin);
       jest.setSystemTime(new Date('2026-11-08T10:00:05.000Z'));
-      await expect(service.create(dto)).rejects.toThrow(
+      await expect(service.create(dto, admin)).rejects.toThrow(
         new ConflictException(PAYMENT_DUPLICATE_MESSAGE),
       );
-      expect(repo.create).toHaveBeenCalledTimes(1);
+      expect(repo.createWithAudit).toHaveBeenCalledTimes(1);
     });
 
     it('parallel ikki so‘rov — faqat bittasi o‘tadi', async () => {
       const results = await Promise.allSettled([
-        service.create(dto),
-        service.create(dto),
+        service.create(dto, admin),
+        service.create(dto, admin),
       ]);
       expect(results.map((r) => r.status).sort()).toEqual([
         'fulfilled',
         'rejected',
       ]);
-      expect(repo.create).toHaveBeenCalledTimes(1);
+      expect(repo.createWithAudit).toHaveBeenCalledTimes(1);
     });
 
     it('10 soniyadan keyin qayta kiritish mumkin', async () => {
       jest.useFakeTimers({ now: new Date('2026-11-08T10:00:00.000Z') });
-      await service.create(dto);
+      await service.create(dto, admin);
       jest.setSystemTime(new Date('2026-11-08T10:00:10.000Z'));
-      await service.create(dto);
-      expect(repo.create).toHaveBeenCalledTimes(2);
+      await service.create(dto, admin);
+      expect(repo.createWithAudit).toHaveBeenCalledTimes(2);
     });
 
     it.each([
@@ -544,17 +583,184 @@ describe('PaymentsService', () => {
     ])('%s boshqa bo‘lsa — dublikat emas', async (_n, change) => {
       repo.findVisitOwner.mockResolvedValue({
         id: 'v1',
+        price: 200_000,
         patientId: (change as any).patientId ?? 'p1',
       });
-      await service.create(dto);
-      await service.create({ ...dto, ...change });
-      expect(repo.create).toHaveBeenCalledTimes(2);
+      await service.create(dto, admin);
+      await service.create({ ...dto, ...change }, admin);
+      expect(repo.createWithAudit).toHaveBeenCalledTimes(2);
     });
 
     it('yozish xatosi — qayta urinish mumkin (kalit bo‘shatiladi)', async () => {
-      repo.create.mockRejectedValueOnce(new Error('db down'));
-      await expect(service.create(dto)).rejects.toThrow('db down');
-      await expect(service.create(dto)).resolves.toBeDefined();
+      repo.createWithAudit.mockRejectedValueOnce(new Error('db down'));
+      await expect(service.create(dto, admin)).rejects.toThrow('db down');
+      await expect(service.create(dto, admin)).resolves.toBeDefined();
+    });
+  });
+  describe('chiqim bemorsiz (EXPENSE) va kirim uchun bemor shart', () => {
+    const exp = {
+      amount: 50_000,
+      method: 'cash' as const,
+      status: 'paid' as const,
+      type: 'EXPENSE' as const,
+      description: 'Ijara',
+    };
+
+    it('EXPENSE patientId siz yaratiladi, patient connect qilinmaydi', async () => {
+      repo.createWithAudit.mockResolvedValue(
+        payment({ patientId: null, type: 'EXPENSE', patient: null }),
+      );
+      const r = await service.create(exp, admin);
+      expect(repo.createWithAudit.mock.calls[0][0].patient).toBeUndefined();
+      expect(r.patientId).toBeNull();
+      expect(r.patient).toBeUndefined();
+    });
+
+    it('INCOME patientId siz — 400 (o‘zbekcha), yozilmaydi', async () => {
+      await expect(
+        service.create({ ...exp, type: 'INCOME' }, admin),
+      ).rejects.toThrow(new BadRequestException(PAYMENT_PATIENT_REQUIRED));
+      await expect(
+        service.create({ ...exp, type: undefined }, admin),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(repo.createWithAudit).not.toHaveBeenCalled();
+    });
+
+    it('bemorsiz to‘lovni tashrifga bog‘lab bo‘lmaydi', async () => {
+      await expect(
+        service.create({ ...exp, visitId: 'v1' }, admin),
+      ).rejects.toThrow(new BadRequestException(PAYMENT_VISIT_NEEDS_PATIENT));
+    });
+
+    it('update — bemorsiz EXPENSE ni INCOME ga o‘tkazish 400', async () => {
+      repo.findById.mockResolvedValue(
+        payment({ patientId: null, type: 'EXPENSE' }),
+      );
+      await expect(
+        service.update('pay1', { type: 'INCOME' }, admin),
+      ).rejects.toThrow(new BadRequestException(PAYMENT_PATIENT_REQUIRED));
+      await service.update('pay1', { amount: 10 }, admin);
+      expect(repo.updateWithAudit).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('sana va chegirma tekshiruvi', () => {
+    const dto = {
+      patientId: 'p1',
+      amount: 100_000,
+      method: 'cash' as const,
+      status: 'paid' as const,
+      description: 'Plomba',
+    };
+
+    it('qabul qilingan to‘lov kelajak sanasida — 400', async () => {
+      jest.useFakeTimers({ now: new Date('2026-11-11T05:00:00.000Z') });
+      await expect(
+        service.create({ ...dto, date: '2026-11-12' }, admin),
+      ).rejects.toThrow(new BadRequestException(PAYMENT_DATE_FUTURE));
+      await service.create({ ...dto, date: '2026-11-11' }, admin);
+    });
+
+    it('yig‘ilmagan (unpaid) to‘lov kelajak sanasida mumkin', async () => {
+      jest.useFakeTimers({ now: new Date('2026-11-11T05:00:00.000Z') });
+      await service.create(
+        { ...dto, status: 'unpaid', date: '2026-12-01' },
+        admin,
+      );
+      expect(repo.createWithAudit).toHaveBeenCalled();
+    });
+
+    it('2020 dan oldingi sana — 400', async () => {
+      await expect(
+        service.create({ ...dto, date: '2019-12-31' }, admin),
+      ).rejects.toThrow(new BadRequestException(PAYMENT_DATE_TOO_OLD));
+    });
+
+    it('update — sana/status o‘zgarsa tekshiriladi', async () => {
+      repo.findById.mockResolvedValue(payment({ status: 'unpaid' }));
+      jest.useFakeTimers({ now: new Date('2026-11-11T05:00:00.000Z') });
+      await expect(
+        service.update('pay1', { date: '2027-01-01', status: 'paid' }, admin),
+      ).rejects.toThrow(new BadRequestException(PAYMENT_DATE_FUTURE));
+    });
+
+    it('chegirma tashrif narxidan katta — 400; teng — mumkin', async () => {
+      repo.findVisitOwner.mockResolvedValue({
+        id: 'v1',
+        patientId: 'p1',
+        price: 200_000,
+      });
+      await expect(
+        service.create({ ...dto, visitId: 'v1', discount: 200_001 }, admin),
+      ).rejects.toThrow(new BadRequestException(PAYMENT_DISCOUNT_TOO_BIG));
+      await service.create({ ...dto, visitId: 'v1', discount: 200_000 }, admin);
+      expect(repo.createWithAudit).toHaveBeenCalledTimes(1);
+    });
+
+    it('update — chegirma oshirilsa tashrif narxi bilan tekshiriladi', async () => {
+      repo.findById.mockResolvedValue(payment({ visitId: 'v1' }));
+      await expect(
+        service.update('pay1', { discount: 999_999 }, admin),
+      ).rejects.toThrow(new BadRequestException(PAYMENT_DISCOUNT_TOO_BIG));
+    });
+  });
+
+  describe('audit', () => {
+    it('create/update/remove actor bilan repositoryga uzatiladi', async () => {
+      repo.findById.mockResolvedValue(payment());
+      await service.create(
+        {
+          patientId: 'p1',
+          amount: 1,
+          method: 'cash',
+          status: 'paid',
+          description: 'abc',
+        },
+        admin,
+      );
+      expect(repo.createWithAudit.mock.calls[0][1]).toEqual({
+        id: 'u1',
+        name: 'Admin',
+      });
+      await service.update('pay1', { amount: 5 }, admin);
+      expect(repo.updateWithAudit.mock.calls[0][2]).toEqual({
+        id: 'u1',
+        name: 'Admin',
+      });
+    });
+
+    it('getAudit — sana ISO ga o‘giriladi', async () => {
+      repo.listAudit.mockResolvedValue([
+        {
+          id: 'a1',
+          paymentId: 'pay1',
+          action: 'delete',
+          actorId: 'u1',
+          actorName: 'Admin',
+          before: { id: 'pay1' },
+          after: null,
+          createdAt: new Date('2026-11-11T05:00:00.000Z'),
+        },
+      ] as any);
+      await expect(service.getAudit('pay1')).resolves.toEqual([
+        expect.objectContaining({
+          action: 'delete',
+          createdAt: '2026-11-11T05:00:00.000Z',
+        }),
+      ]);
+    });
+
+    it('toResponse createdAt/createdById ni qaytaradi', async () => {
+      repo.findById.mockResolvedValue(
+        payment({
+          createdAt: new Date('2026-11-11T05:00:00.000Z'),
+          createdById: 'u1',
+        }),
+      );
+      await expect(service.findOne('pay1')).resolves.toMatchObject({
+        createdAt: '2026-11-11T05:00:00.000Z',
+        createdById: 'u1',
+      });
     });
   });
 });

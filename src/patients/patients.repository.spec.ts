@@ -176,15 +176,12 @@ describe('PatientsRepository', () => {
     ]);
     const sql = prisma.$queryRaw.mock.calls[0][0];
     const text = sql.strings.join('?');
-    // EXPENSE (refund) reduces credit, INCOME adds; discounts only on INCOME
+    // EXPENSE (clinic expense) / patient-less payments never count
     expect(text).toContain(
-      "WHEN type = 'EXPENSE' AND status IN ('paid', 'partial') THEN -amount",
+      "WHERE patient_id IS NOT NULL AND type <> 'EXPENSE'",
     );
     expect(text).toContain(
-      "WHEN type <> 'EXPENSE' AND status IN ('paid', 'partial') THEN amount",
-    );
-    expect(text).toContain(
-      "CASE WHEN type <> 'EXPENSE' THEN COALESCE(discount",
+      "SUM(CASE WHEN status IN ('paid', 'partial') THEN amount ELSE 0 END)",
     );
     expect(text).toContain("WHERE status = 'completed'");
     expect(text).toContain('< 0');

@@ -7,6 +7,13 @@ import {
   WITH_PATIENT_SUMMARY,
 } from '../patients/patient-summary';
 
+export type PaymentActor = { id: string | null; name: string };
+
+/** JSON snapshot of a payment row for the audit trail (Dates → ISO strings). */
+export function paymentSnapshot(p: Payment): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(p)) as Prisma.InputJsonValue;
+}
+
 export type PaymentWithPatient = Payment & {
   patient?: PatientSummaryRow | null;
 };
@@ -59,7 +66,7 @@ export class PaymentsRepository {
   findVisitOwner(visitId: string) {
     return this.prisma.visit.findUnique({
       where: { id: visitId },
-      select: { id: true, patientId: true },
+      select: { id: true, patientId: true, price: true },
     });
   }
 
@@ -113,22 +120,76 @@ export class PaymentsRepository {
     });
   }
 
-  create(data: Prisma.PaymentCreateInput): Promise<PaymentWithPatient> {
-    return this.prisma.payment.create({ data, include: WITH_PATIENT_SUMMARY });
+  private auditRow(
+    action: 'create' | 'update' | 'delete',
+    paymentId: string,
+    actor: PaymentActor,
+    before: Payment | null,
+    after: Payment | null,
+  ): Prisma.PaymentAuditUncheckedCreateInput {
+    return {
+      paymentId,
+      action,
+      actorId: actor.id,
+      actorName: actor.name.slice(0, 100),
+      before: before ? paymentSnapshot(before) : undefined,
+      after: after ? paymentSnapshot(after) : undefined,
+    };
   }
 
-  update(
-    id: string,
-    data: Prisma.PaymentUpdateInput,
+  /** Payment + its audit row in ONE transaction. */
+  createWithAudit(
+    data: Prisma.PaymentCreateInput,
+    actor: PaymentActor,
   ): Promise<PaymentWithPatient> {
-    return this.prisma.payment.update({
-      where: { id },
-      data,
-      include: WITH_PATIENT_SUMMARY,
+    return this.prisma.$transaction(async (tx) => {
+      const p = await tx.payment.create({
+        data: { ...data, createdById: actor.id },
+        include: WITH_PATIENT_SUMMARY,
+      });
+      await tx.paymentAudit.create({
+        data: this.auditRow('create', p.id, actor, null, p),
+      });
+      return p;
     });
   }
 
-  delete(id: string): Promise<Payment> {
-    return this.prisma.payment.delete({ where: { id } });
+  /** The "before" snapshot is read inside the transaction (fresh). */
+  updateWithAudit(
+    id: string,
+    data: Prisma.PaymentUpdateInput,
+    actor: PaymentActor,
+  ): Promise<PaymentWithPatient> {
+    return this.prisma.$transaction(async (tx) => {
+      const before = await tx.payment.findUnique({ where: { id } });
+      const p = await tx.payment.update({
+        where: { id },
+        data,
+        include: WITH_PATIENT_SUMMARY,
+      });
+      await tx.paymentAudit.create({
+        data: this.auditRow('update', id, actor, before, p),
+      });
+      return p;
+    });
+  }
+
+  /** Hard delete; the full row is snapshotted into the audit first. */
+  deleteWithAudit(id: string, actor: PaymentActor): Promise<Payment> {
+    return this.prisma.$transaction(async (tx) => {
+      const before = await tx.payment.findUnique({ where: { id } });
+      await tx.paymentAudit.create({
+        data: this.auditRow('delete', id, actor, before, null),
+      });
+      return tx.payment.delete({ where: { id } });
+    });
+  }
+
+  listAudit(paymentId: string) {
+    return this.prisma.paymentAudit.findMany({
+      where: { paymentId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 200,
+    });
   }
 }

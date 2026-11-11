@@ -202,7 +202,8 @@ model Visit {
 
 model Payment {
   id          String   @id @default(cuid())
-  patientId   String   @map("patient_id")
+  /// Null only for clinic expenses (type EXPENSE) not tied to a patient.
+  patientId   String?  @map("patient_id")
   amount      Int
   method      String
   status      String
@@ -212,8 +213,11 @@ model Payment {
   discount    Int?
   serviceId   String?  @map("service_id")
   visitId     String?  @map("visit_id")
+  /// Who/when entered the payment (rows created before the audit trail: now()/null).
+  createdAt   DateTime @default(now()) @map("created_at")
+  createdById String?  @map("created_by_id")
 
-  patient Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patient Patient? @relation(fields: [patientId], references: [id], onDelete: Cascade)
   service Service? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
   visit   Visit?   @relation(fields: [visitId], references: [id], onDelete: SetNull)
 
@@ -223,6 +227,23 @@ model Payment {
   @@index([type])
   @@index([visitId])
   @@map("payments")
+}
+
+/// Trail of payment changes. No FK to payments on purpose: rows must survive
+/// a hard delete of the payment. action: create | update | delete
+model PaymentAudit {
+  id        String   @id @default(cuid())
+  paymentId String   @map("payment_id")
+  action    String
+  actorId   String?  @map("actor_id")
+  /// Snapshot, so the trail stays readable if the user is renamed/deleted.
+  actorName String   @map("actor_name")
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([paymentId, createdAt])
+  @@map("payment_audits")
 }
 
 model PatientComment {

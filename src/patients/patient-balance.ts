@@ -4,16 +4,15 @@ import { Prisma } from '@prisma/client';
  * Patient balance (so'm):
  *   credit = Σ INCOME payment amounts with status paid|partial
  *          + Σ INCOME payment discounts (any status)
- *          − Σ EXPENSE payment amounts with status paid|partial
  *   owed   = Σ price of completed visits
  *   balance = credit − owed   (negative → the patient owes the clinic)
  *
- * Refund rule: `payments.patient_id` is mandatory, so every EXPENSE ("Chiqim")
- * is attached to a patient and is treated as money handed back to that patient
- * (a refund) — it reduces their credit. Only collected (paid|partial) expenses
- * count, and an EXPENSE never carries a discount. `totalPaid` is INCOME only
- * (gross money received); refunds are exposed separately as `totalRefunded`.
- * Keep `debtorBalancesSql` below in sync with this definition.
+ * EXPENSE ("Chiqim") is a CLINIC expense (rent, materials, ...): it never
+ * touches any patient's balance or debt, even when an old row happens to be
+ * attached to a patient (before `patient_id` became optional every expense
+ * had to pick one). `totalRefunded` is kept in the profile as information
+ * only (Σ collected EXPENSE attached to the patient) and is NOT subtracted.
+ * `totalPaid` is INCOME only. Keep `debtorBalancesSql` below in sync.
  */
 export const COLLECTED_PAYMENT_STATUSES = ['paid', 'partial'] as const;
 
@@ -37,13 +36,13 @@ type BalanceSource = {
 export type PatientFinance = {
   /** INCOME collected (paid|partial) — gross money received. */
   totalPaid: number;
-  /** EXPENSE collected (paid|partial) — refunded to the patient. */
+  /** EXPENSE collected (paid|partial) attached to the patient — informational, not in balance. */
   totalRefunded: number;
   /** Σ INCOME discounts. */
   totalDiscount: number;
   /** Σ price of completed visits. */
   totalOwed: number;
-  /** totalPaid + totalDiscount − totalRefunded − totalOwed. */
+  /** totalPaid + totalDiscount − totalOwed (EXPENSE excluded). */
   balance: number;
 };
 
@@ -72,7 +71,7 @@ export function computePatientFinance(p: BalanceSource): PatientFinance {
     totalRefunded,
     totalDiscount,
     totalOwed,
-    balance: totalPaid + totalDiscount - totalRefunded - totalOwed,
+    balance: totalPaid + totalDiscount - totalOwed,
   };
 }
 
@@ -87,13 +86,10 @@ export const debtorBalancesSql = Prisma.sql`
   FROM patients p
   LEFT JOIN (
     SELECT patient_id,
-           SUM(CASE
-                 WHEN type = 'EXPENSE' AND status IN ('paid', 'partial') THEN -amount
-                 WHEN type <> 'EXPENSE' AND status IN ('paid', 'partial') THEN amount
-                 ELSE 0
-               END)
-             + SUM(CASE WHEN type <> 'EXPENSE' THEN COALESCE(discount, 0) ELSE 0 END) AS credit
+           SUM(CASE WHEN status IN ('paid', 'partial') THEN amount ELSE 0 END)
+             + SUM(COALESCE(discount, 0)) AS credit
     FROM payments
+    WHERE patient_id IS NOT NULL AND type <> 'EXPENSE'
     GROUP BY patient_id
   ) pay ON pay.patient_id = p.id
   LEFT JOIN (

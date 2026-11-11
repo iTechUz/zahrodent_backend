@@ -30,23 +30,22 @@ describe('computePatientFinance', () => {
     });
   });
 
-  it('EXPENSE (qaytarish) kreditni kamaytiradi, totalPaid faqat INCOME', () => {
+  it('EXPENSE (klinika chiqimi) balansga ta’sir qilmaydi, totalRefunded faqat ma’lumot', () => {
     const f = computePatientFinance({
       payments: [pay(200), pay(80, 'paid', 'EXPENSE')],
       visits: [{ price: 100 }],
     });
     expect(f.totalPaid).toBe(200);
     expect(f.totalRefunded).toBe(80);
-    expect(f.balance).toBe(200 - 80 - 100);
+    expect(f.balance).toBe(200 - 100);
   });
 
-  it('yig‘ilmagan (unpaid) EXPENSE va EXPENSE chegirmasi hisobga olinmaydi', () => {
+  it('faqat EXPENSE bo‘lgan bemor qarzdor bo‘lib qolmaydi', () => {
     const f = computePatientFinance({
-      payments: [pay(80, 'unpaid', 'EXPENSE'), pay(30, 'paid', 'EXPENSE', 999)],
+      payments: [pay(80, 'paid', 'EXPENSE'), pay(30, 'paid', 'EXPENSE', 999)],
     });
-    expect(f.totalRefunded).toBe(30);
     expect(f.totalDiscount).toBe(0);
-    expect(f.balance).toBe(-30);
+    expect(f.balance).toBe(0);
   });
 
   it('type berilmasa INCOME deb hisoblanadi; bo‘sh manba — 0', () => {
@@ -61,16 +60,14 @@ describe('computePatientFinance', () => {
 
 describe('debtorBalancesSql (computePatientFinance bilan sinxron)', () => {
   const text = debtorBalancesSql.strings.join('?');
-  it('EXPENSE kreditdan ayriladi, chegirma faqat INCOME uchun', () => {
+  it('EXPENSE va bemorsiz to‘lovlar SQL dan chiqarib tashlanadi', () => {
     expect(text).toContain(
-      "WHEN type = 'EXPENSE' AND status IN ('paid', 'partial') THEN -amount",
+      "WHERE patient_id IS NOT NULL AND type <> 'EXPENSE'",
     );
     expect(text).toContain(
-      "WHEN type <> 'EXPENSE' AND status IN ('paid', 'partial') THEN amount",
+      "SUM(CASE WHEN status IN ('paid', 'partial') THEN amount ELSE 0 END)",
     );
-    expect(text).toContain(
-      "SUM(CASE WHEN type <> 'EXPENSE' THEN COALESCE(discount, 0) ELSE 0 END)",
-    );
+    expect(text).not.toContain('-amount');
     expect(text).toContain("WHERE status = 'completed'");
   });
 });

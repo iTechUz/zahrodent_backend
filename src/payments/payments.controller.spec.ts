@@ -6,6 +6,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { ROLES_KEY } from '../common/decorators/roles.decorator';
 
 describe('PaymentsController', () => {
+  const user = { id: 'u1', name: 'Admin', role: 'admin' } as any;
   let service: Record<string, jest.Mock>;
   let controller: PaymentsController;
 
@@ -18,6 +19,7 @@ describe('PaymentsController', () => {
       create: jest.fn(),
       update: jest.fn(),
       remove: jest.fn(),
+      getAudit: jest.fn(),
     };
     controller = new PaymentsController(service as unknown as PaymentsService);
   });
@@ -47,27 +49,35 @@ describe('PaymentsController', () => {
   it('create — dto', async () => {
     const dto = { amount: 1000 } as any;
     service.create.mockResolvedValue({ id: 'pay1' });
-    await expect(controller.create(dto)).resolves.toEqual({ id: 'pay1' });
-    expect(service.create).toHaveBeenCalledWith(dto);
+    await expect(controller.create(dto, user)).resolves.toEqual({ id: 'pay1' });
+    expect(service.create).toHaveBeenCalledWith(dto, user);
   });
 
   it('update — id va dto', async () => {
     const dto = { amount: 2000 } as any;
     service.update.mockResolvedValue({ id: 'pay1' });
-    await controller.update('pay1', dto);
-    expect(service.update).toHaveBeenCalledWith('pay1', dto);
+    await controller.update('pay1', dto, user);
+    expect(service.update).toHaveBeenCalledWith('pay1', dto, user);
+  });
+
+  it('audit — id', async () => {
+    service.getAudit.mockResolvedValue([]);
+    await expect(controller.audit('pay1')).resolves.toEqual([]);
+    expect(service.getAudit).toHaveBeenCalledWith('pay1');
   });
 
   it('remove — id', async () => {
     service.remove.mockResolvedValue({ id: 'pay1' });
-    await expect(controller.remove('pay1')).resolves.toEqual({ id: 'pay1' });
-    expect(service.remove).toHaveBeenCalledWith('pay1');
+    await expect(controller.remove('pay1', user)).resolves.toEqual({
+      id: 'pay1',
+    });
+    expect(service.remove).toHaveBeenCalledWith('pay1', user);
   });
 
   it('servis xatosi tarqaladi', async () => {
     const err = new Error('bad');
     service.create.mockRejectedValue(err);
-    await expect(controller.create({} as any)).rejects.toBe(err);
+    await expect(controller.create({} as any, user)).rejects.toBe(err);
     service.getStats.mockRejectedValue(err);
     await expect(controller.getStats()).rejects.toBe(err);
   });
