@@ -295,6 +295,8 @@ model Lead {
   doctor      String?
   /// Preferred visit, "YYYY-MM-DD" or "YYYY-MM-DD HH:mm" (Asia/Tashkent).
   preferredAt String?  @map("preferred_at")
+  /// Set by the bot only when the person shared THEIR OWN contact (status updates go here).
+  telegramChatId String? @map("telegram_chat_id")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 

@@ -17,7 +17,10 @@ describe('ClientNotifierService', () => {
   const saved = process.env.TELEGRAM_BOT_USERNAME;
 
   beforeEach(() => {
-    prisma = { patient: { findFirst: jest.fn() } };
+    prisma = {
+      patient: { findFirst: jest.fn() },
+      lead: { findFirst: jest.fn().mockResolvedValue(null) },
+    };
     patients = { findActiveIdsByMobile: jest.fn().mockResolvedValue([]) };
     outbox = { enqueue: jest.fn().mockResolvedValue({}) };
     eskiz = {
@@ -73,5 +76,43 @@ describe('ClientNotifierService', () => {
   it('findChatId: non-Uz phone → null without DB', async () => {
     await expect(svc.findChatId('123')).resolves.toBeNull();
     expect(patients.findActiveIdsByMobile).not.toHaveBeenCalled();
+  });
+
+  describe('notifyLeadStatus', () => {
+    it('sends a fixed text to the lead chat saved by the bot', async () => {
+      await expect(
+        svc.notifyLeadStatus({ ...lead, telegramChatId: '777' }, 'contacted'),
+      ).resolves.toBe(true);
+      const arg = outbox.enqueue.mock.calls[0][0];
+      expect(arg).toMatchObject({
+        chatId: '777',
+        kind: 'patient_lead_status',
+        leadId: 'l1',
+      });
+      expect(arg.text).not.toContain('evil');
+    });
+
+    it('falls back to a chat found by phone (earlier lead linked the bot)', async () => {
+      prisma.lead.findFirst.mockResolvedValue({ telegramChatId: '888' });
+      await svc.notifyLeadStatus(lead, 'converted');
+      expect(outbox.enqueue.mock.calls[0][0].chatId).toBe('888');
+    });
+
+    it('no linked chat, "new" status or unknown status → nothing sent', async () => {
+      await expect(svc.notifyLeadStatus(lead, 'contacted')).resolves.toBe(
+        false,
+      );
+      await expect(
+        svc.notifyLeadStatus({ ...lead, telegramChatId: '1' }, 'new'),
+      ).resolves.toBe(false);
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('never throws when the outbox fails', async () => {
+      outbox.enqueue.mockRejectedValue(new Error('db down'));
+      await expect(
+        svc.notifyLeadStatus({ ...lead, telegramChatId: '777' }, 'cancelled'),
+      ).resolves.toBe(false);
+    });
   });
 });
