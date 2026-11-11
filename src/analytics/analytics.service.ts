@@ -148,7 +148,8 @@ export class AnalyticsService {
           },
         },
       }),
-      this.repo.countDoctors(),
+      // Nofaol (ishlamayotgan) shifokorlar jami songa kirmaydi.
+      this.repo.countDoctors({ isActive: true }),
     ]);
 
     let money: Pick<

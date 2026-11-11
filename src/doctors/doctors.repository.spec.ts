@@ -286,6 +286,18 @@ describe('DoctorsRepository', () => {
       });
     });
 
+    it('updateWithUser — userActive berilsa login ham shu tranzaksiyada yoqiladi/o‘chiriladi', async () => {
+      tx.doctor.update.mockResolvedValue({ id: 'd1', userId: 'u5' });
+      await repo.updateWithUser('d1', { isActive: false }, null, false);
+      expect(tx.user.update).toHaveBeenCalledWith({
+        where: { id: 'u5' },
+        data: { isActive: false },
+      });
+      tx.user.update.mockClear();
+      await repo.updateWithUser('d1', { lastName: 'B' }, null);
+      expect(tx.user.update).not.toHaveBeenCalled();
+    });
+
     it('deleteWithUser — avval doctor, keyin user, bitta tranzaksiyada', async () => {
       const order: string[] = [];
       tx.doctor.delete.mockImplementation(async () => order.push('doctor'));

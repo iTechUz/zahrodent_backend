@@ -15,6 +15,8 @@ model User {
   role         String
   specialty    String?
   avatar       String?
+  /// false → xodim ishdan ketgan: kira olmaydi, mavjud sessiyalar ishlamaydi
+  isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -93,6 +95,8 @@ model Doctor {
   avatar    String?
   schedule  Json?
   daysOff   Json?   @map("days_off")
+  /// false → shifokor ishlamayapti: yangi qabul olmaydi, tarix saqlanadi
+  isActive  Boolean @default(true) @map("is_active")
 
   bookings      Booking[]
   visits        Visit[]
@@ -247,14 +251,16 @@ model PaymentAudit {
 }
 
 model PatientComment {
-  id        String   @id @default(cuid())
-  content   String
-  createdAt DateTime @default(now()) @map("created_at")
-  patientId String   @map("patient_id")
-  authorId  String   @map("author_id")
+  id         String   @id @default(cuid())
+  content    String
+  createdAt  DateTime @default(now()) @map("created_at")
+  patientId  String   @map("patient_id")
+  /// Muallif o'chirilsa sharh qoladi (SetNull), ismi authorName'da saqlanadi
+  authorId   String?  @map("author_id")
+  authorName String?  @map("author_name")
 
   patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author  User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
 
   @@index([patientId])
   @@map("patient_comments")
@@ -304,22 +310,22 @@ model NotificationLog {
 }
 
 model Lead {
-  id          String   @id @default(cuid())
-  name        String
-  phone       String
-  service     String?
-  message     String?
-  status      String   @default("new") // new, contacted, consultation, proposal, converted, cancelled
-  source      String   @default("telegram_bot")
-  notes       String?
+  id             String   @id @default(cuid())
+  name           String
+  phone          String
+  service        String?
+  message        String?
+  status         String   @default("new") // new, contacted, consultation, proposal, converted, cancelled
+  source         String   @default("telegram_bot")
+  notes          String?
   /// Preferred doctor (free text from the website form).
-  doctor      String?
+  doctor         String?
   /// Preferred visit, "YYYY-MM-DD" or "YYYY-MM-DD HH:mm" (Asia/Tashkent).
-  preferredAt String?  @map("preferred_at")
+  preferredAt    String?  @map("preferred_at")
   /// Set by the bot only when the person shared THEIR OWN contact (status updates go here).
-  telegramChatId String? @map("telegram_chat_id")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  telegramChatId String?  @map("telegram_chat_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   @@index([status])
   @@index([createdAt])

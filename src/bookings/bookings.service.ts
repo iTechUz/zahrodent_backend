@@ -51,6 +51,15 @@ export const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed'];
 export const SLOT_OCCUPYING_STATUSES = [...ACTIVE_BOOKING_STATUSES, 'arrived'];
 
 export const BOOKING_NOT_FOUND = 'Qabul topilmadi';
+export const DOCTOR_INACTIVE_MESSAGE =
+  'Shifokor hozir ishlamayapti (faolsizlantirilgan) — boshqa shifokorni tanlang';
+export const BOOKING_TOO_FAR_MESSAGE =
+  "Qabulni 1 yildan ortiq oldinga belgilab bo'lmaydi";
+
+/** Eng uzoq ruxsat etilgan qabul sanasi: bugundan 1 yil keyin (YYYY-MM-DD). */
+export function maxBookingDate(today: string): string {
+  return `${Number(today.slice(0, 4)) + 1}${today.slice(4)}`;
+}
 
 @Injectable()
 export class BookingsService {
@@ -175,6 +184,9 @@ export class BookingsService {
         "Bugungi o'tib ketgan vaqtga qabul yaratib bo'lmaydi",
       );
     }
+    if (dto.date > maxBookingDate(today)) {
+      throw new BadRequestException(BOOKING_TOO_FAR_MESSAGE);
+    }
     assertStatusTransition({
       from: 'pending',
       to: dto.status,
@@ -193,6 +205,7 @@ export class BookingsService {
         if (SLOT_OCCUPYING_STATUSES.includes(dto.status)) {
           await this.checkConflicts(tx, {
             doctorId: dto.doctorId,
+            patientId: dto.patientId,
             date: dto.date,
             time: dto.time,
             duration,
@@ -256,6 +269,7 @@ export class BookingsService {
         const currentDate = toDateOnlyString(current.date);
         const next = {
           doctorId: dto.doctorId ?? current.doctorId,
+          patientId: dto.patientId ?? current.patientId,
           date: dto.date ?? currentDate,
           time: dto.time ?? current.time,
           serviceId:
@@ -289,9 +303,16 @@ export class BookingsService {
 
         const dateTimeChanged =
           next.date !== currentDate || next.time !== current.time;
+        if (
+          next.date !== currentDate &&
+          next.date > maxBookingDate(todayInTashkent())
+        ) {
+          throw new BadRequestException(BOOKING_TOO_FAR_MESSAGE);
+        }
         const slotChanged =
           dateTimeChanged ||
           next.doctorId !== current.doctorId ||
+          next.patientId !== current.patientId ||
           next.serviceId !== current.serviceId;
         if (
           dateTimeChanged &&
@@ -349,6 +370,7 @@ export class BookingsService {
             );
             await this.checkConflicts(tx, {
               doctorId: next.doctorId,
+              patientId: next.patientId,
               date: next.date,
               time: next.time,
               duration,
@@ -368,6 +390,7 @@ export class BookingsService {
             statusChanged,
             to: next.status,
             moved: dateTimeChanged || next.doctorId !== current.doctorId,
+            doctorChanged: next.doctorId !== current.doctorId,
           },
         };
       },
@@ -383,7 +406,12 @@ export class BookingsService {
   private afterUpdate(
     current: BookingWithPatient,
     b: BookingWithPatient,
-    change: { statusChanged: boolean; to: string; moved: boolean },
+    change: {
+      statusChanged: boolean;
+      to: string;
+      moved: boolean;
+      doctorChanged: boolean;
+    },
     dto: UpdateBookingDto,
     user: AuthUserView,
   ) {
@@ -395,6 +423,15 @@ export class BookingsService {
         from: current.status,
         to: change.to,
         reason: dto.statusReason,
+        actor,
+      });
+    }
+    if (change.doctorChanged) {
+      void this.statusService.onDoctorChanged({
+        bookingId: b.id,
+        status: b.status,
+        fromDoctorId: current.doctorId,
+        toDoctorId: b.doctorId,
         actor,
       });
     }
@@ -499,6 +536,9 @@ export class BookingsService {
     const doctor =
       await this.bookingsRepository.findDoctorAvailability(doctorId);
     if (!doctor) throw new NotFoundException('Shifokor topilmadi');
+    if (doctor.isActive === false) {
+      throw new ConflictException(DOCTOR_INACTIVE_MESSAGE);
+    }
     const problem = scheduleViolation(doctor, dateOnly, time, duration);
     if (problem) throw new BadRequestException(problem);
   }
@@ -507,6 +547,7 @@ export class BookingsService {
     db: Prisma.TransactionClient | undefined,
     args: {
       doctorId: string;
+      patientId: string;
       date: string;
       time: string;
       duration: number;
@@ -535,6 +576,28 @@ export class BookingsService {
       if (newStart < bEnd && newEnd > bStart) {
         throw new ConflictException(
           `Vaqtlar to'qnashuvi: Shifokor bu vaqtda band (${b.time}${bDuration > DEFAULT_DURATION_MIN ? ' - ' + minutesToTime(bEnd) : ''})`,
+        );
+      }
+    }
+
+    // Bemor ham bir vaqtda ikki shifokorda bo'la olmaydi (boshqa shifokorlar).
+    const patientBookings = await this.bookingsRepository.findManyWithService(
+      {
+        patientId: args.patientId,
+        doctorId: { not: args.doctorId },
+        date: parseDateOnlyToUTC(args.date),
+        id: args.excludeId ? { not: args.excludeId } : undefined,
+        status: { in: SLOT_OCCUPYING_STATUSES },
+      },
+      db,
+    );
+    for (const b of patientBookings) {
+      const bStart = timeToMinutes(b.time);
+      const bDuration = b.service?.duration || DEFAULT_DURATION_MIN;
+      const bEnd = bStart + bDuration;
+      if (newStart < bEnd && newEnd > bStart) {
+        throw new ConflictException(
+          `Vaqtlar to'qnashuvi: Bemorning bu vaqtda boshqa shifokorda qabuli bor (${b.time} - ${minutesToTime(bEnd)})`,
         );
       }
     }

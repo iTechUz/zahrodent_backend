@@ -26,6 +26,7 @@ export class UsersRepository {
         role: true,
         specialty: true,
         avatar: true,
+        isActive: true,
         doctor: { select: { id: true } },
       },
     });

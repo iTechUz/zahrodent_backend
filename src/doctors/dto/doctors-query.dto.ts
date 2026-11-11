@@ -17,6 +17,14 @@ export class DoctorsQueryDto extends ListQueryDto {
   specialty?: string;
 
   @ApiPropertyOptional({
+    description:
+      "'true' → faolsizlantirilgan shifokorlar ham (admin boshqaruv sahifasi)",
+  })
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  includeInactive?: string;
+
+  @ApiPropertyOptional({
     enum: DOCTOR_SORT_FIELDS,
     description: 'Standart: firstName asc',
   })

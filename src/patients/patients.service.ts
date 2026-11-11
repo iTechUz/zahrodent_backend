@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -43,6 +44,23 @@ export const PATIENT_ARCHIVED_REASON = 'Bemor arxivlandi';
 
 export const patientDebtMessage = (debt: number) =>
   `Bemorning ${debt.toLocaleString('ru-RU').replace(/\u00a0/g, ' ')} so'm qarzi bor. Arxivlansa, bu qarz boshqaruv paneli jamilaridan chiqib ketadi. Baribir o'chirasizmi? (?force=true)`;
+export const DOCTOR_CLINICAL_ONLY_MESSAGE =
+  "Shifokor faqat klinik maydonlarni (izoh, tish xaritasi) o'zgartira oladi";
+export const DOCTOR_NO_DEBT_FILTER_MESSAGE =
+  'Qarzdorlar filtri shifokor uchun mavjud emas';
+
+/** Shifokor roli uchun yashiriladigan moliyaviy maydonlar. */
+const MONEY_FIELDS = [
+  'balance',
+  'totalPaid',
+  'totalRefunded',
+  'totalOwed',
+] as const;
+type MoneyField = (typeof MONEY_FIELDS)[number];
+type PatientResponse = ReturnType<PatientsService['toResponse']>;
+/** Pul maydonlari faqat admin/receptionist uchun to'ldiriladi. */
+export type PatientView = Omit<PatientResponse, MoneyField> &
+  Partial<Pick<PatientResponse, MoneyField>>;
 
 /** Soft-deleted patients are hidden from every list, stat and lookup. */
 export const NOT_DELETED: Prisma.PatientWhereInput = { deletedAt: null };
@@ -73,7 +91,7 @@ export class PatientsService {
   async findAll(
     query: PatientsQueryDto,
     user: AuthUserView,
-  ): Promise<PaginatedResponse<ReturnType<PatientsService['toResponse']>>> {
+  ): Promise<PaginatedResponse<PatientView>> {
     const {
       search,
       source,
@@ -83,6 +101,9 @@ export class PatientsService {
       doctorId,
       relatedDoctorId,
     } = query;
+    if (debtOnly === 'true' && user.role === 'doctor') {
+      throw new ForbiddenException(DOCTOR_NO_DEBT_FILTER_MESSAGE);
+    }
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
@@ -141,7 +162,7 @@ export class PatientsService {
         'createdAt',
       ),
     });
-    return { data: data.map((p) => this.toResponse(p)), total };
+    return { data: data.map((p) => this.forViewer(p, user)), total };
   }
 
   /**
@@ -167,7 +188,7 @@ export class PatientsService {
       // Same 404 as "missing" so a doctor can't probe other patients' ids.
       if (!hasAccess) throw new NotFoundException(PATIENT_NOT_FOUND);
     }
-    return this.toResponse(p);
+    return this.forViewer(p, user);
   }
 
   /**
@@ -224,7 +245,15 @@ export class PatientsService {
   }
 
   async update(id: string, dto: UpdatePatientDto, user: AuthUserView) {
-    await this.ensureExists(id, user);
+    const current = await this.findOne(id, user);
+    if (user.role === 'doctor') {
+      const forbidden = changedNonClinicalFields(dto, current);
+      if (forbidden.length) {
+        throw new ForbiddenException(
+          `${DOCTOR_CLINICAL_ONLY_MESSAGE} (${forbidden.join(', ')})`,
+        );
+      }
+    }
     const ageFields = resolveAgeFields(dto, currentYear());
     const phone =
       dto.phone === undefined
@@ -254,7 +283,7 @@ export class PatientsService {
     });
     // Other patients' ids are not shown to doctors (they only see own patients).
     return this.withDuplicatePhone(
-      this.toResponse(p),
+      this.forViewer(p, user),
       user.role === 'doctor' ? [] : duplicates,
     );
   }
@@ -354,16 +383,46 @@ export class PatientsService {
     user: AuthUserView,
   ) {
     await this.ensureExists(data.patientId, user);
-    return this.patientsRepository.createComment({
+    const c = await this.patientsRepository.createComment({
       content: data.content,
       patientId: data.patientId,
       authorId: user.id,
+      // Muallif keyin o'chirilsa ham ism qoladi.
+      authorName: user.name,
     });
+    return this.toCommentResponse(c);
   }
 
   async findComments(patientId: string, user: AuthUserView) {
     await this.ensureExists(patientId, user);
-    return this.patientsRepository.findCommentsByPatientId(patientId);
+    const rows =
+      await this.patientsRepository.findCommentsByPatientId(patientId);
+    return rows.map((c) => this.toCommentResponse(c));
+  }
+
+  /** Muallif o'chirilgan bo'lsa `author` snapshot ismdan yig'iladi. */
+  toCommentResponse<
+    T extends {
+      authorName: string | null;
+      author: { name: string; avatar: string | null } | null;
+    },
+  >(c: T) {
+    return {
+      ...c,
+      author: c.author ?? {
+        name: c.authorName ?? "Noma'lum xodim",
+        avatar: null,
+      },
+    };
+  }
+
+  /** Shifokor roli pul maydonlarini ko'rmaydi (analytics ham pulni yashiradi). */
+  private forViewer(p: PatientWithRelations, user: AuthUserView): PatientView {
+    const res: PatientView = this.toResponse(p);
+    if (user.role === 'doctor') {
+      for (const f of MONEY_FIELDS) delete res[f];
+    }
+    return res;
   }
 
   toResponse(p: PatientWithRelations) {
@@ -398,4 +457,57 @@ export class PatientsService {
       deletedAt: p.deletedAt ? p.deletedAt.toISOString() : null,
     };
   }
+}
+
+/**
+ * Shifokor uchun: klinik bo'lmagan maydonlardan HAQIQATAN o'zgarganlari
+ * (to'liq forma yuborilganda o'zgarmagan qiymatlar hisobga olinmaydi).
+ */
+function changedNonClinicalFields(
+  dto: UpdatePatientDto,
+  current: PatientView,
+): string[] {
+  const changed: string[] = [];
+  const str = (v: unknown) => (v == null ? '' : String(v).trim());
+  const check = (name: string, differs: boolean) => {
+    if (differs) changed.push(name);
+  };
+  check(
+    'firstName',
+    dto.firstName !== undefined && dto.firstName !== current.firstName,
+  );
+  check(
+    'lastName',
+    dto.lastName !== undefined && dto.lastName !== current.lastName,
+  );
+  check('age', dto.age !== undefined && dto.age !== current.age);
+  check(
+    'birthYear',
+    dto.birthYear !== undefined && dto.birthYear !== current.birthYear,
+  );
+  check(
+    'phone',
+    dto.phone !== undefined &&
+      (normalizeUzPhone(dto.phone) ?? dto.phone.trim()) !== current.phone,
+  );
+  check('source', dto.source !== undefined && dto.source !== current.source);
+  check(
+    'address',
+    dto.address !== undefined && str(dto.address) !== str(current.address),
+  );
+  check(
+    'workplace',
+    dto.workplace !== undefined &&
+      str(dto.workplace) !== str(current.workplace),
+  );
+  check(
+    'assignedDoctorId',
+    dto.assignedDoctorId !== undefined &&
+      (dto.assignedDoctorId || null) !== current.assignedDoctorId,
+  );
+  check(
+    'avatar',
+    dto.avatar !== undefined && str(dto.avatar) !== str(current.avatar),
+  );
+  return changed;
 }

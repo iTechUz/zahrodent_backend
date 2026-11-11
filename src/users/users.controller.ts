@@ -47,9 +47,17 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: "Xodim ma'lumotlarini yangilash" })
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
-    return this.usersService.update(id, dto);
+  @ApiOperation({
+    summary: "Xodim ma'lumotlarini yangilash",
+    description:
+      "isActive=false — faolsizlantirish. O'zini yoki yagona faol adminni faolsizlantirib bo'lmaydi (409)",
+  })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserDto,
+    @GetUser() user: AuthUserView,
+  ) {
+    return this.usersService.update(id, dto, user.id);
   }
 
   @Delete(':id')

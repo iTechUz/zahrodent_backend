@@ -113,6 +113,7 @@ export class DoctorsRepository {
         lastName: true,
         specialty: true,
         phone: true,
+        isActive: true,
       },
     });
 
@@ -186,6 +187,7 @@ export class DoctorsRepository {
         lastName: d.lastName,
         specialty: d.specialty,
         phone: d.phone,
+        isActive: d.isActive,
         totalBookings,
         completedBookings: completedCount,
         totalVisits:
@@ -240,6 +242,8 @@ export class DoctorsRepository {
       | { create: Prisma.UserCreateInput }
       | { update: { id: string; data: Prisma.UserUpdateInput } }
       | null,
+    /** Shifokor faolligi login hisobiga ham ko'chiriladi (bitta tranzaksiya). */
+    userActive?: boolean,
   ): Promise<DoctorWithUser> {
     return this.prisma.$transaction(async (tx) => {
       let doctorData = data;
@@ -255,11 +259,18 @@ export class DoctorsRepository {
           data: user.update.data,
         });
       }
-      return tx.doctor.update({
+      const updated = await tx.doctor.update({
         where: { id },
         data: doctorData,
         include: USER_PHONE,
       });
+      if (userActive !== undefined && updated.userId) {
+        await tx.user.update({
+          where: { id: updated.userId },
+          data: { isActive: userActive },
+        });
+      }
+      return updated;
     });
   }
 

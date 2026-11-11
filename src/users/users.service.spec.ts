@@ -4,7 +4,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { DOCTOR_VIA_DOCTORS_MESSAGE, UsersService } from './users.service';
+import {
+  CANNOT_DEACTIVATE_SELF,
+  DOCTOR_VIA_DOCTORS_MESSAGE,
+  LAST_ADMIN_MESSAGE,
+  UsersService,
+} from './users.service';
 import { PrismaService } from '../database/prisma.service';
 
 jest.mock('bcrypt', () => ({
@@ -34,6 +39,7 @@ describe('UsersService', () => {
     role: true,
     specialty: true,
     avatar: true,
+    isActive: true,
     createdAt: true,
   };
 
@@ -158,7 +164,13 @@ describe('UsersService', () => {
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: 'u1' },
         data: { name: 'N' },
-        select: { id: true, name: true, phone: true, role: true },
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          role: true,
+          isActive: true,
+        },
       });
     });
 
@@ -242,6 +254,65 @@ describe('UsersService', () => {
       });
       await service.update('u1', { name: 'N' });
       expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('isActive=false — sessiyalar bekor qilinadi', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        role: 'receptionist',
+        isActive: true,
+      });
+      await service.update('u1', { isActive: false }, 'admin1');
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { isActive: false } }),
+      );
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('isActive=false — o‘zini faolsizlantira olmaydi (409)', async () => {
+      await expect(
+        service.update('a1', { isActive: false }, 'a1'),
+      ).rejects.toThrow(CANNOT_DEACTIVATE_SELF);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('isActive=false — yagona faol adminni faolsizlantirib bo‘lmaydi (409)', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        role: 'admin',
+        isActive: true,
+      });
+      prisma.$queryRaw.mockResolvedValue([{ id: 'u1' }]);
+      await expect(
+        service.update('u1', { isActive: false }, 'other'),
+      ).rejects.toThrow(LAST_ADMIN_MESSAGE);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('isActive=false — boshqa faol admin bor bo‘lsa o‘tadi', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'a1',
+        role: 'admin',
+        isActive: true,
+      });
+      prisma.user.update.mockResolvedValue({ id: 'a1' });
+      await service.update('a1', { isActive: false }, 'a2');
+      expect(prisma.user.update).toHaveBeenCalled();
+    });
+
+    it('doctor loginini faolsizlantirish — Doctor kartasi ham sinxronlanadi', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'u5',
+        role: 'doctor',
+        isActive: true,
+      });
+      const updateMany = jest.fn();
+      (prisma as any).doctor = { updateMany };
+      await service.update('u5', { isActive: false }, 'admin1');
+      expect(updateMany).toHaveBeenCalledWith({
+        where: { userId: 'u5' },
+        data: { isActive: false },
+      });
     });
 
     it('update — rolni doctor ga o‘zgartirish — 400 (/doctors dan foydalaning)', async () => {

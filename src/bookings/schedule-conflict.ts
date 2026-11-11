@@ -5,6 +5,9 @@ export type ScheduleSlot = {
   startTime: string;
   endTime: string;
   isWorking: boolean;
+  /** Ixtiyoriy tushlik tanaffusi (HH:mm); ikkalasi birga beriladi. */
+  breakStart?: string | null;
+  breakEnd?: string | null;
 };
 
 export const DEFAULT_DURATION_MIN = 30;
@@ -23,7 +26,8 @@ export function minutesToTime(mins: number): string {
 /**
  * Why a booking cannot happen under this doctor schedule / days off, or null
  * when it fits. Schedules with no working day at all (the untouched default)
- * are ignored. Shared by booking validation and the "schedule change hits N
+ * are ignored; once a schedule is defined, a weekday with no entry counts as
+ * non-working. Shared by booking validation and the "schedule change hits N
  * bookings" report.
  */
 export function scheduleViolation(
@@ -47,14 +51,26 @@ export function scheduleViolation(
   const slot = schedule.find(
     (s) => Number(s?.day) === scheduleWeekday(dateOnly),
   );
-  if (!slot) return null;
-  if (!slot.isWorking) return 'Shifokor bu hafta kunida ishlamaydi';
+  if (!slot || !slot.isWorking) return 'Shifokor bu hafta kunida ishlamaydi';
   const start = timeToMinutes(String(slot.startTime).slice(0, 5));
   const end = timeToMinutes(String(slot.endTime).slice(0, 5));
   const bookingStart = timeToMinutes(time);
   if (Number.isNaN(start) || Number.isNaN(end)) return null;
   if (bookingStart < start || bookingStart + duration > end) {
     return `Qabul vaqti shifokorning ish vaqtidan tashqarida (${minutesToTime(start)}–${minutesToTime(end)})`;
+  }
+  if (slot.breakStart && slot.breakEnd) {
+    const bs = timeToMinutes(String(slot.breakStart).slice(0, 5));
+    const be = timeToMinutes(String(slot.breakEnd).slice(0, 5));
+    if (
+      !Number.isNaN(bs) &&
+      !Number.isNaN(be) &&
+      bs < be &&
+      bookingStart < be &&
+      bookingStart + duration > bs
+    ) {
+      return `Qabul vaqti shifokorning tanaffusiga to'g'ri keladi (${minutesToTime(bs)}–${minutesToTime(be)})`;
+    }
   }
   return null;
 }

@@ -39,14 +39,16 @@ describe('DoctorsController', () => {
   it('findAll — query', async () => {
     const query = { search: 'ali' } as any;
     service.findAll.mockResolvedValue({ data: [] });
-    await expect(controller.findAll(query)).resolves.toEqual({ data: [] });
-    expect(service.findAll).toHaveBeenCalledWith(query);
+    const u = { id: 'u1', role: 'admin' } as any;
+    await expect(controller.findAll(query, u)).resolves.toEqual({ data: [] });
+    expect(service.findAll).toHaveBeenCalledWith(query, u);
   });
 
   it('findOne — id', async () => {
     service.findOne.mockResolvedValue({ id: 'd1' });
-    await expect(controller.findOne('d1')).resolves.toEqual({ id: 'd1' });
-    expect(service.findOne).toHaveBeenCalledWith('d1');
+    const u = { id: 'u1', role: 'doctor' } as any;
+    await expect(controller.findOne('d1', u)).resolves.toEqual({ id: 'd1' });
+    expect(service.findOne).toHaveBeenCalledWith('d1', u);
   });
 
   it('create — dto', async () => {

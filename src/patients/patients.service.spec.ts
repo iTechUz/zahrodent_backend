@@ -4,7 +4,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DOCTOR_PROFILE_MISSING_MESSAGE } from '../common/auth/doctor-scope';
-import { PatientsService, patientDebtMessage } from './patients.service';
+import {
+  DOCTOR_NO_DEBT_FILTER_MESSAGE,
+  PatientsService,
+  patientDebtMessage,
+} from './patients.service';
 import { PatientsRepository } from './patients.repository';
 import type { AuthUserView } from '../auth/auth.service';
 
@@ -250,6 +254,36 @@ describe('PatientsService', () => {
       expect(repo.findAll).not.toHaveBeenCalled();
     });
 
+    it('debtOnly — doctor roli uchun 403, DB ga bormaydi', async () => {
+      await expect(
+        service.findAll({ debtOnly: 'true' }, doctor),
+      ).rejects.toThrow(DOCTOR_NO_DEBT_FILTER_MESSAGE);
+      expect(repo.findDebtors).not.toHaveBeenCalled();
+      expect(repo.findAll).not.toHaveBeenCalled();
+    });
+
+    it('doctor roli — ro‘yxat va findOne javobida pul maydonlari yo‘q; admin da bor', async () => {
+      repo.findAll.mockResolvedValue({ data: [row()], total: 1 } as any);
+      repo.findById.mockResolvedValue(row() as any);
+      repo.count.mockResolvedValue(1);
+      const list = await service.findAll({}, doctor);
+      const one = await service.findOne('p1', doctor);
+      for (const o of [list.data[0], one]) {
+        for (const f of [
+          'balance',
+          'totalPaid',
+          'totalRefunded',
+          'totalOwed',
+        ]) {
+          expect(o).not.toHaveProperty(f);
+        }
+        expect(o.firstName).toBe('Ali');
+      }
+      const adminOne = await service.findOne('p1', admin);
+      expect(adminOne).toHaveProperty('balance');
+      expect(adminOne).toHaveProperty('totalOwed');
+    });
+
     it('debtOnly=false — filtr yo‘q', async () => {
       await service.findAll({ debtOnly: 'false' }, admin);
       expect(repo.findDebtors).not.toHaveBeenCalled();
@@ -294,6 +328,42 @@ describe('PatientsService', () => {
       expect(repo.findById).not.toHaveBeenCalled();
       expect(repo.count).not.toHaveBeenCalled();
       expect(repo.groupBySource).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('comments — muallif o‘chirilganda', () => {
+    it('addComment — authorName snapshot yoziladi', async () => {
+      repo.findById.mockResolvedValue(row() as any);
+      repo.createComment.mockResolvedValue({
+        id: 'c1',
+        authorName: 'Admin',
+        author: { name: 'Admin', avatar: null },
+      } as any);
+      await service.addComment({ content: 'x', patientId: 'p1' }, admin);
+      expect(repo.createComment).toHaveBeenCalledWith({
+        content: 'x',
+        patientId: 'p1',
+        authorId: 'u1',
+        authorName: 'Admin',
+      });
+    });
+
+    it('findComments — author null bo‘lsa snapshot ism ko‘rsatiladi', async () => {
+      repo.findById.mockResolvedValue(row() as any);
+      repo.findCommentsByPatientId.mockResolvedValue([
+        { id: 'c1', authorId: null, authorName: 'Eski xodim', author: null },
+        { id: 'c2', authorId: null, authorName: null, author: null },
+        {
+          id: 'c3',
+          authorId: 'u1',
+          authorName: 'Eski',
+          author: { name: 'Yangi', avatar: 'a.png' },
+        },
+      ] as any);
+      const out = await service.findComments('p1', admin);
+      expect(out[0].author).toEqual({ name: 'Eski xodim', avatar: null });
+      expect(out[1].author.name).toBe("Noma'lum xodim");
+      expect(out[2].author).toEqual({ name: 'Yangi', avatar: 'a.png' });
     });
   });
 
@@ -473,6 +543,76 @@ describe('PatientsService', () => {
         service.update('p1', { notes: 'x' }, doctor),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    describe('doctor — faqat klinik maydonlar', () => {
+      beforeEach(() => {
+        repo.findById.mockResolvedValue(row({ assignedDoctorId: 'd1' }) as any);
+        repo.count.mockResolvedValue(1);
+        repo.update.mockResolvedValue(row({ assignedDoctorId: 'd1' }) as any);
+      });
+
+      it.each([
+        [{ assignedDoctorId: 'd9' }, 'assignedDoctorId'],
+        [{ assignedDoctorId: null }, 'assignedDoctorId'],
+        [{ phone: '+998909998877' }, 'phone'],
+        [{ firstName: 'Boshqa' }, 'firstName'],
+        [{ address: 'Yangi manzil' }, 'address'],
+        [{ source: 'phone' as const }, 'source'],
+      ])('%j — 403 va yozilmaydi', async (dto, field) => {
+        await expect(service.update('p1', dto as any, doctor)).rejects.toThrow(
+          ForbiddenException,
+        );
+        await expect(service.update('p1', dto as any, doctor)).rejects.toThrow(
+          field,
+        );
+        expect(repo.update).not.toHaveBeenCalled();
+      });
+
+      it('notes + toothChart o‘tadi', async () => {
+        await service.update(
+          'p1',
+          { notes: 'Karies', toothChart: { 11: { condition: 'caries' } } },
+          doctor,
+        );
+        expect(repo.update).toHaveBeenCalledTimes(1);
+      });
+
+      it('to‘liq forma yuborilsa ham, o‘zgarmagan qiymatlar rad etilmaydi', async () => {
+        await service.update(
+          'p1',
+          {
+            firstName: 'Ali',
+            lastName: 'Valiyev',
+            age: 30,
+            phone: '+998901112233',
+            address: 'Toshkent',
+            workplace: 'IT',
+            source: 'walk-in',
+            assignedDoctorId: 'd1',
+            notes: 'yangi izoh',
+          },
+          doctor,
+        );
+        expect(repo.update).toHaveBeenCalledTimes(1);
+      });
+
+      it('javobda pul maydonlari yo‘q', async () => {
+        const out = await service.update('p1', { notes: 'x' }, doctor);
+        for (const f of [
+          'balance',
+          'totalPaid',
+          'totalRefunded',
+          'totalOwed',
+        ]) {
+          expect(out).not.toHaveProperty(f);
+        }
+      });
+
+      it('admin/receptionist assignedDoctorId ni o‘zgartira oladi', async () => {
+        await service.update('p1', { assignedDoctorId: 'd9' }, admin);
+        expect(repo.update).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('qisman update — faqat berilgan maydonlar, notes default yo‘q', async () => {
@@ -710,14 +850,19 @@ describe('PatientsService', () => {
   describe('comments', () => {
     it('addComment — authorId bilan saqlaydi', async () => {
       repo.findById.mockResolvedValue(row() as any);
-      repo.createComment.mockResolvedValue({ id: 'c1' } as any);
+      repo.createComment.mockResolvedValue({
+        id: 'c1',
+        authorName: 'Admin',
+        author: { name: 'Admin', avatar: null },
+      } as any);
       await expect(
         service.addComment({ content: 'Salom', patientId: 'p1' }, admin),
-      ).resolves.toEqual({ id: 'c1' });
+      ).resolves.toMatchObject({ id: 'c1' });
       expect(repo.createComment).toHaveBeenCalledWith({
         content: 'Salom',
         patientId: 'p1',
         authorId: 'u1',
+        authorName: 'Admin',
       });
     });
 
@@ -758,11 +903,16 @@ describe('PatientsService', () => {
       it('doctor — o‘z bemoriga izoh yoza oladi (authorId = user.id)', async () => {
         repo.findById.mockResolvedValue(row() as any);
         repo.count.mockResolvedValue(1);
+        repo.createComment.mockResolvedValue({
+          author: null,
+          authorName: 'Dr',
+        } as any);
         await service.addComment({ content: 'ok', patientId: 'p1' }, doctor);
         expect(repo.createComment).toHaveBeenCalledWith({
           content: 'ok',
           patientId: 'p1',
           authorId: 'u2',
+          authorName: 'Dr',
         });
       });
     });

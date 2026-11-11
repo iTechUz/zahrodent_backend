@@ -35,6 +35,21 @@ export class ScheduleSlotDto {
 
   @IsBoolean()
   isWorking: boolean;
+
+  /** Ixtiyoriy tushlik tanaffusi: ikkalasi birga (HH:mm), breakStart < breakEnd. */
+  @IsOptional()
+  @IsString()
+  @Matches(SCHEDULE_TIME_REGEX, {
+    message: 'breakStart HH:mm formatida bo‘lishi kerak',
+  })
+  breakStart?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @Matches(SCHEDULE_TIME_REGEX, {
+    message: 'breakEnd HH:mm formatida bo‘lishi kerak',
+  })
+  breakEnd?: string | null;
 }
 
 export class CreateDoctorDto {
@@ -60,6 +75,17 @@ export class CreateDoctorDto {
     message: "Telefon raqami noto'g'ri formatda (+998XXXXXXXXX)",
   })
   phone: string;
+
+  /**
+   * Kirish (login) telefoni. Berilmasa — yaratishda `phone` ishlatiladi,
+   * yangilashda login telefoni o'zgarmaydi.
+   */
+  @IsOptional()
+  @IsString()
+  @Matches(/^\+998\d{9}$/, {
+    message: "Login telefoni noto'g'ri formatda (+998XXXXXXXXX)",
+  })
+  loginPhone?: string;
 
   @IsOptional()
   @IsString()
