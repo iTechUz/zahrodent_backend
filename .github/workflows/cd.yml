@@ -37,6 +37,8 @@ jobs:
       NETWORK: ${{ vars.DOCKER_NETWORK }}
       ENV_FILE: ${{ vars.ENV_FILE }}
       PORT: ${{ vars.PORT }}
+      NODE_ENV: ${{ vars.NODE_ENV }}
+      TRUST_PROXY: ${{ vars.TRUST_PROXY }}
     steps:
       # Tag = qisqa commit sha (7 belgi), masalan 10449/zahrodent_backend:8d777fa
       - name: Set image
@@ -47,6 +49,17 @@ jobs:
           missing=""
           for k in SERVER_HOST SERVER_USER CONTAINER NETWORK ENV_FILE PORT; do [ -z "${!k}" ] && missing="$missing $k"; done
           [ -z "$IMAGE_NAME" ] && missing="$missing IMAGE_NAME"
+          # NODE_ENV har ikkala muhitda ochiq-oydin berilishi shart (Dockerfile default'i production,
+          # development muhit esa ataylab NODE_ENV=development qo'yadi — jimgina production bo'lib qolmasin).
+          [ -z "$NODE_ENV" ] && missing="$missing NODE_ENV"
+          # TRUST_PROXY faqat production'da majburiy (nginx ortida; aks holda rate limit/login bloklash global bo'ladi).
+          # development muhit proxy ortida bo'lmasligi mumkin — u yerda ixtiyoriy.
+          if [ "$DEPLOY_ENV" = "production" ]; then
+            [ -z "$TRUST_PROXY" ] && missing="$missing TRUST_PROXY"
+            if [ -n "$NODE_ENV" ] && [ "$NODE_ENV" != "production" ]; then
+              echo "::error::production environment'da NODE_ENV=production bo'lishi kerak (hozir: $NODE_ENV)"; exit 1
+            fi
+          fi
           if [ -n "$missing" ]; then echo "::error::$DEPLOY_ENV environment'da yo'q:$missing"; exit 1; fi
 
       - name: Checkout
@@ -208,6 +221,35 @@ jobs:
           chmod 600 ~/.ssh/id
           ssh-keyscan -H "$SERVER_HOST" >> ~/.ssh/known_hosts 2>/dev/null
           printf 'Host server\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id\n' "$SERVER_HOST" "$SERVER_USER" > ~/.ssh/config
+
+      - name: Checkout
+        if: env.DEPLOY_ENV == 'production'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      # Migratsiyadan OLDIN production bazadan pg_dump (gzip, vaqt tamg'ali) — serverdagi katalogga.
+      # Dump xato bo'lsa yoki juda kichik (< 2 KB) bo'lsa script exit != 0 → bu step, demak
+      # butun deploy to'xtaydi (migratsiya ham, yangi container ham ishga tushmaydi).
+      # Kutiladigan variables: PG_CONTAINER (Postgres container nomi, masalan zahro_db; bo'sh bo'lsa
+      # serverdagi pg_dump + ENV_FILE ichidagi DATABASE_URL ishlatiladi), PG_USER, PG_DATABASE (ixtiyoriy),
+      # PRE_MIGRATE_BACKUP_DIR (ixtiyoriy), PRE_MIGRATE_KEEP (ixtiyoriy, oxirgi nechta dump saqlansin).
+      # Script repodan (shu commit) serverga vaqtincha ko'chiriladi — serverdagi nusxaga bog'liq emas.
+      - name: Pre-migration database backup
+        if: env.DEPLOY_ENV == 'production'
+        env:
+          PG_CONTAINER: ${{ vars.PG_CONTAINER }}
+          PG_USER: ${{ vars.PG_USER }}
+          PG_DATABASE: ${{ vars.PG_DATABASE }}
+          PRE_MIGRATE_BACKUP_DIR: ${{ vars.PRE_MIGRATE_BACKUP_DIR }}
+          PRE_MIGRATE_KEEP: ${{ vars.PRE_MIGRATE_KEEP }}
+        run: |
+          set -euo pipefail
+          BACKUP_DIR="${PRE_MIGRATE_BACKUP_DIR:-/home/ubuntu/backups/zahro_dental/pre-migrate}"
+          KEEP="${PRE_MIGRATE_KEEP:-10}"
+          scp scripts/backup-db.sh server:/tmp/zahro-backup-db.sh
+          # shellcheck disable=SC2029 # qiymatlar runner'da ochiladi (ataylab)
+          ssh server "env PG_CONTAINER='${PG_CONTAINER:-}' PGUSER='${PG_USER:-postgres}' PGDATABASE='${PG_DATABASE:-zahro_dental}' BACKUP_DIR='$BACKUP_DIR' KEEP_LAST='$KEEP' MIN_BYTES=2048 ENV_FILE='$ENV_FILE' bash /tmp/zahro-backup-db.sh; rc=\$?; rm -f /tmp/zahro-backup-db.sh; exit \$rc"
 
       # Yangi image bilan `prisma migrate deploy` (faqat pending migratsiyalar).
       # Xato bo'lsa deploy qilinmaydi — eski container ishlashda davom etadi.

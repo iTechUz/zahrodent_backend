@@ -186,7 +186,7 @@ Qoidalar:
 1. **Faqat oldinga (forward-only).** Qo'llangan migratsiya fayli hech qachon tahrirlanmaydi yoki o'chirilmaydi —
    o'zgarish kerak bo'lsa yangi migratsiya yoziladi.
 2. Umumiy/production bazada **hech qachon** `prisma migrate dev`, `prisma migrate reset` yoki `prisma db push` ishlatilmaydi.
-3. Production'da migratsiyalar konteyner startida avtomatik: `prisma migrate deploy && node dist/src/main.js`.
+3. Production'da migratsiyalar CD'ning `migrate` job'ida (konteyner almashishidan oldin, avval `pg_dump` zaxira nusxa bilan) qo'llanadi; konteyner startida emas. Destruktiv SQL (`DROP COLUMN`/`DROP TABLE`/`ALTER COLUMN … TYPE`) PR'da `-- allow-destructive` izohisiz CI'dan o'tmaydi.
 4. Yangi migratsiya yozish (lokal):
    ```bash
    # schema.prisma ni o'zgartiring, so'ng vaqtinchalik shadow DB bilan SQL oling
@@ -294,18 +294,14 @@ Eslatma oynasi: bugundan `bugun + reminderDaysAhead` gacha (Asia/Tashkent), `pen
 ## Docker va CI/CD
 
 **Dockerfile** (multi-stage): `npm ci` → `prisma generate` → `nest build`; runtime image faqat prod dependency'lar,
-non-root `nodeuser`, `PORT=7878`, `TZ=Asia/Tashkent`, `HEALTHCHECK` → `GET /health`. Start buyrug'i:
-`prisma migrate deploy && exec node dist/src/main.js` (node PID 1 — SIGTERM'da graceful shutdown: Prisma disconnect, bot stop).
+distroless non-root, `NODE_ENV=production` (default), `TZ=Asia/Tashkent`, `HEALTHCHECK` → `GET /health`. Start buyrug'i:
+`node dist/src/main.js` (node PID 1 — SIGTERM'da graceful shutdown: Prisma disconnect, bot stop). Migratsiya start'da emas, CD'da.
 
-**GitHub Actions** (`.github/workflows/docker-deploy.yml`):
-
-| Job | Qachon | Nima qiladi |
-|---|---|---|
-| `test` | har PR va `main` ga push | `npm ci`, `prisma generate`, type check, ESLint, Jest (coverage) |
-| `deploy` | faqat `main` ga push, `test` o'tsa | `docker build -t 10449/zahrodent_backend:<git sha>` → Docker Hub → SSH orqali serverda `docker pull`, eski konteynerni o'chirish, `docker run --network zaxro_network -p 7878:7878 --env-file …/.env` |
-
-Kerakli GitHub secrets: `DOCKERHUB_TOKEN`, `SSH_PRIVATE_KEY`. Batafsil, birinchi deploy, rollback va nginx:
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+**GitHub Actions**: `.github/workflows/ci.yml` (lint, typecheck, test, Docker build, migration safety, npm audit) va
+`.github/workflows/cd.yml` (CI muvaffaqiyatli tugagach: `build` → `prepare` → `migrate` → `deploy` → `notify`;
+`main` → `production`, `dev` → `development` environment). Production'da `NODE_ENV` va `TRUST_PROXY` Variables majburiy,
+**faqat bitta API instansiyasi** ishlatiladi (Telegram polling, xotiradagi login bloklash). Batafsil, birinchi deploy,
+rollback, backup va nginx: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Health check
 

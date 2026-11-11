@@ -47,7 +47,8 @@ describe('RolesGuard coverage — every guarded route has explicit @Roles', () =
           const roles =
             (Reflect.getMetadata(ROLES_KEY, handler) as string[] | undefined) ??
             (Reflect.getMetadata(ROLES_KEY, exp) as string[] | undefined);
-          if (!roles?.length) missing.push(`${(exp as Function).name}.${name}`);
+          if (!roles?.length)
+            missing.push(`${(exp as { name: string }).name}.${name}`);
         }
       }
     }

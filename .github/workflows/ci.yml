@@ -58,6 +58,37 @@ jobs:
       - run: npx prisma generate
       - run: npx jest --ci --coverage
 
+  # Yangi/o'zgargan migratsiyada DROP COLUMN / DROP TABLE / ALTER COLUMN ... TYPE bo'lsa,
+  # faylda "-- allow-destructive" izohi bo'lishi shart (scripts/check-migrations.sh).
+  migrations:
+    name: Migration safety
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check destructive migrations
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: scripts/check-migrations.sh "origin/$BASE_REF"
+
+  # Production bog'liqliklaridagi zaiflik hisoboti. Bloklamaydi (continue-on-error):
+  # ko'pincha fix'siz tranzitiv paketlar; natijani Actions logida ko'ring.
+  audit:
+    name: npm audit (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+      - run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
+
   # 🐳 Docker image build bo'lishini tekshirish (push qilinmaydi)
   build:
     name: Docker build
