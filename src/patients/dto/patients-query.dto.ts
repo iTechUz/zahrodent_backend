@@ -49,6 +49,13 @@ export class PatientsQueryDto extends ListQueryDto {
   doctorId?: string;
 
   @ApiPropertyOptional({
+    description:
+      "Shifokorning barcha bemorlari: biriktirilgan, qabulga yozilgan yoki tashrif qilgan (shifokor profili uchun)",
+  })
+  @IdQuery()
+  relatedDoctorId?: string;
+
+  @ApiPropertyOptional({
     enum: PATIENT_SORT_FIELDS,
     description: 'Standart: createdAt desc',
   })

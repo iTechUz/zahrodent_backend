@@ -61,7 +61,8 @@ export class PatientsService {
     query: PatientsQueryDto,
     user: AuthUserView,
   ): Promise<PaginatedResponse<ReturnType<PatientsService['toResponse']>>> {
-    const { search, source, startDate, endDate, debtOnly, doctorId } = query;
+    const { search, source, startDate, endDate, debtOnly, doctorId, relatedDoctorId } =
+      query;
     const pageNum = Number(query.page || 0);
     const limitNum = Number(query.limit || 10);
     const skip = pageNum * limitNum;
@@ -73,6 +74,7 @@ export class PatientsService {
 
     if (source && source !== 'all') and.push({ source });
     if (doctorId) and.push({ assignedDoctorId: doctorId });
+    if (relatedDoctorId) and.push(doctorPatientsWhere(relatedDoctorId));
 
     if (startDate || endDate) {
       // created_at is a DATE column → compare calendar days directly.
