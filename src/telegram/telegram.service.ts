@@ -174,15 +174,28 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private registerCommands(bot: Telegraf) {
-    bot.start((ctx) => {
-      ctx.reply(
-        `Zahro Dental klinikasiga xush kelibsiz, ${ctx.from.first_name}!\n\nIltimos, telefon raqamingizni yuboring:`,
-        Markup.keyboard([
-          Markup.button.contactRequest('📱 Telefon raqamni yuborish'),
-        ])
-          .resize()
-          .oneTime(),
-      );
+    bot.start(async (ctx) => {
+      try {
+        // Telegram rejects contact-request buttons outside private chats.
+        if (ctx.chat.type !== 'private') {
+          await ctx.reply(
+            'Zahro Dental klinikasiga xush kelibsiz! Murojaat qoldirish uchun botga shaxsiy chatda /start yuboring.',
+          );
+          return;
+        }
+        await ctx.reply(
+          `Zahro Dental klinikasiga xush kelibsiz, ${ctx.from.first_name}!\n\nIltimos, telefon raqamingizni yuboring:`,
+          Markup.keyboard([
+            Markup.button.contactRequest('📱 Telefon raqamni yuborish'),
+          ])
+            .resize()
+            .oneTime(),
+        );
+      } catch (err) {
+        this.logger.warn(
+          `/start javobida xato: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     });
 
     bot.on('contact', async (ctx) => {
