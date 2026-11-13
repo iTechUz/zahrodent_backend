@@ -248,12 +248,21 @@ describe('TelegramService', () => {
       );
     });
 
-    it('/start — salomlashadi va kontakt so‘raydi', () => {
-      const c = ctx();
-      handlers.start!(c);
+    it('/start — salomlashadi va kontakt so‘raydi', async () => {
+      const c = ctx({ chat: { id: 9001, type: 'private' } });
+      await handlers.start!(c);
       expect(c.reply).toHaveBeenCalledWith(
         expect.stringContaining('xush kelibsiz, Ali!'),
         expect.anything(),
+      );
+    });
+
+    it('/start guruhda — kontakt tugmasisiz, shaxsiy chatga yo‘naltiradi', async () => {
+      const c = ctx({ chat: { id: -1001234, type: 'supergroup' } });
+      await handlers.start!(c);
+      expect(c.reply).toHaveBeenCalledTimes(1);
+      expect(c.reply).toHaveBeenCalledWith(
+        expect.stringContaining('shaxsiy chatda'),
       );
     });
 
