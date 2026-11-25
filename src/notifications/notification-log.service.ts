@@ -9,7 +9,12 @@ import { NotificationLog, Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { TelegramBotRegistry } from '../telegram/telegram-bot.registry';
 import { oneLine } from '../common/utils/text.util';
-import { bookingsTopicId, statusChatId } from '../telegram/dev-defaults';
+import {
+  bookingsTopicId,
+  leadsChatId,
+  leadsTopicId,
+  statusChatId,
+} from '../telegram/dev-defaults';
 
 export type NotificationLogStatus = 'pending' | 'sent' | 'failed';
 
@@ -300,11 +305,13 @@ export const BOOKING_GROUP_KINDS: readonly string[] = [
   'feedback_low_group',
 ];
 
-/** Topic for a row, only when it is a booking message to the staff group. */
+/** Topic for a row: new leads go to the leads topic, booking messages to the bookings topic. */
 export function bookingTopicFor(row: {
   kind: string;
   chatId: string;
 }): number | undefined {
+  if (row.kind === 'lead_group')
+    return row.chatId === leadsChatId() ? leadsTopicId() : undefined;
   if (!BOOKING_GROUP_KINDS.includes(row.kind)) return undefined;
   if (row.chatId !== statusChatId()) return undefined;
   return bookingsTopicId();
