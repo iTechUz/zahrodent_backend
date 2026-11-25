@@ -71,6 +71,21 @@ describe('NotificationLogService', () => {
       });
     });
 
+    it('lead group message goes to TELEGRAM_LEADS_TOPIC_ID, else the bookings topic', async () => {
+      process.env.TELEGRAM_LEADS_CHAT_ID = '-100';
+      process.env.TELEGRAM_LEADS_TOPIC_ID = '55';
+      process.env.TELEGRAM_BOOKINGS_TOPIC_ID = '77';
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'new' });
+      expect(tg.sendMessage).toHaveBeenLastCalledWith('-100', 'new', {
+        message_thread_id: 55,
+      });
+      delete process.env.TELEGRAM_LEADS_TOPIC_ID;
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'new2' });
+      expect(tg.sendMessage).toHaveBeenLastCalledWith('-100', 'new2', {
+        message_thread_id: 77,
+      });
+    });
+
     it('without the env var it stays in General (no thread id)', async () => {
       delete process.env.TELEGRAM_BOOKINGS_TOPIC_ID;
       await svc.enqueue({

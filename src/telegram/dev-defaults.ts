@@ -50,3 +50,14 @@ export function bookingsTopicId(): number | undefined {
   const id = Number(raw);
   return id > 0 ? id : undefined;
 }
+
+/**
+ * Forum topic of the staff group where new website/bot leads go. Falls back to
+ * the bookings topic, then to General, so leads don't stay in General once a
+ * topic is configured.
+ */
+export function leadsTopicId(): number | undefined {
+  const raw = process.env.TELEGRAM_LEADS_TOPIC_ID?.trim();
+  if (raw && /^\d+$/.test(raw) && Number(raw) > 0) return Number(raw);
+  return bookingsTopicId();
+}
