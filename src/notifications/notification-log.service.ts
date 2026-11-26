@@ -206,17 +206,30 @@ export function isPermanentTelegramError(error: string): boolean {
   return /^(400|403)\b/.test(error.trim());
 }
 
-/** Forum topic for new-lead group messages (TELEGRAM_LEADS_TOPIC_ID, else TELEGRAM_BOOKINGS_TOPIC_ID); General when unset/invalid. */
+/**
+ * Forum topic for group messages: new leads → TELEGRAM_LEADS_TOPIC_ID (else TELEGRAM_BOOKINGS_TOPIC_ID);
+ * booking status changes → TELEGRAM_STATUS_TOPIC_ID (else TELEGRAM_BOOKINGS_TOPIC_ID). General when unset/invalid.
+ */
 export function leadTopicFor(row: {
   kind: string;
   chatId: string;
 }): number | undefined {
-  if (row.kind !== 'lead_group') return undefined;
-  if (row.chatId !== process.env.TELEGRAM_LEADS_CHAT_ID?.trim())
-    return undefined;
-  const raw =
-    process.env.TELEGRAM_LEADS_TOPIC_ID?.trim() ||
-    process.env.TELEGRAM_BOOKINGS_TOPIC_ID?.trim();
+  let raw: string | undefined;
+  if (row.kind === 'lead_group') {
+    if (row.chatId !== process.env.TELEGRAM_LEADS_CHAT_ID?.trim())
+      return undefined;
+    raw =
+      process.env.TELEGRAM_LEADS_TOPIC_ID?.trim() ||
+      process.env.TELEGRAM_BOOKINGS_TOPIC_ID?.trim();
+  } else if (row.kind === 'booking_status_group') {
+    const statusChat = (
+      process.env.TELEGRAM_STATUS_CHAT_ID || process.env.TELEGRAM_LEADS_CHAT_ID
+    )?.trim();
+    if (row.chatId !== statusChat) return undefined;
+    raw =
+      process.env.TELEGRAM_STATUS_TOPIC_ID?.trim() ||
+      process.env.TELEGRAM_BOOKINGS_TOPIC_ID?.trim();
+  } else return undefined;
   if (!raw || !/^\d+$/.test(raw)) return undefined;
   const id = Number(raw);
   return id > 0 ? id : undefined;
