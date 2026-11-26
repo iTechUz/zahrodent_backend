@@ -11,6 +11,7 @@ describe('AnalyticsService', () => {
       | 'countPatients'
       | 'countBookings'
       | 'countDoctors'
+      | 'countBookingsByStatus'
       | 'sumPayments'
       | 'getDebtSummary'
       | 'patientsPerDay'
@@ -56,6 +57,7 @@ describe('AnalyticsService', () => {
       countPatients: jest.fn().mockResolvedValue(0),
       countBookings: jest.fn().mockResolvedValue(0),
       countDoctors: jest.fn().mockResolvedValue(0),
+      countBookingsByStatus: jest.fn().mockResolvedValue({}),
       sumPayments: jest.fn().mockResolvedValue(0),
       getDebtSummary: jest.fn().mockResolvedValue({ total: 0, count: 0 }),
       patientsPerDay: jest.fn().mockResolvedValue([]),
@@ -116,6 +118,7 @@ describe('AnalyticsService', () => {
         pendingBookings: 11,
         activeDoctors: 3,
         totalDoctors: 5,
+        periodBookingsByStatus: {},
         todayRevenue: 1_500_000,
         monthRevenue: 42_000_000,
         monthExpenses: 8_000_000,
@@ -211,6 +214,29 @@ describe('AnalyticsService', () => {
         status: 'pending',
         date: { gte: d('2026-09-15') },
       });
+    });
+
+    it('doctor — shifokorlar soni faqat o‘zi, davr holatlari o‘z qabullari', async () => {
+      repo.countBookingsByStatus.mockResolvedValue({
+        completed: 2,
+        pending: 1,
+      });
+      const out = await service.getDashboard(doctor, '2026-09-15');
+      expect(repo.countDoctors).toHaveBeenNthCalledWith(1, {
+        id: 'd1',
+        bookings: {
+          some: {
+            date: d('2026-09-15'),
+            status: { notIn: ['cancelled', 'no-show'] },
+          },
+        },
+      });
+      expect(repo.countDoctors).toHaveBeenNthCalledWith(2, { id: 'd1' });
+      expect(repo.countBookingsByStatus).toHaveBeenCalledWith({
+        doctorId: 'd1',
+        date: { gte: d('2026-09-01'), lte: d('2026-09-30') },
+      });
+      expect(out.periodBookingsByStatus).toEqual({ completed: 2, pending: 1 });
     });
 
     it('doctor profili yo‘q — 403', async () => {

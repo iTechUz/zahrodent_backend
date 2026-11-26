@@ -1163,37 +1163,35 @@ describe('BookingsService', () => {
   });
 
   describe('getStats', () => {
-    it('bugun, pending, bugun yakunlangan', async () => {
+    it('barcha, pending, yakunlangan (+ eski bugun maydonlari)', async () => {
       // 2026-06-17 20:00Z = 2026-06-18 01:00 Toshkent
       jest.useFakeTimers({ now: new Date('2026-06-17T20:00:00.000Z') });
       repo.count
-        .mockResolvedValueOnce(8)
+        .mockResolvedValueOnce(40)
         .mockResolvedValueOnce(3)
+        .mockResolvedValueOnce(25)
+        .mockResolvedValueOnce(8)
         .mockResolvedValueOnce(2);
       await expect(service.getStats(user)).resolves.toEqual({
-        today: 8,
+        total: 40,
         pending: 3,
+        completed: 25,
+        today: 8,
         completedToday: 2,
       });
       const today = new Date('2026-06-18T00:00:00.000Z');
-      expect(repo.count).toHaveBeenNthCalledWith(1, {
-        date: today,
-        status: { notIn: ['cancelled', 'no-show'] },
-      });
+      expect(repo.count).toHaveBeenNthCalledWith(1, {});
       expect(repo.count).toHaveBeenNthCalledWith(2, {
         status: 'pending',
         date: { gte: today },
       });
-      expect(repo.count).toHaveBeenNthCalledWith(3, {
-        status: 'completed',
-        date: today,
-      });
+      expect(repo.count).toHaveBeenNthCalledWith(3, { status: 'completed' });
     });
 
     it('doctor — barcha count lar doctorId bilan', async () => {
       repo.count.mockResolvedValue(0);
       await service.getStats(doctor);
-      expect(repo.count).toHaveBeenCalledTimes(3);
+      expect(repo.count).toHaveBeenCalledTimes(5);
       for (const call of repo.count.mock.calls) {
         expect(call[0]).toMatchObject({ doctorId: 'd1' });
       }

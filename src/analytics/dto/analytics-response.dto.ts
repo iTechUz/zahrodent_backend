@@ -25,8 +25,17 @@ export class DashboardResponseDto {
   })
   activeDoctors: number;
 
-  @ApiProperty({ example: 5 })
+  @ApiProperty({ example: 5, description: 'doctor uchun — 1 (o‘zi)' })
   totalDoctors: number;
+
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: { type: 'number' },
+    example: { pending: 3, confirmed: 5, completed: 20 },
+    description:
+      'Tanlangan davrdagi qabullar holatlar kesimida (doctor — faqat o‘ziniki)',
+  })
+  periodBookingsByStatus: Record<string, number>;
 
   @ApiProperty({
     type: Number,

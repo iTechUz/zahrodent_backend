@@ -449,27 +449,38 @@ export class BookingsService {
     const scopedDoctorId = doctorScopeId(user);
     if (scopedDoctorId) baseWhere.doctorId = scopedDoctorId;
 
-    const [todayCount, pendingCount, completedToday] = await Promise.all([
-      this.bookingsRepository.count({
-        ...baseWhere,
-        date: today,
-        status: { notIn: ['cancelled', 'no-show'] },
-      }),
-      this.bookingsRepository.count({
-        ...baseWhere,
-        status: 'pending',
-        date: { gte: today },
-      }),
-      this.bookingsRepository.count({
-        ...baseWhere,
-        status: 'completed',
-        date: today,
-      }),
-    ]);
+    const [total, pendingCount, completed, todayCount, completedToday] =
+      await Promise.all([
+        // "Barcha qabullar": every booking regardless of date/status.
+        this.bookingsRepository.count({ ...baseWhere }),
+        this.bookingsRepository.count({
+          ...baseWhere,
+          status: 'pending',
+          date: { gte: today },
+        }),
+        // "Yakunlangan qabullar": all completed bookings.
+        this.bookingsRepository.count({
+          ...baseWhere,
+          status: 'completed',
+        }),
+        this.bookingsRepository.count({
+          ...baseWhere,
+          date: today,
+          status: { notIn: ['cancelled', 'no-show'] },
+        }),
+        this.bookingsRepository.count({
+          ...baseWhere,
+          status: 'completed',
+          date: today,
+        }),
+      ]);
 
     return {
-      today: todayCount,
+      total,
       pending: pendingCount,
+      completed,
+      // Deprecated aliases (previous response shape), kept for old clients.
+      today: todayCount,
       completedToday,
     };
   }
