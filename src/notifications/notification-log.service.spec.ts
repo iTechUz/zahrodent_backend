@@ -46,6 +46,42 @@ describe('NotificationLogService', () => {
     });
   });
 
+  it('lead group message goes to TELEGRAM_LEADS_TOPIC_ID, falls back to General if the topic is gone', async () => {
+    const OLD = process.env;
+    process.env = {
+      ...OLD,
+      TELEGRAM_LEADS_CHAT_ID: '-100',
+      TELEGRAM_LEADS_TOPIC_ID: '55',
+    };
+    try {
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'new' });
+      expect(tg.sendMessage).toHaveBeenLastCalledWith('-100', 'new', {
+        message_thread_id: 55,
+      });
+      tg.sendMessage
+        .mockResolvedValueOnce({
+          ok: false,
+          error: '400: message thread not found',
+        })
+        .mockResolvedValueOnce({ ok: true });
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'new2' });
+      expect(tg.sendMessage).toHaveBeenLastCalledWith(
+        '-100',
+        'new2',
+        undefined,
+      );
+      delete process.env.TELEGRAM_LEADS_TOPIC_ID;
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'new3' });
+      expect(tg.sendMessage).toHaveBeenLastCalledWith(
+        '-100',
+        'new3',
+        undefined,
+      );
+    } finally {
+      process.env = OLD;
+    }
+  });
+
   it('passes inline keyboard as reply_markup', async () => {
     const kb = { inline_keyboard: [[{ text: 'a', callback_data: 'b' }]] };
     db.notificationLog.create.mockResolvedValue(
