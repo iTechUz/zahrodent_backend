@@ -93,8 +93,12 @@ export class LeadsService {
         phone,
         new Date(Date.now() - LEAD_DEDUPE_WINDOW_MS),
       );
-      // Same person re-submitting: keep one lead, no second staff ping.
-      if (dup) return dup;
+      // Same person re-submitting: keep one lead, but tell staff in the group
+      // (short "takroriy" note) so the submission doesn't look lost.
+      if (dup) {
+        void this.notifyLeadsChatDuplicate(dup, dto.source ?? '');
+        return dup;
+      }
     }
     const lead = await this.leadsRepository.create({
       ...dto,
@@ -126,6 +130,32 @@ export class LeadsService {
     } catch (e) {
       this.logger.warn(
         `Lead Telegram guruhiga yuborilmadi: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  /** Short note in the leads topic that an open lead's phone was submitted again. */
+  private async notifyLeadsChatDuplicate(
+    lead: Lead,
+    source: string,
+  ): Promise<void> {
+    try {
+      const chatId = leadsChatId();
+      if (!chatId || !NOTIFIED_SOURCES.includes(source)) return;
+      await this.outbox.enqueue({
+        kind: 'lead_group',
+        chatId,
+        text: [
+          '🔁 Takroriy murojaat (24 soat ichida shu raqamdan ariza bor)',
+          `👤 ${clean(lead.name, 100)}`,
+          `📞 ${clean(lead.phone, 30)}`,
+          `📍 ${SOURCE_LABELS[source] ?? clean(source, 40)}`,
+        ].join('\n'),
+        leadId: lead.id,
+      });
+    } catch (e) {
+      this.logger.warn(
+        `Takroriy murojaat guruhga yuborilmadi: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
   }
