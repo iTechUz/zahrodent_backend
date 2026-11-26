@@ -13,6 +13,7 @@ import {
   bookingsTopicId,
   leadsChatId,
   leadsTopicId,
+  statusTopicId,
   statusChatId,
 } from '../telegram/dev-defaults';
 
@@ -314,6 +315,7 @@ export function bookingTopicFor(row: {
     return row.chatId === leadsChatId() ? leadsTopicId() : undefined;
   if (!BOOKING_GROUP_KINDS.includes(row.kind)) return undefined;
   if (row.chatId !== statusChatId()) return undefined;
+  if (row.kind === 'booking_status_group') return statusTopicId();
   return bookingsTopicId();
 }
 
