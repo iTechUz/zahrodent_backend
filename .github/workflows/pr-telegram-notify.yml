@@ -15,7 +15,7 @@ jobs:
     environment: production
 
     steps:
-      - uses: actions/checkout@v4.4.0
+      - uses: actions/checkout@v7
       # Every value goes through env, never ${{ }} inside run: (script injection).
       # Fails the job if the message is not delivered.
       - name: Send message to Telegram topic
