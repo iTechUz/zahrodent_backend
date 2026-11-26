@@ -109,10 +109,23 @@ export class NotificationLogService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async attempt(row: NotificationLog): Promise<NotificationLog> {
-    const extra = row.replyMarkup
+    const topic = leadTopicFor(row);
+    const markup = row.replyMarkup
       ? { reply_markup: row.replyMarkup as Record<string, unknown> }
       : undefined;
-    const res = await this.telegram.sendMessage(row.chatId, row.text, extra);
+    const extra = topic ? { ...markup, message_thread_id: topic } : markup;
+    let res = await this.telegram.sendMessage(row.chatId, row.text, extra);
+    if (
+      'error' in res &&
+      topic &&
+      /message thread not found/i.test(res.error)
+    ) {
+      // The topic was deleted/renamed — never lose the lead, fall back to General.
+      this.logger.warn(
+        `Topic ${topic} topilmadi — lid General chatga yuborildi`,
+      );
+      res = await this.telegram.sendMessage(row.chatId, row.text, markup);
+    }
     const attempts = row.attempts + 1;
     if (!('error' in res)) {
       return this.prisma.notificationLog.update({
@@ -191,6 +204,20 @@ export function retryDelayMs(attemptsMade: number): number {
 /** Telegram 400 (bad chat) / 403 (bot blocked) never succeed on retry. */
 export function isPermanentTelegramError(error: string): boolean {
   return /^(400|403)\b/.test(error.trim());
+}
+
+/** Forum topic for new-lead group messages (TELEGRAM_LEADS_TOPIC_ID); General when unset/invalid. */
+export function leadTopicFor(row: {
+  kind: string;
+  chatId: string;
+}): number | undefined {
+  if (row.kind !== 'lead_group') return undefined;
+  if (row.chatId !== process.env.TELEGRAM_LEADS_CHAT_ID?.trim())
+    return undefined;
+  const raw = process.env.TELEGRAM_LEADS_TOPIC_ID?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return undefined;
+  const id = Number(raw);
+  return id > 0 ? id : undefined;
 }
 
 function errMsg(e: unknown): string {
