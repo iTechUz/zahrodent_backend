@@ -28,7 +28,7 @@ jobs:
       # State (failure counters / "already alerted" flags) lives in the Actions
       # cache: each run restores the newest entry and saves a new one.
       - name: Restore state
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .uptime-state
           key: uptime-state-none
@@ -42,7 +42,7 @@ jobs:
         run: ./scripts/uptime-monitor.sh
       - name: Save state
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .uptime-state
           key: uptime-state-${{ github.run_id }}-${{ github.run_attempt }}
