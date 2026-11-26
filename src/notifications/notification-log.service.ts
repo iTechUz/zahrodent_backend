@@ -206,7 +206,7 @@ export function isPermanentTelegramError(error: string): boolean {
   return /^(400|403)\b/.test(error.trim());
 }
 
-/** Forum topic for new-lead group messages (TELEGRAM_LEADS_TOPIC_ID); General when unset/invalid. */
+/** Forum topic for new-lead group messages (TELEGRAM_LEADS_TOPIC_ID, else TELEGRAM_BOOKINGS_TOPIC_ID); General when unset/invalid. */
 export function leadTopicFor(row: {
   kind: string;
   chatId: string;
@@ -214,7 +214,9 @@ export function leadTopicFor(row: {
   if (row.kind !== 'lead_group') return undefined;
   if (row.chatId !== process.env.TELEGRAM_LEADS_CHAT_ID?.trim())
     return undefined;
-  const raw = process.env.TELEGRAM_LEADS_TOPIC_ID?.trim();
+  const raw =
+    process.env.TELEGRAM_LEADS_TOPIC_ID?.trim() ||
+    process.env.TELEGRAM_BOOKINGS_TOPIC_ID?.trim();
   if (!raw || !/^\d+$/.test(raw)) return undefined;
   const id = Number(raw);
   return id > 0 ? id : undefined;
