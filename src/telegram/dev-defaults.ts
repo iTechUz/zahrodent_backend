@@ -61,3 +61,13 @@ export function leadsTopicId(): number | undefined {
   if (raw && /^\d+$/.test(raw) && Number(raw) > 0) return Number(raw);
   return bookingsTopicId();
 }
+
+/**
+ * Forum topic for booking status-change messages ("Qabul holati: ..."). Falls
+ * back to the bookings topic, then to General.
+ */
+export function statusTopicId(): number | undefined {
+  const raw = process.env.TELEGRAM_STATUS_TOPIC_ID?.trim();
+  if (raw && /^\d+$/.test(raw) && Number(raw) > 0) return Number(raw);
+  return bookingsTopicId();
+}
