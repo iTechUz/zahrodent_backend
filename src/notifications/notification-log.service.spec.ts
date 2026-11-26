@@ -77,6 +77,11 @@ describe('NotificationLogService', () => {
         'new3',
         undefined,
       );
+      process.env.TELEGRAM_BOOKINGS_TOPIC_ID = '77';
+      await svc.enqueue({ kind: 'lead_group', chatId: '-100', text: 'new4' });
+      expect(tg.sendMessage).toHaveBeenLastCalledWith('-100', 'new4', {
+        message_thread_id: 77,
+      });
     } finally {
       process.env = OLD;
     }
