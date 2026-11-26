@@ -1,4 +1,8 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { DOCTOR_PROFILE_MISSING_MESSAGE } from '../common/auth/doctor-scope';
 import { PatientsService } from './patients.service';
 import { PatientsRepository } from './patients.repository';
@@ -421,6 +425,18 @@ describe('PatientsService', () => {
         toothChart: undefined,
         createdAt: expect.any(Date),
       });
+    });
+
+    it('age/birthYear siz → 400, ageUnknown bilan → age 0, birthYear null', async () => {
+      const noAge = { ...dto, age: undefined };
+      await expect(service.create(noAge)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      repo.create.mockResolvedValue(row() as any);
+      await service.create({ ...noAge, ageUnknown: true });
+      expect(repo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ age: 0, birthYear: null }),
+      );
     });
 
     it('createdAt — Toshkent kuni (DB server TZ emas)', async () => {
