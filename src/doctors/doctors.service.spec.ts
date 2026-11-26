@@ -80,6 +80,41 @@ describe('DoctorsService', () => {
   });
 
   describe('findAll', () => {
+    const doctorUser = {
+      id: 'u2',
+      name: 'Dr',
+      phone: 'p',
+      role: 'doctor',
+      doctorId: 'd1',
+    } as any;
+
+    it('doctor roli — faqat o‘z yozuvi (boshqa shifokorlar ko‘rinmaydi)', async () => {
+      await service.findAll({ specialty: 'Ortoped' }, doctorUser);
+      expect(repo.findAll.mock.calls[0][0]).toEqual({
+        id: 'd1',
+        specialty: 'Ortoped',
+      });
+    });
+
+    it('doctor — boshqa shifokor id si bo‘yicha findOne 404', async () => {
+      await expect(service.findOne('d2', doctorUser)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(repo.findById).not.toHaveBeenCalled();
+    });
+
+    it('doctor — o‘z id si bo‘yicha findOne ishlaydi', async () => {
+      repo.findById.mockResolvedValue(doc());
+      await expect(service.findOne('d1', doctorUser)).resolves.toMatchObject({
+        id: 'd1',
+      });
+    });
+
+    it('admin — filtrsiz', async () => {
+      await service.findAll({}, { ...doctorUser, role: 'admin' });
+      expect(repo.findAll).toHaveBeenCalledWith({}, { skip: 0, take: 10 });
+    });
+
     it('default pagination', async () => {
       await service.findAll({});
       expect(repo.findAll).toHaveBeenCalledWith({}, { skip: 0, take: 10 });

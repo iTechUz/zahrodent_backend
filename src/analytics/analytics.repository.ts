@@ -15,6 +15,18 @@ export class AnalyticsRepository {
     return this.prisma.booking.count({ where });
   }
 
+  /** Booking counts per status, e.g. { pending: 3, completed: 5 }. */
+  async countBookingsByStatus(
+    where: Prisma.BookingWhereInput,
+  ): Promise<Record<string, number>> {
+    const rows = await this.prisma.booking.groupBy({
+      by: ['status'],
+      where,
+      _count: { _all: true },
+    });
+    return Object.fromEntries(rows.map((r) => [r.status, r._count._all]));
+  }
+
   countDoctors(where: Prisma.DoctorWhereInput = {}) {
     return this.prisma.doctor.count({ where });
   }

@@ -16,6 +16,8 @@ import { DoctorsRepository, DoctorWithUser } from './doctors.repository';
 import { UsersService } from '../users/users.service';
 import { orderByOption, PaginatedResponse } from '../common/dto/pagination.dto';
 import { DoctorsQueryDto } from './dto/doctors-query.dto';
+import { AuthUserView } from '../auth/auth.service';
+import { doctorScopeId } from '../common/auth/doctor-scope';
 
 export const DOCTOR_NOT_FOUND = 'Shifokor topilmadi';
 export const DOCTOR_HAS_HISTORY =
@@ -30,8 +32,13 @@ export class DoctorsService {
     private readonly usersService: UsersService,
   ) {}
 
+  /**
+   * A `doctor` user only ever sees their own record (never colleagues);
+   * other roles see everybody.
+   */
   async findAll(
     query: DoctorsQueryDto,
+    user?: AuthUserView,
   ): Promise<PaginatedResponse<ReturnType<DoctorsService['toResponse']>>> {
     const { search, specialty } = query;
     const pageNum = Number(query.page || 0);
@@ -39,6 +46,8 @@ export class DoctorsService {
     const skip = pageNum * limitNum;
 
     const where: Prisma.DoctorWhereInput = {};
+    const scopedDoctorId = user ? doctorScopeId(user) : null;
+    if (scopedDoctorId) where.id = scopedDoctorId;
 
     if (specialty && specialty !== 'all') {
       where.specialty = specialty;
@@ -62,7 +71,11 @@ export class DoctorsService {
     return { data: data.map((d) => this.toResponse(d)), total };
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, user?: AuthUserView) {
+    const scopedDoctorId = user ? doctorScopeId(user) : null;
+    if (scopedDoctorId && id !== scopedDoctorId) {
+      throw new NotFoundException(DOCTOR_NOT_FOUND);
+    }
     const d = await this.doctorsRepository.findById(id);
     if (!d) throw new NotFoundException(DOCTOR_NOT_FOUND);
     return this.toResponse(d);

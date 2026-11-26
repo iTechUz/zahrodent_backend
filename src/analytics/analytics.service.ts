@@ -64,6 +64,8 @@ export class AnalyticsService {
         ? { AND: [{ deletedAt: null }, doctorPatientsWhere(doctorId)] }
         : { deletedAt: null }) as Prisma.PatientWhereInput,
       bookings: (doctorId ? { doctorId } : {}) as Prisma.BookingWhereInput,
+      // A doctor only counts themselves, never the other doctors.
+      doctors: (doctorId ? { id: doctorId } : {}) as Prisma.DoctorWhereInput,
       canSeeMoney: user.role === 'admin',
     };
   }
@@ -99,6 +101,7 @@ export class AnalyticsService {
       pendingBookings,
       activeDoctors,
       totalDoctors,
+      periodBookingsByStatus,
     ] = await Promise.all([
       this.repo.countPatients(scope.patients),
       this.repo.countPatients({
@@ -122,11 +125,17 @@ export class AnalyticsService {
         date: { gte: day },
       }),
       this.repo.countDoctors({
+        ...scope.doctors,
         bookings: {
           some: { date: day, status: { notIn: ['cancelled', 'no-show'] } },
         },
       }),
-      this.repo.countDoctors(),
+      this.repo.countDoctors(scope.doctors),
+      // Bookings inside the selected period, split by status.
+      this.repo.countBookingsByStatus({
+        ...scope.bookings,
+        date: monthRange,
+      }),
     ]);
 
     let money: Pick<
@@ -181,6 +190,7 @@ export class AnalyticsService {
       pendingBookings,
       activeDoctors,
       totalDoctors,
+      periodBookingsByStatus,
       ...money,
     };
   }
