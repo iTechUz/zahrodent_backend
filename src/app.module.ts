@@ -16,6 +16,7 @@ import { TelegramModule } from './telegram/telegram.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { SettingsModule } from './settings/settings.module';
 import { TelegramCoreModule } from './telegram/telegram-core.module';
+import { UploadsModule } from './uploads/uploads.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -39,6 +40,7 @@ import { HealthController } from './health/health.controller';
     SettingsModule,
     TelegramModule,
     TelegramCoreModule,
+    UploadsModule,
   ],
   controllers: [HealthController],
 })

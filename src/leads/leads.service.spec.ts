@@ -59,7 +59,8 @@ describe('LeadsService', () => {
       );
     });
 
-    it('website re-submit with an open lead → returns it, no new row, no ping', async () => {
+    it('website re-submit with an open lead → returns it, no new row, no new-lead ping, short duplicate note to the group', async () => {
+      process.env.TELEGRAM_LEADS_CHAT_ID = '-100123';
       repo.findOpenByPhoneSince.mockResolvedValue(lead);
       const r = await service.create({
         name: 'Ali',
@@ -69,6 +70,17 @@ describe('LeadsService', () => {
       expect(r).toBe(lead);
       expect(repo.create).not.toHaveBeenCalled();
       expect(gateway.sendNewLead).not.toHaveBeenCalled();
+      await new Promise((r) => setImmediate(r));
+      expect(tg.enqueue).toHaveBeenCalledTimes(1);
+      expect(tg.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'lead_group',
+          chatId: '-100123',
+          leadId: 'l1',
+          text: expect.stringContaining('Takroriy'),
+        }),
+      );
+      delete process.env.TELEGRAM_LEADS_CHAT_ID;
     });
 
     it('CRM-entered leads are never deduped', async () => {

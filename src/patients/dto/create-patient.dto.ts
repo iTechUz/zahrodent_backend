@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsIn,
   IsInt,
   IsObject,
@@ -43,6 +44,14 @@ export class CreatePatientDto {
   @Min(1900)
   @Max(2100)
   birthYear?: number;
+
+  /**
+   * Qabul formasidan tez qo‘shishda yosh noma'lum: `age`/`birthYear` siz bemor
+   * saqlanadi (age 0, birthYear NULL — lead'dan yaratilgandek).
+   */
+  @IsOptional()
+  @IsBoolean()
+  ageUnknown?: boolean;
 
   @IsString()
   @Matches(/^\+?[\d\s-]{10,20}$/, { message: 'Invalid phone' })

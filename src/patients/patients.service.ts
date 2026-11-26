@@ -177,8 +177,11 @@ export class PatientsService {
   }
 
   async create(dto: CreatePatientDto) {
-    const ageFields = resolveAgeFields(dto, currentYear());
-    if (!ageFields) throw new BadRequestException(AGE_OR_BIRTH_YEAR_REQUIRED);
+    const resolved = resolveAgeFields(dto, currentYear());
+    if (!resolved && !dto.ageUnknown)
+      throw new BadRequestException(AGE_OR_BIRTH_YEAR_REQUIRED);
+    // `ageUnknown` (quick add from the booking form): age 0, no birth year.
+    const ageFields = resolved ?? { age: 0, birthYear: null };
     // Canonical +998XXXXXXXXX when it is an Uzbek number.
     const phone = normalizeUzPhone(dto.phone) ?? dto.phone.trim();
     const duplicates = await this.findDuplicatePhone(phone);

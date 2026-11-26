@@ -39,6 +39,11 @@ rules:
   - { pattern: "TELEGRAM_BOOKINGS_TOPIC_ID", type: variable }
   - { pattern: "TELEGRAM_LEADS_TOPIC_ID", type: variable }
   - { pattern: "TELEGRAM_BOT_USERNAME", type: variable }
+  - { pattern: "CDN_ENDPOINT", type: variable }
+  - { pattern: "CDN_BUCKET", type: variable }
+  - { pattern: "CDN_PUBLIC_URL", type: variable }
+  - { pattern: "CDN_ACCESS_KEY", type: secret }
+  - { pattern: "CDN_SECRET_KEY", type: secret }
 
 # Branch -> environment. "env4ci push" on a branch writes to its environment.
 branches:
