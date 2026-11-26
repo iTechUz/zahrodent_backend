@@ -87,6 +87,37 @@ describe('NotificationLogService', () => {
     }
   });
 
+  it('status change goes to TELEGRAM_STATUS_TOPIC_ID, else TELEGRAM_BOOKINGS_TOPIC_ID', async () => {
+    const OLD = process.env;
+    process.env = {
+      ...OLD,
+      TELEGRAM_LEADS_CHAT_ID: '-100',
+      TELEGRAM_STATUS_TOPIC_ID: '88',
+      TELEGRAM_BOOKINGS_TOPIC_ID: '77',
+    };
+    try {
+      await svc.enqueue({
+        kind: 'booking_status_group',
+        chatId: '-100',
+        text: 's1',
+      });
+      expect(tg.sendMessage).toHaveBeenLastCalledWith('-100', 's1', {
+        message_thread_id: 88,
+      });
+      delete process.env.TELEGRAM_STATUS_TOPIC_ID;
+      await svc.enqueue({
+        kind: 'booking_status_group',
+        chatId: '-100',
+        text: 's2',
+      });
+      expect(tg.sendMessage).toHaveBeenLastCalledWith('-100', 's2', {
+        message_thread_id: 77,
+      });
+    } finally {
+      process.env = OLD;
+    }
+  });
+
   it('passes inline keyboard as reply_markup', async () => {
     const kb = { inline_keyboard: [[{ text: 'a', callback_data: 'b' }]] };
     db.notificationLog.create.mockResolvedValue(
